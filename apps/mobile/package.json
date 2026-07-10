@@ -1,0 +1,14 @@
+{
+  "name": "@revival/mobile",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/shareTargetAdapter.ts",
+  "types": "./src/shareTargetAdapter.ts",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@revival/shared-types": "workspace:*"
+  }
+}

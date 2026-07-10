@@ -1,0 +1,26 @@
+{
+  "name": "collection-revival-system",
+  "version": "0.1.0",
+  "private": true,
+  "description": "收藏复活系统 MVP：把用户主动分享的收藏内容转成行动卡、计划和可搜索索引。",
+  "scripts": {
+    "dev": "pnpm --filter @revival/web dev",
+    "build": "pnpm --filter @revival/web build",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "lint": "pnpm -r --if-present lint",
+    "check": "pnpm typecheck && pnpm --filter @revival/web build && pnpm test:e2e",
+    "check:quick": "pnpm typecheck && pnpm --filter @revival/web build",
+    "deploy:check": "pnpm check",
+    "test:e2e": "pnpm --filter @revival/web test:e2e",
+    "test:e2e:ui": "pnpm --filter @revival/web test:e2e:ui",
+    "test:e2e:headed": "pnpm --filter @revival/web test:e2e:headed",
+    "preview:start": "powershell -ExecutionPolicy Bypass -File scripts/start-web-preview.ps1",
+    "preview:foreground": "powershell -ExecutionPolicy Bypass -File scripts/start-web-preview.ps1 -Foreground"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "typescript": "5.5.4"
+  }
+}

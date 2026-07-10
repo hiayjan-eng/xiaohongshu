@@ -1,0 +1,69 @@
+﻿:root {
+  --color-page: #f7f5ef;
+  --color-surface: #ffffff;
+  --color-surface-soft: #eef6f2;
+  --color-primary: #4f8a75;
+  --color-primary-hover: #3f7663;
+  --color-primary-dark: #2f5f50;
+  --color-accent: #d98c64;
+  --color-accent-soft: #fff4ec;
+  --color-text: #1f2933;
+  --color-muted: #6b7280;
+  --color-subtle: #9ca3af;
+  --color-border: #e8e3da;
+  --color-success: #4f8a75;
+  --color-warning: #d98c64;
+  --color-danger: #c86767;
+  color-scheme: light;
+  --page-bg: var(--color-page);
+  --soft-green-bg: var(--color-surface-soft);
+  --card-bg: var(--color-surface);
+  --primary: var(--color-primary);
+  --primary-dark: var(--color-primary-dark);
+  --warm-accent: var(--color-accent);
+  --text-main: var(--color-text);
+  --text-muted: var(--color-muted);
+  --text-light: var(--color-subtle);
+  --border-soft: var(--color-border);
+  --soft-warm-bg: var(--color-accent-soft);
+  --shadow-premium: 0 18px 60px rgba(31, 41, 51, 0.08);
+  --shadow-light: 0 8px 30px rgba(31, 41, 51, 0.06);
+  --radius-card: 24px;
+  --radius-normal: 20px;
+  --radius-input: 14px;
+  --radius-pill: 999px;
+  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-synthesis: none;
+  letter-spacing: 0;
+  text-rendering: geometricPrecision;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+html {
+  background: var(--page-bg);
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  background: var(--page-bg);
+  color: var(--text-main);
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+  letter-spacing: 0;
+}
+
+button {
+  cursor: pointer;
+}
+
+::selection {
+  background: rgba(79, 138, 117, 0.18);
+}

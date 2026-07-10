@@ -1,0 +1,12 @@
+﻿node_modules/
+.pnpm-store/
+
+apps/*/node_modules/
+apps/*/dist/
+apps/*/playwright-report/
+apps/*/test-results/
+
+packages/*/node_modules/
+packages/*/dist/
+
+*.log

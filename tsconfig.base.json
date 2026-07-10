@@ -1,0 +1,28 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "useDefineForClassFields": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "allowJs": false,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "strict": true,
+    "forceConsistentCasingInFileNames": true,
+    "module": "ESNext",
+    "moduleResolution": "Node",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "baseUrl": ".",
+    "paths": {
+      "@revival/shared-types": ["packages/shared-types/src/index.ts"],
+      "@revival/ai-service": ["packages/ai-service/src/index.ts"],
+      "@revival/search-service": ["packages/search-service/src/index.ts"],
+      "@revival/action-card-service": ["packages/action-card-service/src/index.ts"],
+      "@revival/recommendation-service": ["packages/recommendation-service/src/index.ts"],
+      "@revival/database": ["packages/database/src/index.ts"]
+    }
+  }
+}
