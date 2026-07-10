@@ -1,4 +1,4 @@
-﻿node_modules/
+node_modules/
 .pnpm-store/
 
 apps/*/node_modules/
@@ -10,3 +10,5 @@ packages/*/node_modules/
 packages/*/dist/
 
 *.log
+
+dist/
