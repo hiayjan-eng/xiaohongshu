@@ -52,6 +52,45 @@ if (existsSync(hostingConfig)) {
   await cp(hostingConfig, resolve(rootDistDir, ".openai", "hosting.json"));
 }
 
+await mkdir(resolve(rootDistDir, "server"), { recursive: true });
+await writeFile(
+  resolve(rootDistDir, "server", "index.js"),
+  `const INDEX_PATH = "/index.html";
+
+function isAssetRequest(pathname) {
+  return pathname.startsWith("/assets/") || pathname.includes(".");
+}
+
+async function fetchAsset(request, env) {
+  if (!env || !env.ASSETS || typeof env.ASSETS.fetch !== "function") {
+    return new Response("Sites asset binding is unavailable", { status: 500 });
+  }
+  return env.ASSETS.fetch(request);
+}
+
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+    const response = await fetchAsset(request, env);
+
+    if (response.status !== 404) {
+      return response;
+    }
+
+    if ((request.method !== "GET" && request.method !== "HEAD") || isAssetRequest(url.pathname)) {
+      return response;
+    }
+
+    const indexUrl = new URL(INDEX_PATH, url.origin);
+    return fetchAsset(new Request(indexUrl.toString(), {
+      method: request.method,
+      headers: request.headers,
+    }), env);
+  },
+};
+`,
+  "utf8",
+);
 await writeFile(resolve(rootDistDir, "_redirects"), "/* /index.html 200\n", "utf8");
 await writeFile(resolve(rootDistDir, "404.html"), await import("node:fs/promises").then((fs) => fs.readFile(resolve(rootDistDir, "index.html"), "utf8")), "utf8");
 console.log(`[build-web] Copied static site to ${rootDistDir}`);
