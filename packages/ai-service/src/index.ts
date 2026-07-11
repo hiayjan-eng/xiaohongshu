@@ -1,11 +1,16 @@
+import { CATEGORIES } from "@revival/shared-types";
 import type {
   ActionCardDraft,
   AiClassificationResult,
   Category,
   EntityTag,
+  ImportBatch,
+  SavedItem,
   ShareInput,
+  SmartAlbum,
   TaskDraft
 } from "@revival/shared-types";
+import { COLLECTION_REVIVAL_JSON_INSTRUCTIONS, COLLECTION_REVIVAL_SYSTEM_PROMPT } from "./prompts";
 
 type CategoryRule = {
   category: Category;
@@ -79,8 +84,303 @@ const entityHints: Record<string, string[]> = {
   creative: ["选题", "文案", "封面", "脚本", "拍摄", "标题", "账号运营", "审美"]
 };
 
+export type AiProviderMode = "mock" | "openai-compatible" | "real";
+export type AiCallStatus = "idle" | "success" | "fallback" | "blocked" | "failed";
+export type MaybePromise<T> = T | Promise<T>;
+
+export interface AiProviderConfig {
+  provider?: AiProviderMode;
+  apiKey?: string;
+  baseUrl?: string;
+  model?: string;
+  timeoutMs?: number;
+}
+
+export interface AiRuntimeStatus {
+  mode: "mock" | "real";
+  providerName: string;
+  modelName: string;
+  apiKeyConfigured: boolean;
+  lastCallStatus: AiCallStatus;
+  fallbackActive: boolean;
+  lastError?: string;
+}
+
+export interface RegenerateActionCardOptions {
+  savedItem?: SavedItem;
+  title?: string;
+  rawShareText?: string;
+  userNote?: string;
+}
+
+export interface ImportBatchSummary {
+  title: string;
+  summary: string;
+  recommendedNextStep: string;
+  fallbackUsed?: boolean;
+}
+
+export interface GenerateSmartAlbumsInput {
+  savedItems: SavedItem[];
+  existingAlbums?: SmartAlbum[];
+  now?: Date;
+}
+
+export interface MockAiProviderOptions {
+  generateSmartAlbums?: (savedItems: SavedItem[], now?: Date) => SmartAlbum[];
+}
+
 export interface AiProvider {
-  classifyAndGenerateActionCard(input: ShareInput): Promise<AiClassificationResult>;
+  readonly name: string;
+  getStatus(): AiRuntimeStatus;
+  classifyAndGenerateActionCard(input: ShareInput): MaybePromise<AiClassificationResult>;
+  generateSmartAlbums(input: GenerateSmartAlbumsInput): MaybePromise<SmartAlbum[]>;
+  regenerateActionCard(savedItemId: string, options?: RegenerateActionCardOptions): MaybePromise<ActionCardDraft>;
+  summarizeImportBatch(batch: ImportBatch): MaybePromise<ImportBatchSummary>;
+  generateSearchKeywords(input: ShareInput): MaybePromise<string[]>;
+}
+
+export class MockAiProvider implements AiProvider {
+  readonly name = "mock";
+
+  constructor(private readonly options: MockAiProviderOptions = {}) {}
+
+  getStatus(): AiRuntimeStatus {
+    return {
+      mode: "mock",
+      providerName: "MockAIProvider",
+      modelName: "local-rules",
+      apiKeyConfigured: false,
+      lastCallStatus: "success",
+      fallbackActive: false
+    };
+  }
+
+  classifyAndGenerateActionCard(input: ShareInput): AiClassificationResult {
+    return classifyAndGenerateActionCard(input);
+  }
+
+  generateSmartAlbums(input: GenerateSmartAlbumsInput): SmartAlbum[] {
+    return this.options.generateSmartAlbums?.(input.savedItems, input.now) ?? [];
+  }
+
+  regenerateActionCard(_savedItemId: string, options: RegenerateActionCardOptions = {}): ActionCardDraft {
+    const source = options.savedItem;
+    const shareInput: ShareInput = {
+      sourceUrl: source?.sourceUrl ?? "",
+      title: options.title ?? source?.title ?? "",
+      rawShareText: options.rawShareText ?? source?.rawShareText ?? "",
+      userNote: options.userNote ?? source?.userNote ?? ""
+    };
+    return classifyAndGenerateActionCard(shareInput).actionCard;
+  }
+
+  summarizeImportBatch(batch: ImportBatch): ImportBatchSummary {
+    return {
+      title: batch.title,
+      summary: `Imported ${batch.importedCount} of ${batch.rawCount} items with ${batch.duplicateCount} duplicates and ${batch.failedCount} failures.`,
+      recommendedNextStep: batch.importedCount > 0 ? "Open smart albums and pick three items to revive first." : "Fix failed or duplicate import items before continuing.",
+      fallbackUsed: true
+    };
+  }
+
+  generateSearchKeywords(input: ShareInput): string[] {
+    return classifyAndGenerateActionCard(input).keywords;
+  }
+}
+
+export class OpenAICompatibleProvider implements AiProvider {
+  readonly name = "openai-compatible";
+  private lastStatus: AiRuntimeStatus;
+  private readonly fallback: AiProvider;
+
+  constructor(private readonly config: AiProviderConfig, fallback: AiProvider = new MockAiProvider()) {
+    this.fallback = fallback;
+    this.lastStatus = getAiRuntimeStatus(config, "idle");
+  }
+
+  getStatus(): AiRuntimeStatus {
+    return this.lastStatus;
+  }
+
+  async classifyAndGenerateActionCard(input: ShareInput): Promise<AiClassificationResult> {
+    if (!this.config.apiKey) return this.fallbackClassification(input, "AI API key is not configured", "blocked");
+
+    try {
+      const raw = await this.requestJson([
+        { role: "system", content: COLLECTION_REVIVAL_SYSTEM_PROMPT },
+        { role: "user", content: `${COLLECTION_REVIVAL_JSON_INSTRUCTIONS}\n\nInput:\n${JSON.stringify(input)}` }
+      ]);
+      const result = coerceClassificationResult(raw, input);
+      this.lastStatus = getAiRuntimeStatus(this.config, "success");
+      return result;
+    } catch (error) {
+      return this.fallbackClassification(input, error instanceof Error ? error.message : String(error), "fallback");
+    }
+  }
+
+  async generateSmartAlbums(input: GenerateSmartAlbumsInput): Promise<SmartAlbum[]> {
+    return this.fallback.generateSmartAlbums(input);
+  }
+
+  async regenerateActionCard(savedItemId: string, options: RegenerateActionCardOptions = {}): Promise<ActionCardDraft> {
+    const item = options.savedItem;
+    const result = await this.classifyAndGenerateActionCard({
+      sourceUrl: item?.sourceUrl ?? "",
+      title: options.title ?? item?.title ?? "",
+      rawShareText: options.rawShareText ?? item?.rawShareText ?? "",
+      userNote: options.userNote ?? item?.userNote ?? ""
+    });
+    return result.actionCard;
+  }
+
+  async summarizeImportBatch(batch: ImportBatch): Promise<ImportBatchSummary> {
+    return this.fallback.summarizeImportBatch(batch);
+  }
+
+  async generateSearchKeywords(input: ShareInput): Promise<string[]> {
+    const result = await this.classifyAndGenerateActionCard(input);
+    return result.keywords;
+  }
+
+  private async requestJson(messages: Array<{ role: "system" | "user" | "assistant"; content: string }>): Promise<unknown> {
+    const baseUrl = (this.config.baseUrl || "https://api.openai.com/v1").replace(/\/$/, "");
+    const model = this.config.model || "gpt-4.1-mini";
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.config.timeoutMs ?? 30000);
+
+    try {
+      const response = await fetch(`${baseUrl}/chat/completions`, {
+        method: "POST",
+        signal: controller.signal,
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${this.config.apiKey}`
+        },
+        body: JSON.stringify({
+          model,
+          messages,
+          temperature: 0.2,
+          response_format: { type: "json_object" }
+        })
+      });
+
+      if (!response.ok) throw new Error(`AI provider returned HTTP ${response.status}`);
+      const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
+      const content = payload.choices?.[0]?.message?.content;
+      if (!content) throw new Error("AI provider returned an empty response");
+      return JSON.parse(content) as unknown;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  private async fallbackClassification(input: ShareInput, error: string, status: AiCallStatus): Promise<AiClassificationResult> {
+    this.lastStatus = { ...getAiRuntimeStatus(this.config, status), fallbackActive: true, lastError: error };
+    return this.fallback.classifyAndGenerateActionCard(input);
+  }
+}
+
+export function createMockAiProvider(options?: MockAiProviderOptions): MockAiProvider {
+  return new MockAiProvider(options);
+}
+
+export function createAiProvider(config: AiProviderConfig = {}, fallback?: AiProvider): AiProvider {
+  const provider = (config.provider || "mock").toLowerCase();
+  if (provider === "openai-compatible" || provider === "real") {
+    return new OpenAICompatibleProvider(config, fallback ?? new MockAiProvider());
+  }
+  return new MockAiProvider();
+}
+
+export function getAiConfigFromEnv(env: Record<string, unknown>): AiProviderConfig {
+  return {
+    provider: typeof env.VITE_AI_PROVIDER === "string" ? env.VITE_AI_PROVIDER as AiProviderMode : "mock",
+    apiKey: typeof env.VITE_AI_API_KEY === "string" ? env.VITE_AI_API_KEY : "",
+    baseUrl: typeof env.VITE_AI_BASE_URL === "string" ? env.VITE_AI_BASE_URL : "",
+    model: typeof env.VITE_AI_MODEL === "string" ? env.VITE_AI_MODEL : "",
+    timeoutMs: typeof env.VITE_AI_TIMEOUT_MS === "string" ? Number(env.VITE_AI_TIMEOUT_MS) : undefined
+  };
+}
+
+export function getAiRuntimeStatus(config: AiProviderConfig = {}, lastCallStatus: AiCallStatus = "idle"): AiRuntimeStatus {
+  const provider = config.provider || "mock";
+  const realMode = provider === "openai-compatible" || provider === "real";
+  return {
+    mode: realMode ? "real" : "mock",
+    providerName: realMode ? "OpenAICompatibleProvider" : "MockAIProvider",
+    modelName: realMode ? config.model || "gpt-4.1-mini" : "local-rules",
+    apiKeyConfigured: Boolean(config.apiKey),
+    lastCallStatus,
+    fallbackActive: !realMode || !config.apiKey
+  };
+}
+
+export function isAiProviderPromise<T>(value: MaybePromise<T>): value is Promise<T> {
+  return typeof (value as Promise<T>)?.then === "function";
+}
+
+function coerceClassificationResult(value: unknown, input: ShareInput): AiClassificationResult {
+  const fallback = classifyAndGenerateActionCard(input);
+  if (!isRecord(value)) return fallback;
+  const rawActionCard = isRecord(value.actionCard) ? value.actionCard : {};
+  return {
+    category: isCategory(value.category) ? value.category : fallback.category,
+    intent: readString(value.intent, fallback.intent),
+    summary: readString(value.summary, fallback.summary),
+    keywords: readStringArray(value.keywords, fallback.keywords),
+    entities: readEntities(value.entities, fallback.entities),
+    searchableText: readString(value.searchableText, fallback.searchableText),
+    actionCard: {
+      title: readString(rawActionCard.title, fallback.actionCard.title),
+      goal: readString(rawActionCard.goal, fallback.actionCard.goal),
+      nextAction: readString(rawActionCard.nextAction, fallback.actionCard.nextAction),
+      estimatedTime: readString(rawActionCard.estimatedTime, fallback.actionCard.estimatedTime),
+      difficulty: readString(rawActionCard.difficulty, fallback.actionCard.difficulty) as ActionCardDraft["difficulty"],
+      tasks: readTasks(rawActionCard.tasks, fallback.actionCard.tasks),
+      structuredFields: isRecord(rawActionCard.structuredFields) ? rawActionCard.structuredFields as Record<string, string | string[]> : fallback.actionCard.structuredFields
+    }
+  };
+}
+
+function isCategory(value: unknown): value is Category {
+  return typeof value === "string" && (CATEGORIES as readonly string[]).includes(value);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function readString(value: unknown, fallback: string): string {
+  return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+
+function readStringArray(value: unknown, fallback: string[]): string[] {
+  if (!Array.isArray(value)) return fallback;
+  const values = value.filter((item): item is string => typeof item === "string" && item.trim().length > 0).map((item) => item.trim());
+  return values.length > 0 ? values.slice(0, 12) : fallback;
+}
+
+function readEntities(value: unknown, fallback: EntityTag[]): EntityTag[] {
+  if (!Array.isArray(value)) return fallback;
+  const entities = value
+    .filter(isRecord)
+    .map((item) => ({ type: readString(item.type, "topic"), value: readString(item.value, "") }))
+    .filter((item) => item.value);
+  return entities.length > 0 ? entities.slice(0, 12) : fallback;
+}
+
+function readTasks(value: unknown, fallback: TaskDraft[]): TaskDraft[] {
+  if (!Array.isArray(value)) return fallback;
+  const tasks = value
+    .filter(isRecord)
+    .map((item) => ({
+      title: readString(item.title, "下一步行动"),
+      description: readString(item.description, "从一个 5-30 分钟的小动作开始"),
+      estimatedTime: readString(item.estimatedTime, "20分钟"),
+      dueDate: typeof item.dueDate === "string" ? item.dueDate : undefined
+    }));
+  return tasks.length > 0 ? tasks.slice(0, 8) : fallback;
 }
 
 export async function classifyAndGenerateActionCardAsync(input: ShareInput): Promise<AiClassificationResult> {

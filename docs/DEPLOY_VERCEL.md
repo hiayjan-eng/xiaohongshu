@@ -189,3 +189,23 @@ git push
 ```
 
 如果 Vercel 已连接 GitHub，push 后会自动生成新的 Preview Deployment；合并或推送到生产分支后会更新正式线上版本。功能优化不会天然破坏线上版本，但每次上线前都应该先跑 `pnpm check`，避免把核心闭环改坏。
+## Current production and recovery status
+
+Production URL: https://xiaohongshu-green.vercel.app
+
+Before and after deployment, run:
+
+```bash
+pnpm check
+pnpm verify:prod
+```
+
+`pnpm verify:prod` checks the Vercel SPA routes with Node `fetch`, including `/import`, `/albums`, `/old-import`, `/qa`, `/real-test`, `/search`, and `/settings`.
+
+If GitHub push is blocked by network or credentials, do not force push or create another repository. Generate a bundle backup instead:
+
+```bash
+git bundle create release-artifacts/xiaohongshu-phase-latest.bundle --all
+```
+
+Then record the current HEAD, recent commits, status, production URL, deployment URL, and sync problem in `release-artifacts/current-project-state.txt`. Once GitHub connectivity returns, push the same `main` branch normally.

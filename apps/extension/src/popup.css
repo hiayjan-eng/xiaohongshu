@@ -202,3 +202,85 @@ button:disabled {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.page-health {
+  border-radius: 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.page-health.ok {
+  border-color: rgba(79, 138, 117, 0.28);
+  background: var(--soft);
+  color: var(--primary-dark);
+}
+
+.page-health.warn {
+  border-color: rgba(217, 140, 100, 0.35);
+  background: #fff4ec;
+  color: #7a4b32;
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.stats span {
+  display: grid;
+  gap: 2px;
+  padding: 8px;
+  border-radius: 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  text-align: center;
+}
+
+.stats strong {
+  color: var(--primary-dark);
+  font-size: 15px;
+}
+
+.stats small,
+.select-actions,
+.scan-choice small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.select-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 8px 12px 0;
+}
+
+.link-button {
+  background: transparent;
+  color: var(--primary-dark);
+  font-weight: 750;
+  padding: 0;
+}
+
+.scan-choice {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.scan-choice input {
+  width: 16px;
+  min-height: 16px;
+  margin-top: 2px;
+  accent-color: var(--primary);
+}
+
+.scan-choice span {
+  min-width: 0;
+}

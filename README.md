@@ -127,3 +127,67 @@ Vercel 推荐选择仓库根目录作为 Root Directory，Build Command 使用 `
 ## 下一阶段计划
 
 建议下一阶段先用 `/real-test` 跑 20 条真实小红书收藏，重点观察分类准确率、行动卡有用率、搜索找回率和用户是否愿意今天执行。`docs/REAL_USER_TEST_TEMPLATE.md` 可以作为离线备份模板，但优先使用网页内置流程。等真实试用结果稳定后，再考虑接入真实 AI、设计正式数据存储，以及验证手机系统分享入口。
+
+## Production smoke test
+
+Current production URL: https://xiaohongshu-green.vercel.app
+
+Run the production route smoke test with:
+
+```bash
+pnpm verify:prod
+```
+
+This uses Node `fetch` to verify `/`, `/dashboard`, `/import`, `/albums`, `/old-import`, `/qa`, `/real-test`, `/search`, and `/settings` return the SPA shell. See `docs/PRODUCTION_SMOKE_TEST.md` for the full checklist.
+
+Current GitHub sync note: local `main` may be ahead of `origin/main` if this environment cannot reach GitHub. When connectivity is restored, run `git push origin main`. A recovery bundle can be generated under `release-artifacts/` for handoff.
+## AI provider configuration
+
+The default AI mode is still mock/local rules. Do not commit real API keys.
+
+Copy `.env.example` to `.env.local` for local experiments:
+
+```bash
+VITE_AI_PROVIDER=mock
+VITE_AI_API_KEY=
+VITE_AI_BASE_URL=
+VITE_AI_MODEL=
+```
+
+Supported planned values:
+
+- `VITE_AI_PROVIDER=mock`: default local mock provider, no network and no key.
+- `VITE_AI_PROVIDER=openai-compatible`: OpenAI-compatible chat completions provider. Requires `VITE_AI_API_KEY`; without it, the app must fall back to mock.
+
+For Vercel, configure environment variables in Project Settings. Never commit `.env` or real secrets.
+
+## Phase 2/3 架构状态
+
+当前版本已经把 AI 和存储的下一阶段接入点拆出来，但默认仍然是稳定的本地 Web MVP。
+
+- AI：`packages/ai-service` 提供 `AiProvider`、`MockAiProvider` 和 OpenAI-compatible provider 链路。没有 `VITE_AI_API_KEY` 时继续使用 mock fallback，不消耗网络请求。
+- Prompt：统一放在 `packages/ai-service/src/prompts.ts`，边界是只生成私人摘要、行动建议和搜索索引，不复制小红书原帖全文。
+- 同步：`packages/storage-service` 覆盖 SavedItem、ActionCard、ImportBatch、SmartAlbum、Task、Plan、Achievement、SearchLog、RealUserTestRecord。默认 localStorage；Supabase adapter 需要项目 URL、anon key、Auth 和 RLS 验证后才能启用。
+- 设置页：现在会显示 AI 状态和同步状态，避免把 mock/localStorage 误认为真实云端能力。
+
+相关文档：
+
+- `docs/AI_PROVIDER_AND_PROMPTS.md`
+- `docs/SUPABASE_SCHEMA.md`
+- `docs/AUTH_AND_SYNC_PLAN.md`
+## Phase 4-6 状态
+
+当前版本继续保持 Web MVP 为主，不引入真实 App、PWA、登录或云同步。Phase 4-6 已补齐以下可验证资产：
+
+- Mobile：`apps/mobile` 仍是 skeleton，已补 `docs/MOBILE_SHARE_TECH_SPEC.md` 和 `docs/MOBILE_MVP_SCOPE.md`，说明 iOS Share Extension / Android Send Intent 如何进入统一 ImportBatch 管线。
+- Extension Beta：`apps/extension` 现在有 `pnpm --filter @revival/extension build`，输出 `release-artifacts/extension-beta`，可作为 Chrome / Edge unpacked Beta 安装测试。
+- Friend Test：`/real-test` 顶部有朋友测试入口说明，`/qa` 有线上测试提醒，`docs/FRIEND_TEST_GUIDE.md` 可直接作为测试 SOP。
+
+相关命令：
+
+```bash
+pnpm --filter @revival/mobile typecheck
+pnpm --filter @revival/extension typecheck
+pnpm --filter @revival/extension build
+pnpm check
+```

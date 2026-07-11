@@ -223,6 +223,21 @@ export function RealTestView(props: RealTestViewProps) {
         <p className="page-lead">用 20 条你真的想收藏的小红书内容，测试这个产品到底有没有用。</p>
       </div>
 
+      <section className="tool-panel friend-test-entry" data-testid="friend-test-entry">
+        <div>
+          <span className="friend-test-kicker">朋友测试入口</span>
+          <strong>建议朋友用 3-5 条真实收藏跑一轮</strong>
+          <p>每条只需要导入、看行动卡、测一个搜索词、点选评价，最后复制试用总结发回来。数据只保存在朋友自己的浏览器里，请不要输入隐私信息。</p>
+        </div>
+        <div className="friend-test-steps">
+          <span>1 导入收藏</span>
+          <span>2 看行动卡</span>
+          <span>3 看智能专辑</span>
+          <span>4 搜索找回</span>
+          <span>5 复制反馈</span>
+        </div>
+      </section>
+
       <section className="real-test-stats" aria-label="试用进度">
         <RealTestStat label="已测试" value={`${records.length} / 20`} testId="real-test-stat-tested" />
         <RealTestStat label="分类准确率" value={formatPercent(stats.classificationAccuracy)} testId="real-test-stat-classification" />

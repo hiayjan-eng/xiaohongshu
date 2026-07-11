@@ -18,12 +18,14 @@
 
       <section class="notice">
         <strong>使用边界</strong>
-        <p>请先打开你本人已登录的小红书网页版收藏夹。当前 Beta 只扫描页面里已经加载出来的卡片，导入前你可以先确认列表。</p>
+        <p>请先打开你本人已登录的小红书网页版收藏夹。Beta 只读取当前页面 DOM 中已加载出来的卡片，导入前你可以先勾选确认。</p>
       </section>
+
+      <section id="pageHealth" class="page-health">等待检测当前标签页</section>
 
       <label class="field">
         <span>导入到 Web 地址</span>
-        <input id="webAppUrl" placeholder="https://xiaohongshu-green.vercel.app/" />
+        <input id="webAppUrl" placeholder="https://xiaohongshu-green.vercel.app/old-import" />
       </label>
 
       <div class="actions">
@@ -33,10 +35,21 @@
 
       <div id="status" class="status">等待扫描</div>
 
+      <section class="stats" id="statsGrid" aria-label="扫描统计">
+        <span><strong>0</strong><small>总数</small></span>
+        <span><strong>0</strong><small>有链接</small></span>
+        <span><strong>0</strong><small>重复</small></span>
+        <span><strong>0</strong><small>缺标题</small></span>
+      </section>
+
       <section class="results">
         <div class="results-head">
-          <strong>扫描结果</strong>
+          <strong>待导入清单</strong>
           <span id="count">0 条</span>
+        </div>
+        <div class="select-actions">
+          <button id="selectAll" class="link-button" disabled>全选</button>
+          <button id="clearSelection" class="link-button" disabled>取消全选</button>
         </div>
         <div id="list" class="result-list"></div>
       </section>

@@ -21,7 +21,8 @@ import {
   Smartphone,
   Sparkles
 } from "lucide-react";
-import { createPlansFromActionCards, generateSmartAlbums, PLAN_TYPE_LABELS } from "@revival/action-card-service";
+import { cloneTasksForCard, createPlansFromActionCards, generateSmartAlbums, PLAN_TYPE_LABELS } from "@revival/action-card-service";
+import { createMockAiProvider, getAiConfigFromEnv, getAiRuntimeStatus, isAiProviderPromise, type AiRuntimeStatus } from "@revival/ai-service";
 import { extensionItemsToImportItems, processImportBatch, type ImportInputItem, type ProcessImportBatchResult } from "@revival/import-service";
 import {
   createInitialDemoData,
@@ -190,6 +191,8 @@ export function App() {
   );
   const [achievementModal, setAchievementModal] = useState<AchievementDisplay | null>(null);
   const [rewardBurstId, setRewardBurstId] = useState(0);
+  const aiStatus = useMemo(() => getAiRuntimeStatus(getAiConfigFromEnv(import.meta.env as Record<string, unknown>)), []);
+  const syncStatus = useMemo(() => getSyncRuntimeStatus(import.meta.env as Record<string, unknown>), []);
 
   useEffect(() => {
     persistAppState(state, typeof window === "undefined" ? undefined : window.localStorage);
@@ -452,6 +455,72 @@ export function App() {
         card.id === cardId ? { ...card, [field]: value, updatedAt: new Date().toISOString() } : card
       )
     }));
+  }
+
+  function regenerateActionCard(itemId: string) {
+    const item = state.savedItems.find((entry) => entry.id === itemId);
+    const card = state.actionCards.find((entry) => entry.savedItemId === itemId);
+    if (!item || !card) {
+      setToast("No action card is available to regenerate");
+      return;
+    }
+
+    const provider = createMockAiProvider({ generateSmartAlbums });
+    const result = provider.classifyAndGenerateActionCard({
+      sourceUrl: item.sourceUrl,
+      title: item.title,
+      rawShareText: item.rawShareText,
+      userNote: item.userNote
+    });
+
+    if (isAiProviderPromise(result)) {
+      setToast("Async AI regeneration is not enabled yet; mock fallback remains active");
+      return;
+    }
+
+    const now = new Date().toISOString();
+    setState((current) => ({
+      ...current,
+      savedItems: current.savedItems.map((entry) =>
+        entry.id === itemId
+          ? {
+              ...entry,
+              category: result.category,
+              intent: result.intent,
+              summary: result.summary,
+              keywords: result.keywords,
+              entities: result.entities,
+              searchableText: result.searchableText,
+              updatedAt: now
+            }
+          : entry
+      ),
+      actionCards: current.actionCards.map((entry) =>
+        entry.id === card.id
+          ? {
+              ...entry,
+              category: result.category,
+              title: result.actionCard.title,
+              goal: result.actionCard.goal,
+              nextAction: result.actionCard.nextAction,
+              estimatedTime: result.actionCard.estimatedTime,
+              difficulty: result.actionCard.difficulty,
+              fields: result.actionCard.structuredFields,
+              tasks: cloneTasksForCard(entry.id, result.actionCard.tasks),
+              updatedAt: now
+            }
+          : entry
+      )
+    }));
+    setToast("Action card regenerated with mock AI fallback");
+  }
+
+  function regenerateSmartAlbums() {
+    setState((current) => ({
+      ...current,
+      smartAlbums: mergeGeneratedSmartAlbums(current.smartAlbums ?? [], current.savedItems)
+    }));
+    setToast("Smart album candidates regenerated with mock AI fallback");
   }
 
   function updateTaskStatus(cardId: string, taskId: string, status: ItemStatus) {
@@ -738,6 +807,7 @@ export function App() {
               updateSavedNote={updateSavedNote}
               updateCardField={updateCardField}
               updateTaskStatus={updateTaskStatus}
+              regenerateActionCard={regenerateActionCard}
             />
           )}
 
@@ -759,6 +829,7 @@ export function App() {
               renameAlbum={renameSmartAlbum}
               confirmAlbum={confirmSmartAlbum}
               archiveAlbum={archiveSmartAlbum}
+              regenerateSmartAlbums={regenerateSmartAlbums}
             />
           )}
 
@@ -795,6 +866,8 @@ export function App() {
               resetDemoData={resetDemoData}
               themeId={themeId}
               setThemeId={setThemeId}
+              aiStatus={aiStatus}
+              syncStatus={syncStatus}
             />
           )}
 
@@ -816,6 +889,8 @@ export function App() {
               revivalStats={revivalStats}
               achievements={unlockedAchievementDisplays}
               themeId={themeId}
+              aiStatus={aiStatus}
+              syncStatus={syncStatus}
               resetDemoData={resetDemoData}
               importDemoData={importDemoData}
               runSearch={runSearch}
@@ -1408,6 +1483,7 @@ function DetailView(props: {
   updateSavedNote: (itemId: string, userNote: string) => void;
   updateCardField: (cardId: string, field: "title" | "goal" | "nextAction", value: string) => void;
   updateTaskStatus: (cardId: string, taskId: string, status: ItemStatus) => void;
+  regenerateActionCard: (itemId: string) => void;
 }) {
   return (
     <>
@@ -1422,6 +1498,7 @@ function DetailView(props: {
             <CalendarCheck size={17} />
             加入今日
           </button>
+          <button className="secondary-action" onClick={() => props.regenerateActionCard(props.item.id)}>Regenerate</button>
           <button className="icon-text-button" onClick={() => props.openSource(props.item)} data-testid="detail-open-source">
             <ExternalLink size={17} />
             打开原帖
@@ -1540,6 +1617,7 @@ function SmartAlbumsView(props: {
   renameAlbum: (albumId: string) => void;
   confirmAlbum: (albumId: string) => void;
   archiveAlbum: (albumId: string) => void;
+  regenerateSmartAlbums: () => void;
 }) {
   const visibleAlbums = props.albums.filter((album) => album.status !== "archived");
   const candidateCount = props.albums.filter((album) => album.status === "candidate").length;
@@ -1575,7 +1653,7 @@ function SmartAlbumsView(props: {
           <strong>旧收藏扫描或手动导入后，都会先进入统一导入管线，再生成专辑候选。</strong>
           <small>完整原帖内容仍然通过 sourceUrl 回到原平台查看，本产品只保存用户确认导入后的索引、摘要和行动卡。</small>
         </div>
-        <code>/albums</code>
+        <button className="secondary-action" onClick={props.regenerateSmartAlbums}>Regenerate albums</button>
       </section>
 
       <div className="smart-album-grid">
@@ -1892,6 +1970,8 @@ function SettingsView(props: {
   resetDemoData: () => void;
   themeId: ThemePresetId;
   setThemeId: (themeId: ThemePresetId) => void;
+  aiStatus: AiRuntimeStatus;
+  syncStatus: SyncRuntimeStatus;
 }) {
   return (
     <>
@@ -1904,6 +1984,49 @@ function SettingsView(props: {
       </div>
 
       <ThemePicker selectedThemeId={props.themeId} onThemeChange={props.setThemeId} />
+
+      <section className="tool-panel single settings-list">
+        <div className="settings-row">
+          <span>AI mode</span>
+          <strong>{props.aiStatus.mode === "real" ? "Real AI" : "Mock"}</strong>
+        </div>
+        <div className="settings-row muted">
+          <span>AI provider</span>
+          <strong>{props.aiStatus.providerName}</strong>
+        </div>
+        <div className="settings-row muted">
+          <span>AI model</span>
+          <strong>{props.aiStatus.modelName}</strong>
+        </div>
+        <div className="settings-row muted">
+          <span>API Key</span>
+          <strong>{props.aiStatus.apiKeyConfigured ? "Configured" : "Not configured"}</strong>
+        </div>
+        <div className="settings-row muted">
+          <span>Fallback</span>
+          <strong>{props.aiStatus.fallbackActive ? "Mock fallback ready" : "Not active"}</strong>
+        </div>
+      </section>
+
+      <section className="tool-panel single settings-list" data-testid="sync-status-panel">
+        <div className="settings-row">
+          <span>同步状态</span>
+          <strong>{props.syncStatus.mode === "local" ? "本地模式" : "云端待验证"}</strong>
+        </div>
+        <div className="settings-row muted">
+          <span>存储位置</span>
+          <strong>{props.syncStatus.persistence === "browser-local" ? "当前浏览器 localStorage" : "Supabase 待迁移"}</strong>
+        </div>
+        <div className="settings-row muted">
+          <span>云同步</span>
+          <strong>{props.syncStatus.syncEnabled ? "已启用" : "Coming soon"}</strong>
+        </div>
+        <div className="settings-row muted">
+          <span>迁移状态</span>
+          <strong>{props.syncStatus.migrationRequired ? "需要用户确认迁移" : "暂不需要迁移"}</strong>
+        </div>
+        <p className="quiet-copy">{props.syncStatus.message}</p>
+      </section>
 
       <section className="tool-panel single settings-list">
         <div className="settings-row">
@@ -1938,6 +2061,8 @@ function QaView(props: {
   revivalStats: ReturnType<typeof buildRevivalStats>;
   achievements: AchievementDisplay[];
   themeId: ThemePresetId;
+  aiStatus: AiRuntimeStatus;
+  syncStatus: SyncRuntimeStatus;
   resetDemoData: () => void;
   importDemoData: () => void;
   runSearch: (query: string) => void;
@@ -1972,6 +2097,19 @@ function QaView(props: {
         <Metric label="连续行动" value={`${props.revivalStats.streakDays} 天`} />
         <Metric label="已解锁成就" value={props.achievements.length.toString()} />
         <Metric label="当前主题" value={currentTheme.name.split(" /")[0]} />
+        <Metric label="AI" value={props.aiStatus.providerName} />
+        <Metric label="Sync" value={props.syncStatus.mode === "local" ? "Local" : "Supabase"} />
+      </section>
+
+      <section className="tool-panel single qa-panel" data-testid="qa-friend-test-reminder">
+        <PanelHeader icon={<ClipboardList size={18} />} title="线上朋友测试提醒" meta="Web MVP" />
+        <div className="qa-status-list">
+          <span>当前版本：<strong>公开 Web MVP</strong></span>
+          <span>数据位置：<strong>当前浏览器 localStorage</strong></span>
+          <span>朋友测试：<strong>建议去 /real-test 或 /import</strong></span>
+          <span>旧收藏扫描：<strong>需要安装本地扩展 Beta</strong></span>
+        </div>
+        <p className="quiet-copy">请提醒朋友不要输入隐私内容。完成 3-5 条真实收藏测试后，可以在 /real-test 复制试用总结发回来。</p>
       </section>
 
       <div className="qa-layout">
@@ -2269,6 +2407,34 @@ function EmptyState(props: { title: string; text: string }) {
       <span>{props.text}</span>
     </div>
   );
+}
+
+type SyncRuntimeStatus = {
+  mode: "local" | "supabase";
+  providerName: string;
+  configured: boolean;
+  persistence: "browser-local" | "cloud";
+  syncEnabled: boolean;
+  migrationRequired: boolean;
+  message: string;
+};
+
+function getSyncRuntimeStatus(env: Record<string, unknown>): SyncRuntimeStatus {
+  const supabaseUrl = typeof env.VITE_SUPABASE_URL === "string" ? env.VITE_SUPABASE_URL.trim() : "";
+  const supabaseAnonKey = typeof env.VITE_SUPABASE_ANON_KEY === "string" ? env.VITE_SUPABASE_ANON_KEY.trim() : "";
+  const configured = Boolean(supabaseUrl && supabaseAnonKey);
+
+  return {
+    mode: configured ? "supabase" : "local",
+    providerName: configured ? "Supabase" : "LocalStorage",
+    configured,
+    persistence: configured ? "cloud" : "browser-local",
+    syncEnabled: false,
+    migrationRequired: configured,
+    message: configured
+      ? "检测到 Supabase 环境变量，但云同步仍需完成登录、数据库迁移和 RLS 验证后才能开启。"
+      : "当前数据只保存在这个浏览器。换设备、换浏览器或清空 localStorage 后不会自动同步。"
+  };
 }
 
 type StorageStatus = {

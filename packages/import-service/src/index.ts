@@ -1,5 +1,5 @@
 import { generateSmartAlbums } from "@revival/action-card-service";
-import { classifyAndGenerateActionCard } from "@revival/ai-service";
+import { createMockAiProvider, isAiProviderPromise, type AiProvider } from "@revival/ai-service";
 import { createImportedRecords } from "@revival/database";
 import type {
   ActionCard,
@@ -29,6 +29,7 @@ export interface ProcessImportBatchInput {
   existingSavedItems: SavedItem[];
   existingActionCards: ActionCard[];
   existingSmartAlbums?: SmartAlbum[];
+  aiProvider?: AiProvider;
   now?: Date;
 }
 
@@ -46,6 +47,7 @@ export function processImportBatch(input: ProcessImportBatchInput): ProcessImpor
   const now = input.now ?? new Date();
   const createdAt = now.toISOString();
   const batchId = createId("batch");
+  const aiProvider = input.aiProvider ?? createMockAiProvider({ generateSmartAlbums });
   const existingKeys = new Map<string, SavedItem>();
   input.existingSavedItems.forEach((item) => {
     const key = getSavedItemDedupeKey(item);
@@ -100,7 +102,11 @@ export function processImportBatch(input: ProcessImportBatchInput): ProcessImpor
 
     try {
       const itemDate = new Date(now.getTime() + index);
-      const records = createImportedRecords(input.userId, normalized, classifyAndGenerateActionCard(normalized), itemDate);
+      const classification = aiProvider.classifyAndGenerateActionCard(normalized);
+      if (isAiProviderPromise(classification)) {
+        throw new Error("Async AI providers require an async import pipeline; mock fallback remains the default for the current Web MVP.");
+      }
+      const records = createImportedRecords(input.userId, normalized, classification, itemDate);
       existingKeys.set(key, records.savedItem);
       importedSavedItems.push(records.savedItem);
       actionCards.push(records.actionCard);
@@ -122,7 +128,11 @@ export function processImportBatch(input: ProcessImportBatchInput): ProcessImpor
   });
 
   const allSavedItems = [...importedSavedItems, ...input.existingSavedItems];
-  const smartAlbumCandidates = mergeSmartAlbumCandidates(input.existingSmartAlbums ?? [], generateSmartAlbums(allSavedItems, now));
+  const generatedAlbums = aiProvider.generateSmartAlbums({ savedItems: allSavedItems, existingAlbums: input.existingSmartAlbums ?? [], now });
+  if (isAiProviderPromise(generatedAlbums)) {
+    throw new Error("Async AI album generation requires an async import pipeline; mock fallback remains the default for the current Web MVP.");
+  }
+  const smartAlbumCandidates = mergeSmartAlbumCandidates(input.existingSmartAlbums ?? [], generatedAlbums);
   const createdAlbumCount = smartAlbumCandidates.filter((album) => album.status === "candidate").length;
   const status = pickBatchStatus(importedSavedItems.length, duplicates.length, failedItems.length, input.items.length);
 
