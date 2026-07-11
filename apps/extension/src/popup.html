@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>收藏复活扫描</title>
+    <link rel="stylesheet" href="./popup.css" />
+  </head>
+  <body>
+    <main class="popup-shell">
+      <header>
+        <span class="brand-dot">复</span>
+        <div>
+          <strong>旧收藏扫描 Beta</strong>
+          <small>只扫描当前已加载页面</small>
+        </div>
+      </header>
+
+      <section class="notice">
+        <strong>使用边界</strong>
+        <p>请先打开你本人已登录的小红书网页版收藏夹。当前 Beta 只扫描页面里已经加载出来的卡片，导入前你可以先确认列表。</p>
+      </section>
+
+      <label class="field">
+        <span>导入到 Web 地址</span>
+        <input id="webAppUrl" placeholder="https://xiaohongshu-green.vercel.app/" />
+      </label>
+
+      <div class="actions">
+        <button id="scanVisible" class="primary">扫描当前可见卡片</button>
+        <button id="scanScroll" class="secondary">轻滚动后扫描</button>
+      </div>
+
+      <div id="status" class="status">等待扫描</div>
+
+      <section class="results">
+        <div class="results-head">
+          <strong>扫描结果</strong>
+          <span id="count">0 条</span>
+        </div>
+        <div id="list" class="result-list"></div>
+      </section>
+
+      <div class="actions bottom">
+        <button id="importToWeb" class="primary" disabled>导入并查看结果</button>
+        <button id="exportJson" class="secondary" disabled>导出 JSON</button>
+      </div>
+    </main>
+    <script src="./popup.js"></script>
+  </body>
+</html>

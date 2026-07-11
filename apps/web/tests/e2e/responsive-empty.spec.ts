@@ -1,4 +1,4 @@
-﻿import { expect, test } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import { collectConsoleErrors, expectNoConsoleErrors, seedEmptyState } from "./helpers";
 
 test.describe("MVP empty states and responsive basics", () => {
@@ -21,11 +21,9 @@ test.describe("MVP empty states and responsive basics", () => {
 
     await page.goto("/import");
     await page.getByTestId("import-title").fill("没有链接的封面灵感收藏");
-    await page.getByTestId("import-raw-share-text").fill("封面设计参考，没有 sourceUrl，用来测试打开原帖兜底");
+    await page.getByTestId("import-raw-share-text").fill("封面设计参考，没有 sourceUrl，用来测试导入管线兜底");
     await page.getByTestId("import-submit").click();
-    await expect(page.getByText("行动卡").first()).toBeVisible();
-    await page.getByTestId("detail-open-source").click();
-    await expect(page.locator(".toast")).toContainText("还没有可打开的原帖链接");
+    await expect(page.locator(".toast")).toContainText("缺少 sourceUrl");
     await expectNoConsoleErrors(errors);
   });
 
@@ -41,7 +39,7 @@ test.describe("MVP empty states and responsive basics", () => {
       const globalSearch = page.getByRole("textbox", { name: "全局搜索" });
       await expect(globalSearch).toBeVisible();
       await globalSearch.fill("剪辑");
-      await page.getByRole("button", { name: "搜索" }).click();
+      await page.getByRole("button", { name: "搜索", exact: true }).click();
       await expect(page.getByTestId("search-result-card").first()).toBeVisible();
 
       await page.goto("/dashboard");

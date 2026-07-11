@@ -1,4 +1,4 @@
-﻿import { classifyAndGenerateActionCard } from "@revival/ai-service";
+import { classifyAndGenerateActionCard } from "@revival/ai-service";
 import {
   DEFAULT_USER,
   type ActionCard,
@@ -24,7 +24,7 @@ export function loadAppState(storage?: Pick<Storage, "getItem" | "setItem">): Ap
   }
 
   try {
-    return JSON.parse(raw) as AppState;
+    return normalizeAppState(JSON.parse(raw) as AppState);
   } catch {
     const initial = createInitialDemoData();
     storage.setItem(STORAGE_KEY, JSON.stringify(initial));
@@ -285,3 +285,15 @@ function createId(prefix: string): string {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+
+function normalizeAppState(state: AppState): AppState {
+  return {
+    ...state,
+    savedItems: state.savedItems ?? [],
+    actionCards: state.actionCards ?? [],
+    searchLogs: state.searchLogs ?? [],
+    smartAlbums: state.smartAlbums ?? [],
+    importBatches: state.importBatches ?? [],
+    importBatchItems: state.importBatchItems ?? []
+  };
+}

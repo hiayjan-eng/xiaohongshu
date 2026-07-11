@@ -12,6 +12,8 @@ importers:
         specifier: 5.5.4
         version: 5.5.4
 
+  apps/extension: {}
+
   apps/mobile:
     dependencies:
       '@revival/shared-types':
@@ -29,6 +31,9 @@ importers:
       '@revival/database':
         specifier: workspace:*
         version: link:../../packages/database
+      '@revival/import-service':
+        specifier: workspace:*
+        version: link:../../packages/import-service
       '@revival/recommendation-service':
         specifier: workspace:*
         version: link:../../packages/recommendation-service
@@ -88,6 +93,21 @@ importers:
         specifier: workspace:*
         version: link:../shared-types
 
+  packages/import-service:
+    dependencies:
+      '@revival/action-card-service':
+        specifier: workspace:*
+        version: link:../action-card-service
+      '@revival/ai-service':
+        specifier: workspace:*
+        version: link:../ai-service
+      '@revival/database':
+        specifier: workspace:*
+        version: link:../database
+      '@revival/shared-types':
+        specifier: workspace:*
+        version: link:../shared-types
+
   packages/recommendation-service:
     dependencies:
       '@revival/shared-types':
@@ -101,6 +121,12 @@ importers:
         version: link:../shared-types
 
   packages/shared-types: {}
+
+  packages/storage-service:
+    dependencies:
+      '@revival/shared-types':
+        specifier: workspace:*
+        version: link:../shared-types
 
 packages:
 

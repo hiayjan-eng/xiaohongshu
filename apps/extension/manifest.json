@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "收藏复活扫描 POC",
+  "version": "0.1.0",
+  "description": "在用户主动点击后，扫描本人小红书网页版当前已加载收藏卡片，并导入收藏复活 Web MVP。",
+  "permissions": ["activeTab", "scripting", "storage", "downloads"],
+  "action": {
+    "default_title": "收藏复活扫描",
+    "default_popup": "src/popup.html"
+  }
+}

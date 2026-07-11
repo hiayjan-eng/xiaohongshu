@@ -1,0 +1,9 @@
+{
+  "name": "@revival/extension",
+  "version": "0.1.0",
+  "private": true,
+  "description": "收藏复活浏览器扩展 POC：在用户主动点击后扫描本人小红书网页版当前已加载收藏卡片。",
+  "scripts": {
+    "typecheck": "node ./scripts/validate-extension.mjs"
+  }
+}

@@ -21,10 +21,9 @@ import {
   Smartphone,
   Sparkles
 } from "lucide-react";
-import { classifyAndGenerateActionCard } from "@revival/ai-service";
-import { createPlansFromActionCards, PLAN_TYPE_LABELS } from "@revival/action-card-service";
+import { createPlansFromActionCards, generateSmartAlbums, PLAN_TYPE_LABELS } from "@revival/action-card-service";
+import { extensionItemsToImportItems, processImportBatch, type ImportInputItem, type ProcessImportBatchResult } from "@revival/import-service";
 import {
-  createImportedRecords,
   createInitialDemoData,
   createSearchLog,
   STORAGE_KEY,
@@ -47,6 +46,11 @@ import {
   type ActionCard,
   type AppState,
   type Category,
+  type ExtensionImportPayload,
+  type ExtensionScannedItem,
+  type ImportBatch,
+  type ImportBatchItem,
+  type ImportSource,
   type ItemStatus,
   type Plan,
   type RevivalRecommendation,
@@ -54,22 +58,24 @@ import {
   type SearchResult,
   type SearchLog,
   type ShareInput,
+  type SmartAlbum,
   type Task
 } from "@revival/shared-types";
 
-type ViewKey = "welcome" | "dashboard" | "import" | "search" | "pool" | "detail" | "plans" | "insights" | "mobile" | "settings" | "real-test" | "qa";
+type ViewKey = "welcome" | "dashboard" | "import" | "old-import" | "search" | "pool" | "detail" | "plans" | "albums" | "insights" | "mobile" | "settings" | "real-test" | "qa";
 type PoolViewMode = "cards" | "table";
 
 const navItems: Array<{ key: ViewKey; label: string; icon: typeof LayoutDashboard }> = [
-  { key: "dashboard", label: "今日", icon: LayoutDashboard },
-  { key: "import", label: "复活", icon: Import },
-  { key: "search", label: "找回", icon: Search },
-  { key: "pool", label: "收藏", icon: Archive },
-  { key: "plans", label: "计划", icon: ClipboardList },
-  { key: "insights", label: "洞察", icon: BarChart3 },
-  { key: "mobile", label: "手机", icon: Smartphone },
-  { key: "settings", label: "我的", icon: Settings },
-  { key: "real-test", label: "真实试用", icon: CheckCircle2 }
+  { key: "dashboard", label: "今日复活", icon: LayoutDashboard },
+  { key: "import", label: "导入中心", icon: Import },
+  { key: "albums", label: "智能专辑", icon: LayoutGrid },
+  { key: "search", label: "搜索找回", icon: Search },
+  { key: "pool", label: "收藏池", icon: Archive },
+  { key: "plans", label: "计划库", icon: ClipboardList },
+  { key: "real-test", label: "真实试用", icon: CheckCircle2 },
+  { key: "old-import", label: "旧收藏 Beta", icon: Sparkles },
+  { key: "settings", label: "设置", icon: Settings },
+  { key: "qa", label: "QA", icon: BarChart3 }
 ];
 
 const emptyImport: ShareInput = {
@@ -82,6 +88,24 @@ const emptyImport: ShareInput = {
 const DISPLAY_STATUS_LABELS: Record<ItemStatus, string> = {
   ...STATUS_LABELS,
   completed: "已复活"
+};
+
+const IMPORT_SOURCE_LABELS: Record<ImportSource, string> = {
+  manual_single: "新收藏导入",
+  extension_scan: "旧收藏扫描",
+  batch_links: "批量链接",
+  browser_bookmarks: "浏览器书签",
+  mobile_share: "手机分享",
+  screenshot_ocr: "截图识别",
+  other: "其他来源"
+};
+
+const IMPORT_STATUS_LABELS: Record<ImportBatch["status"], string> = {
+  pending: "等待处理",
+  processing: "处理中",
+  completed: "已完成",
+  failed: "失败",
+  partially_completed: "部分完成"
 };
 
 type AchievementId = "first_revival" | "three_day_streak" | "ten_revivals" | "search_recall" | "plan_finished";
@@ -193,6 +217,13 @@ export function App() {
     return () => window.removeEventListener("keydown", handleSearchShortcut);
   }, []);
 
+  useEffect(() => {
+    const payload = readExtensionImportFromHash();
+    if (!payload) return;
+    importExtensionPayload(payload);
+    window.history.replaceState(null, "", window.location.pathname || "/");
+  }, []);
+
   const selectedItem = useMemo(
     () => state.savedItems.find((item) => item.id === selectedItemId) ?? state.savedItems[0],
     [selectedItemId, state.savedItems]
@@ -218,6 +249,19 @@ export function App() {
     () => createPlansFromActionCards(state.user.id, state.savedItems, state.actionCards),
     [state.actionCards, state.savedItems, state.user.id]
   );
+
+  const smartAlbums = useMemo(
+    () => (state.smartAlbums && state.smartAlbums.length > 0 ? state.smartAlbums : generateSmartAlbums(state.savedItems)),
+    [state.savedItems, state.smartAlbums]
+  );
+
+  const importBatches = useMemo(
+    () => [...(state.importBatches ?? [])].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
+    [state.importBatches]
+  );
+
+  const importBatchItems = state.importBatchItems ?? [];
+  const latestExtensionBatch = importBatches.find((batch) => batch.source === "extension_scan");
 
   const searchResults = useMemo(
     () => searchSavedItems(submittedSearch, state.savedItems, state.actionCards),
@@ -286,22 +330,62 @@ export function App() {
 
     setIsImporting(true);
     window.setTimeout(() => {
-      const aiResult = classifyAndGenerateActionCard(input);
-      const records = createImportedRecords(state.user.id, input, aiResult);
-
-      setState((current) => ({
-        ...current,
-        savedItems: [records.savedItem, ...current.savedItems],
-        actionCards: [records.actionCard, ...current.actionCards]
-      }));
+      const result = runImportPipeline("manual_single", "新收藏导入", [input]);
+      commitImportResult(result);
+      const firstItem = result.importedSavedItems[0];
+      if (firstItem) {
+        setSelectedItemId(firstItem.id);
+        setActiveView("detail");
+      }
       setImportInput(emptyImport);
-      setSelectedItemId(records.savedItem.id);
-      setActiveView("detail");
       setIsImporting(false);
-      setToast("已复活一条收藏");
+      setToast(result.batch.importedCount > 0 ? "已复活一条收藏" : result.batch.errorMessage || "这条收藏已经在收藏池里了");
     }, 420);
   }
 
+  function importExtensionPayload(payload: ExtensionImportPayload) {
+    const scannedItems = normalizeExtensionItems(payload.items);
+    if (scannedItems.length === 0) {
+      setToast("没有发现可导入的收藏卡片");
+      return;
+    }
+
+    const result = runImportPipeline("extension_scan", "旧收藏扫描 Beta", extensionItemsToImportItems(scannedItems));
+    commitImportResult(result);
+    setSelectedItemId(result.importedSavedItems[0]?.id);
+    setActiveView("old-import");
+    setToast(
+      result.batch.importedCount > 0
+        ? `旧收藏扫描完成：导入 ${result.batch.importedCount} 条，重复 ${result.batch.duplicateCount} 条，生成 ${result.batch.createdAlbumCount} 个专辑候选`
+        : "这些扫描结果已经在收藏池里了"
+    );
+  }
+
+  function runImportPipeline(source: ImportSource, title: string, items: ImportInputItem[]): ProcessImportBatchResult {
+    return processImportBatch({
+      source,
+      title,
+      items,
+      userId: state.user.id,
+      existingSavedItems: state.savedItems,
+      existingActionCards: state.actionCards,
+      existingSmartAlbums: smartAlbums
+    });
+  }
+
+  function commitImportResult(result: ProcessImportBatchResult) {
+    setState((current) => {
+      const savedItems = [...result.importedSavedItems, ...current.savedItems];
+      return {
+        ...current,
+        savedItems,
+        actionCards: [...result.actionCards, ...current.actionCards],
+        smartAlbums: result.smartAlbumCandidates,
+        importBatches: [result.batch, ...(current.importBatches ?? [])],
+        importBatchItems: [...result.batchItems, ...(current.importBatchItems ?? [])]
+      };
+    });
+  }
   function unlockAchievements(ids: AchievementId[]) {
     const now = new Date().toISOString();
     const newlyUnlocked = ids.filter((id) => !unlockedAchievements[id]);
@@ -338,10 +422,14 @@ export function App() {
     const previousItem = state.savedItems.find((item) => item.id === itemId);
     const nextItems = updateItemStatus(state.savedItems, itemId, status);
 
-    setState((current) => ({
-      ...current,
-      savedItems: updateItemStatus(current.savedItems, itemId, status)
-    }));
+    setState((current) => {
+      const savedItems = updateItemStatus(current.savedItems, itemId, status);
+      return {
+        ...current,
+        savedItems,
+        smartAlbums: mergeGeneratedSmartAlbums(smartAlbums, savedItems)
+      };
+    });
 
     if (status === "completed" && previousItem?.status !== "completed") {
       triggerCompletionReward(nextItems);
@@ -454,13 +542,51 @@ export function App() {
       return;
     }
 
-    setState((current) => ({
-      ...current,
-      savedItems: [...newItems, ...current.savedItems],
-      actionCards: [...newCards, ...current.actionCards]
-    }));
+    setState((current) => {
+      const savedItems = [...newItems, ...current.savedItems];
+      return {
+        ...current,
+        savedItems,
+        actionCards: [...newCards, ...current.actionCards],
+        smartAlbums: mergeGeneratedSmartAlbums(smartAlbums, savedItems)
+      };
+    });
     setSelectedItemId(newItems[0]?.id);
     setToast(`已导入 ${newItems.length} 条演示数据`);
+  }
+
+  function renameSmartAlbum(albumId: string) {
+    const album = smartAlbums.find((entry) => entry.id === albumId);
+    if (!album) return;
+    const title = window.prompt("给这个智能专辑换个名字", album.title)?.trim();
+    if (!title || title === album.title) return;
+    setState((current) => ({
+      ...current,
+      smartAlbums: (current.smartAlbums ?? smartAlbums).map((entry) =>
+        entry.id === albumId ? { ...entry, title, updatedAt: new Date().toISOString() } : entry
+      )
+    }));
+    setToast("专辑名称已更新");
+  }
+
+  function confirmSmartAlbum(albumId: string) {
+    setState((current) => ({
+      ...current,
+      smartAlbums: (current.smartAlbums ?? smartAlbums).map((entry) =>
+        entry.id === albumId ? { ...entry, status: "confirmed", updatedAt: new Date().toISOString() } : entry
+      )
+    }));
+    setToast("已确认创建智能专辑");
+  }
+
+  function archiveSmartAlbum(albumId: string) {
+    setState((current) => ({
+      ...current,
+      smartAlbums: (current.smartAlbums ?? smartAlbums).map((entry) =>
+        entry.id === albumId ? { ...entry, status: "archived", updatedAt: new Date().toISOString() } : entry
+      )
+    }));
+    setToast("已归档这个专辑候选，收藏本身不会被删除");
   }
   if (activeView === "welcome") {
     return (
@@ -552,7 +678,24 @@ export function App() {
           )}
 
           {activeView === "import" && (
-            <ImportView importInput={importInput} setImportInput={setImportInput} handleImport={handleImport} isImporting={isImporting} />
+            <ImportView
+              importInput={importInput}
+              setImportInput={setImportInput}
+              handleImport={handleImport}
+              isImporting={isImporting}
+              importBatches={importBatches}
+              setActiveView={setActiveView}
+            />
+          )}
+
+          {activeView === "old-import" && (
+            <OldImportView
+              latestBatch={latestExtensionBatch}
+              batchItems={importBatchItems}
+              setActiveView={setActiveView}
+              recommendations={recommendations}
+              changeStatus={changeStatus}
+            />
           )}
 
           {activeView === "search" && (
@@ -604,6 +747,19 @@ export function App() {
 
           {activeView === "plans" && (
             <PlansView plans={plans} actionCards={state.actionCards} savedItems={state.savedItems} viewActionCard={viewActionCard} copyPlan={copyPlan} />
+          )}
+
+          {activeView === "albums" && (
+            <SmartAlbumsView
+              albums={smartAlbums}
+              savedItems={state.savedItems}
+              actionCards={state.actionCards}
+              viewActionCard={viewActionCard}
+              openSource={openSource}
+              renameAlbum={renameSmartAlbum}
+              confirmAlbum={confirmSmartAlbum}
+              archiveAlbum={archiveSmartAlbum}
+            />
           )}
 
           {activeView === "insights" && <InsightsView insights={insights} savedItems={state.savedItems} />}
@@ -915,18 +1071,159 @@ function ImportView(props: {
   setImportInput: (input: ShareInput) => void;
   handleImport: (event: FormEvent) => void;
   isImporting: boolean;
+  importBatches: ImportBatch[];
+  setActiveView: (view: ViewKey) => void;
 }) {
+  const methods = [
+    {
+      title: "新收藏导入",
+      description: "适合你刚刚看到、想马上保存的一条内容。",
+      action: "复活一条新收藏",
+      status: "已支持",
+      onClick: () => document.getElementById("single-import-panel")?.scrollIntoView({ behavior: "smooth", block: "start" })
+    },
+    {
+      title: "旧收藏扫描 Beta",
+      description: "适合从小红书网页版收藏夹里导入已经加载出来的旧收藏。",
+      action: "查看扫描说明",
+      status: "Beta",
+      onClick: () => props.setActiveView("old-import")
+    },
+    {
+      title: "批量链接导入",
+      description: "一次粘贴多条链接，系统自动拆分、去重、分类。",
+      action: "Coming soon",
+      status: "预留",
+      onClick: undefined
+    },
+    {
+      title: "浏览器书签导入",
+      description: "后续支持 Chrome / Edge 书签导入，把网页收藏整理成行动卡。",
+      action: "Coming soon",
+      status: "预留",
+      onClick: undefined
+    },
+    {
+      title: "手机分享入口",
+      description: "未来在手机小红书里点击分享，选择收藏复活 App。",
+      action: "App 阶段支持",
+      status: "预留",
+      onClick: undefined
+    }
+  ];
+
   return (
     <>
       <div className="page-title-row airy-title">
         <div>
-          <p className="eyebrow">快速复活</p>
-          <h1>复活一条新收藏</h1>
+          <p className="eyebrow">导入中心</p>
+          <h1>把旧收藏和新收藏，都放回行动里</h1>
         </div>
-        <p className="page-lead">把刚刚心动的链接放进来，系统会自动判断它适合学习、出行、做饭、探店还是创作。</p>
+        <p className="page-lead">不管它来自小红书、浏览器收藏、批量链接，还是未来手机分享入口，系统都会先整理、去重、分类，再变成行动卡和智能专辑。</p>
       </div>
-      <section className="tool-panel single revive-panel import-page-panel">
+
+      <div className="import-method-grid">
+        {methods.map((method) => (
+          <article className="import-method-card" key={method.title}>
+            <span>{method.status}</span>
+            <strong>{method.title}</strong>
+            <p>{method.description}</p>
+            <button className={method.onClick ? "primary-button" : "secondary-action"} onClick={method.onClick} disabled={!method.onClick}>
+              {method.action}
+            </button>
+          </article>
+        ))}
+      </div>
+
+      <section className="tool-panel single import-batches-panel">
+        <PanelHeader icon={<Clock3 size={18} />} title="最近导入记录" meta={`${props.importBatches.length} 批`} />
+        <div className="import-batch-list">
+          {props.importBatches.slice(0, 6).map((batch) => (
+            <article key={batch.id} className="import-batch-row" data-testid="import-batch-row">
+              <div>
+                <strong>{batch.title}</strong>
+                <small>{IMPORT_SOURCE_LABELS[batch.source]} · {formatDate(batch.createdAt)} · {IMPORT_STATUS_LABELS[batch.status]}</small>
+              </div>
+              <span>扫描 {batch.rawCount}</span>
+              <span>导入 {batch.importedCount}</span>
+              <span>重复 {batch.duplicateCount}</span>
+              <span>失败 {batch.failedCount}</span>
+              <span>行动卡 {batch.createdActionCardCount}</span>
+              <span>专辑 {batch.createdAlbumCount}</span>
+              <button onClick={() => props.setActiveView(batch.source === "extension_scan" ? "old-import" : "albums")}>查看详情</button>
+            </article>
+          ))}
+          {props.importBatches.length === 0 && <EmptyState title="还没有导入记录" text="先复活一条新收藏，或者用旧收藏扫描 Beta 导入一批已加载收藏。" />}
+        </div>
+      </section>
+
+      <section id="single-import-panel" className="tool-panel single revive-panel import-page-panel">
+        <div className="section-heading-soft">
+          <span><Share2 size={18} /> 复活一条新收藏</span>
+          <small>走统一 ImportBatch 管线</small>
+        </div>
         <QuickImportForm input={props.importInput} setInput={props.setImportInput} onSubmit={props.handleImport} isLoading={props.isImporting} />
+      </section>
+    </>
+  );
+}
+
+function OldImportView(props: {
+  latestBatch?: ImportBatch;
+  batchItems: ImportBatchItem[];
+  setActiveView: (view: ViewKey) => void;
+  recommendations: RevivalRecommendation[];
+  changeStatus: (itemId: string, status: ItemStatus) => void;
+}) {
+  const items = props.latestBatch ? props.batchItems.filter((item) => item.batchId === props.latestBatch?.id) : [];
+  return (
+    <>
+      <div className="page-title-row airy-title">
+        <div>
+          <p className="eyebrow">旧收藏扫描 Beta</p>
+          <h1>把旧收藏先整理成专辑</h1>
+        </div>
+        <p className="page-lead">当前版本通过 Chrome / Edge 扩展，在你本人主动点击后读取小红书网页版当前已加载的收藏卡片。它不会登录账号、不会绕过验证码，也不承诺完整扫描全部历史收藏。</p>
+      </div>
+
+      <section className="extension-import-guide">
+        <div>
+          <span><Sparkles size={18} /> 如何扫描</span>
+          <strong>打开你自己的小红书网页版收藏夹，点击浏览器扩展“旧收藏扫描 Beta”，确认列表后导入。</strong>
+          <small>导入后会先生成 ImportBatch，再生成行动卡和智能专辑候选。第一版只处理当前页面已加载 DOM 中的标题、链接、封面地址和可见短文本。</small>
+        </div>
+        <code>apps/extension</code>
+      </section>
+
+      <section className="qa-grid">
+        <Metric label="扫描数量" value={(props.latestBatch?.rawCount ?? 0).toString()} />
+        <Metric label="成功导入" value={(props.latestBatch?.importedCount ?? 0).toString()} />
+        <Metric label="重复" value={(props.latestBatch?.duplicateCount ?? 0).toString()} />
+        <Metric label="失败" value={(props.latestBatch?.failedCount ?? 0).toString()} />
+        <Metric label="生成专辑" value={(props.latestBatch?.createdAlbumCount ?? 0).toString()} />
+      </section>
+
+      <div className="old-import-actions">
+        <button className="primary-button" onClick={() => props.setActiveView("albums")}>查看智能专辑</button>
+        <button className="secondary-action" onClick={() => props.recommendations.slice(0, 3).forEach((entry) => props.changeStatus(entry.item.id, "today"))}>今日先复活 3 条</button>
+        <button className="secondary-action" onClick={() => props.setActiveView("import")}>返回导入中心</button>
+      </div>
+
+      <section className="tool-panel single import-batches-panel">
+        <PanelHeader icon={<List size={18} />} title="最近一次扫描明细" meta={props.latestBatch ? IMPORT_STATUS_LABELS[props.latestBatch.status] : "暂无"} />
+        <div className="qa-result-list">
+          {items.slice(0, 30).map((item) => (
+            <article key={item.id} className="qa-result-row">
+              <div>
+                <strong>{item.title}</strong>
+                <small>{item.status} · {item.sourceUrl || "无链接"}</small>
+                <span>{item.errorMessage || item.visibleText || item.rawShareText}</span>
+              </div>
+              {item.createdSavedItemId && <button onClick={() => props.setActiveView("albums")}>看专辑</button>}
+            </article>
+          ))}
+          {!props.latestBatch && <EmptyState title="还没有旧收藏扫描记录" text="先加载 apps/extension 扩展，在小红书网页版收藏夹里扫描并导入。" />}
+        </div>
       </section>
     </>
   );
@@ -1234,6 +1531,129 @@ function PlansView(props: {
   );
 }
 
+function SmartAlbumsView(props: {
+  albums: SmartAlbum[];
+  savedItems: SavedItem[];
+  actionCards: ActionCard[];
+  viewActionCard: (itemId: string) => void;
+  openSource: (item: SavedItem, origin?: OpenSourceOrigin) => void;
+  renameAlbum: (albumId: string) => void;
+  confirmAlbum: (albumId: string) => void;
+  archiveAlbum: (albumId: string) => void;
+}) {
+  const visibleAlbums = props.albums.filter((album) => album.status !== "archived");
+  const candidateCount = props.albums.filter((album) => album.status === "candidate").length;
+  const confirmedCount = props.albums.filter((album) => album.status === "confirmed").length;
+  const confirmedItemIds = new Set(props.albums.filter((album) => album.status === "confirmed").flatMap((album) => album.savedItemIds));
+  const [selectedAlbumId, setSelectedAlbumId] = useState<string | undefined>(visibleAlbums[0]?.id);
+  const selectedAlbum = visibleAlbums.find((album) => album.id === selectedAlbumId) ?? visibleAlbums[0];
+  const selectedItems = selectedAlbum
+    ? selectedAlbum.savedItemIds
+        .map((id) => props.savedItems.find((item) => item.id === id))
+        .filter((item): item is SavedItem => Boolean(item))
+    : [];
+
+  return (
+    <>
+      <div className="page-title-row">
+        <div>
+          <p className="eyebrow">智能整理</p>
+          <h1>智能专辑</h1>
+        </div>
+        <p className="page-lead">大量旧收藏先整理成少量专辑，再挑每个专辑里最值得先复活的 3 条。你不用直接面对几百张卡片。</p>
+      </div>
+
+      <section className="album-overview-grid">
+        <Metric label="候选专辑" value={candidateCount.toString()} />
+        <Metric label="已确认专辑" value={confirmedCount.toString()} />
+        <Metric label="待处理收藏" value={Math.max(0, props.savedItems.length - confirmedItemIds.size).toString()} />
+      </section>
+
+      <section className="extension-import-guide">
+        <div>
+          <span><Sparkles size={18} /> 导入 → 整理成专辑 → 选择今日行动</span>
+          <strong>旧收藏扫描或手动导入后，都会先进入统一导入管线，再生成专辑候选。</strong>
+          <small>完整原帖内容仍然通过 sourceUrl 回到原平台查看，本产品只保存用户确认导入后的索引、摘要和行动卡。</small>
+        </div>
+        <code>/albums</code>
+      </section>
+
+      <div className="smart-album-grid">
+        {visibleAlbums.map((album) => {
+          const albumItems = album.savedItemIds
+            .map((id) => props.savedItems.find((item) => item.id === id))
+            .filter((item): item is SavedItem => Boolean(item));
+          const priorityItems = albumItems.slice(0, 3);
+
+          return (
+            <section className="smart-album-card" key={album.id} data-testid="smart-album-card">
+              <div className="smart-album-head">
+                <span>{album.category} · {album.status === "confirmed" ? "已确认" : "候选"}</span>
+                <strong>{album.title}</strong>
+                <small>{album.description}</small>
+              </div>
+              <div className="tag-list album-keywords">
+                {album.keywords.slice(0, 6).map((keyword) => <span key={keyword}>{keyword}</span>)}
+              </div>
+              <div className="album-priority-list">
+                {priorityItems.map((item, index) => {
+                  const card = props.actionCards.find((entry) => entry.savedItemId === item.id);
+                  return (
+                    <article key={item.id}>
+                      <em>{index + 1}</em>
+                      <span>
+                        <strong>{item.title}</strong>
+                        <small>{card?.nextAction ?? item.summary}</small>
+                      </span>
+                      <div>
+                        <button onClick={() => props.viewActionCard(item.id)}>查看卡片</button>
+                        <button onClick={() => props.openSource(item)}>原帖</button>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+              <div className="album-actions">
+                <button className="primary-button" onClick={() => props.confirmAlbum(album.id)} disabled={album.status === "confirmed"} data-testid="confirm-album">
+                  {album.status === "confirmed" ? "已确认" : "确认创建"}
+                </button>
+                <button className="secondary-action" onClick={() => props.renameAlbum(album.id)}>改名</button>
+                <button className="secondary-action" onClick={() => setSelectedAlbumId(album.id)}>查看收藏</button>
+                <button className="ghost-action" onClick={() => props.archiveAlbum(album.id)} data-testid="archive-album">暂不需要</button>
+              </div>
+            </section>
+          );
+        })}
+      </div>
+
+      {selectedAlbum && (
+        <section className="tool-panel single album-detail-panel" data-testid="album-detail">
+          <PanelHeader icon={<LayoutGrid size={18} />} title={`${selectedAlbum.title} · 全部收藏`} meta={`${selectedItems.length} 条`} />
+          <div className="qa-result-list">
+            {selectedItems.map((item, index) => {
+              const card = props.actionCards.find((entry) => entry.savedItemId === item.id);
+              return (
+                <article key={item.id} className="qa-result-row">
+                  <div>
+                    <strong>{index + 1}. {item.title}</strong>
+                    <small>{item.category} · {DISPLAY_STATUS_LABELS[item.status]}</small>
+                    <span>{card?.nextAction ?? item.summary}</span>
+                  </div>
+                  <div className="qa-row-actions">
+                    <button onClick={() => props.viewActionCard(item.id)}>行动卡</button>
+                    <button onClick={() => props.openSource(item)}>原帖</button>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {visibleAlbums.length === 0 && <EmptyState title="还没有智能专辑" text="先从导入中心导入一条收藏，或用旧收藏扫描 Beta 导入一批已加载收藏。" />}
+    </>
+  );
+}
 function InsightsView(props: { insights: ReturnType<typeof buildInsights>; savedItems: SavedItem[] }) {
   return (
     <>
@@ -1946,10 +2366,73 @@ function buildRevivalStats(items: SavedItem[]) {
     revivalValue: completed.length
   };
 }
+function readExtensionImportFromHash(): ExtensionImportPayload | null {
+  if (typeof window === "undefined" || !window.location.hash.startsWith("#extension-import=")) return null;
+
+  const encoded = window.location.hash.replace("#extension-import=", "");
+  try {
+    const payload = decodeBase64UrlJson<ExtensionImportPayload>(encoded);
+    if (payload?.source !== "browser-extension-poc" || !Array.isArray(payload.items)) return null;
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+function decodeBase64UrlJson<T>(encoded: string): T {
+  const base64 = decodeURIComponent(encoded).replace(/-/g, "+").replace(/_/g, "/");
+  const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, "=");
+  const binary = window.atob(padded);
+  const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+  return JSON.parse(new TextDecoder().decode(bytes)) as T;
+}
+
+function normalizeExtensionItems(items: ExtensionScannedItem[]): ExtensionScannedItem[] {
+  const seen = new Set<string>();
+  return items
+    .map((item) => ({
+      title: item.title?.trim() || item.visibleText?.trim().slice(0, 42) || "未命名小红书收藏",
+      sourceUrl: item.sourceUrl?.trim() ?? "",
+      coverUrl: item.coverUrl?.trim() || undefined,
+      visibleText: item.visibleText?.trim().slice(0, 280) || undefined,
+      sourcePlatform: "xiaohongshu" as const
+    }))
+    .filter((item) => item.sourceUrl || item.title)
+    .filter((item) => {
+      const key = `${item.sourceUrl.toLowerCase()}|${item.title.toLowerCase()}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 80);
+}
+
+function mergeGeneratedSmartAlbums(existingAlbums: SmartAlbum[], savedItems: SavedItem[]): SmartAlbum[] {
+  const existingById = new Map(existingAlbums.map((album) => [album.id, album]));
+  const generated = generateSmartAlbums(savedItems);
+  const merged = generated.map((album) => {
+    const existing = existingById.get(album.id);
+    if (!existing) return album;
+    return {
+      ...album,
+      title: existing.title,
+      description: existing.description || album.description,
+      status: existing.status,
+      createdAt: existing.createdAt,
+      updatedAt: album.updatedAt
+    };
+  });
+
+  existingAlbums
+    .filter((album) => album.status === "archived" && !merged.some((entry) => entry.id === album.id))
+    .forEach((album) => merged.push(album));
+
+  return merged.sort((a, b) => b.priority - a.priority || b.savedItemIds.length - a.savedItemIds.length);
+}
 function getInitialView(): ViewKey {
   if (typeof window === "undefined") return "welcome";
   const view = window.location.pathname.replace(/^\//, "") as ViewKey;
-  const supported: ViewKey[] = ["welcome", "dashboard", "import", "search", "pool", "detail", "plans", "insights", "mobile", "settings", "real-test", "qa"];
+  const supported: ViewKey[] = ["welcome", "dashboard", "import", "old-import", "search", "pool", "detail", "plans", "albums", "insights", "mobile", "settings", "real-test", "qa"];
   return supported.includes(view) ? view : "welcome";
 }
 

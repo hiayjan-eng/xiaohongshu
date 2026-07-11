@@ -139,6 +139,67 @@ export interface SearchLog {
   createdAt: string;
 }
 
+export interface ExtensionScannedItem {
+  title: string;
+  sourceUrl: string;
+  coverUrl?: string;
+  visibleText?: string;
+  sourcePlatform: "xiaohongshu";
+}
+
+export interface ExtensionImportPayload {
+  source: "browser-extension-poc";
+  sourcePlatform: "xiaohongshu";
+  scannedAt: string;
+  pageUrl?: string;
+  items: ExtensionScannedItem[];
+}
+
+export type ImportSource =
+  | "manual_single"
+  | "extension_scan"
+  | "batch_links"
+  | "browser_bookmarks"
+  | "mobile_share"
+  | "screenshot_ocr"
+  | "other";
+
+export type ImportBatchStatus = "pending" | "processing" | "completed" | "failed" | "partially_completed";
+export type ImportBatchItemStatus = "pending" | "imported" | "duplicate" | "failed" | "skipped";
+
+export interface ImportBatch {
+  id: string;
+  source: ImportSource;
+  title: string;
+  status: ImportBatchStatus;
+  rawCount: number;
+  importedCount: number;
+  duplicateCount: number;
+  failedCount: number;
+  createdActionCardCount: number;
+  createdAlbumCount: number;
+  errorMessage?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ImportBatchItem {
+  id: string;
+  batchId: string;
+  sourceUrl: string;
+  title: string;
+  rawShareText: string;
+  visibleText?: string;
+  coverUrl?: string;
+  userNote: string;
+  status: ImportBatchItemStatus;
+  duplicateOfSavedItemId?: string;
+  errorMessage?: string;
+  createdSavedItemId?: string;
+  createdActionCardId?: string;
+  createdAt: string;
+}
+
 export interface ShareInput {
   sourceUrl: string;
   rawShareText: string;
@@ -170,11 +231,28 @@ export interface RevivalRecommendation {
   reason: string;
 }
 
+export interface SmartAlbum {
+  id: string;
+  title: string;
+  description: string;
+  category: Category;
+  keywords: string[];
+  savedItemIds: string[];
+  coverItemId?: string;
+  priority: number;
+  status: "candidate" | "confirmed" | "archived";
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface AppState {
   user: User;
   savedItems: SavedItem[];
   actionCards: ActionCard[];
   searchLogs: SearchLog[];
+  smartAlbums?: SmartAlbum[];
+  importBatches?: ImportBatch[];
+  importBatchItems?: ImportBatchItem[];
 }
 
 export const DEFAULT_USER: User = {

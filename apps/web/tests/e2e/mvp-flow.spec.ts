@@ -4,6 +4,9 @@ import { collectConsoleErrors, expectNoConsoleErrors, importTestNote, readAppSta
 const pages = [
   { path: "/", heading: "别让收藏夹替你努力" },
   { path: "/dashboard", heading: "今天，从一条收藏开始" },
+  { path: "/import", heading: "把旧收藏和新收藏，都放回行动里" },
+  { path: "/albums", heading: "智能专辑" },
+  { path: "/old-import", heading: "把旧收藏先整理成专辑" },
   { path: "/search", heading: "找回你收藏过的那一条" },
   { path: "/settings", heading: "本地 MVP 设置" },
   { path: "/qa", heading: "7 天稳定性检查面板" },
@@ -43,7 +46,10 @@ test.describe("MVP page health and import flow", () => {
         },
         savedItems: [],
         actionCards: [],
-        searchLogs: []
+        searchLogs: [],
+        smartAlbums: [],
+        importBatches: [],
+        importBatchItems: []
       }));
     }, STORAGE_KEY);
     await page.reload();
@@ -73,6 +79,9 @@ test.describe("MVP page health and import flow", () => {
     expect(savedItem?.searchableText).toContain("封面");
     expect(actionCard?.nextAction).toBeTruthy();
     expect(actionCard?.tasks.length).toBeGreaterThan(0);
+    expect(state.importBatches?.[0]?.source).toBe("manual_single");
+    expect(state.importBatches?.[0]?.importedCount).toBe(1);
+    expect(state.importBatchItems?.[0]?.status).toBe("imported");
 
     await page.goto("/pool");
     await page.getByPlaceholder("筛选收藏池").fill("封面设计");

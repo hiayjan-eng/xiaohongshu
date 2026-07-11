@@ -15,6 +15,7 @@
     "@revival/action-card-service": "workspace:*",
     "@revival/ai-service": "workspace:*",
     "@revival/database": "workspace:*",
+    "@revival/import-service": "workspace:*",
     "@revival/recommendation-service": "workspace:*",
     "@revival/search-service": "workspace:*",
     "@revival/shared-types": "workspace:*",

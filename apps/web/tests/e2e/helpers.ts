@@ -1,4 +1,4 @@
-﻿import { expect, type Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 
 export const STORAGE_KEY = "collection-revival-system:v1";
 export const ACHIEVEMENT_STORAGE_KEY = "collection-revival-achievements";
@@ -39,6 +39,9 @@ type AppState = {
     tasks: unknown[];
   }>;
   searchLogs: Array<{ query: string; resultCount: number; clickedSavedItemId?: string }>;
+  importBatches?: Array<{ id: string; source: string; rawCount: number; importedCount: number; duplicateCount: number; failedCount: number; createdActionCardCount: number; createdAlbumCount: number; status: string }>;
+  importBatchItems?: Array<{ id: string; batchId: string; status: string; sourceUrl: string; title: string }>;
+  smartAlbums?: Array<{ id: string; title: string; status: string; savedItemIds: string[] }>;
 };
 
 export function collectConsoleErrors(page: Page): string[] {
@@ -75,7 +78,7 @@ export async function resetDemoData(page: Page) {
 
 export async function importTestNote(page: Page, note = testNote) {
   await page.goto("/import");
-  await expect(page.getByRole("heading", { name: "复活一条新收藏" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "把旧收藏和新收藏，都放回行动里" })).toBeVisible();
   await page.getByTestId("import-source-url").fill(note.sourceUrl);
   await page.getByTestId("import-title").fill(note.title);
   await page.getByTestId("import-raw-share-text").fill(note.rawShareText);
