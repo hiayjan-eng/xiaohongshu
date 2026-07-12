@@ -1,16 +1,27 @@
 export const CATEGORIES = [
   "技能学习",
+  "内容创作",
+  "小红书运营",
+  "AI工具",
+  "职场学习",
   "旅行地点",
   "美食探店",
   "菜谱做饭",
   "穿搭变美",
+  "购物参考",
   "家居生活",
+  "生活方式",
+  "情绪成长",
+  "亲密关系",
+  "健身运动",
+  "读书学习",
   "工作效率",
   "灵感素材",
   "其他"
 ] as const;
 
 export type Category = (typeof CATEGORIES)[number];
+export type ClassificationConfidence = "high" | "medium" | "low";
 
 export const STATUSES = [
   "not_started",
@@ -71,6 +82,7 @@ export interface SavedItem {
   title: string;
   userNote: string;
   category: Category;
+  classificationConfidence?: ClassificationConfidence;
   intent: string;
   summary: string;
   keywords: string[];
@@ -209,6 +221,7 @@ export interface ShareInput {
 
 export interface AiClassificationResult {
   category: Category;
+  confidence: ClassificationConfidence;
   intent: string;
   summary: string;
   keywords: string[];

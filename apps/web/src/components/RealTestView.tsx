@@ -1,11 +1,11 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { CheckCircle2, Clipboard, Download, ExternalLink, FileJson, FileText, Play, Search, Trash2 } from "lucide-react";
-import { classifyAndGenerateActionCard } from "@revival/ai-service";
 import { createImportedRecords } from "@revival/database";
 import { searchSavedItems } from "@revival/search-service";
 import type {
   ActionCard,
   ActionCardRating,
+  AiClassificationResult,
   ClassificationRating,
   NextStepRating,
   RealUserTestRecord,
@@ -77,6 +77,7 @@ type RealTestViewProps = {
   savedItems: SavedItem[];
   actionCards: ActionCard[];
   onCreateRecords: (savedItem: SavedItem, actionCard: ActionCard) => void;
+  classifyShareInput: (input: ShareInput) => Promise<AiClassificationResult>;
   openSource: (item: SavedItem) => void;
   viewActionCard: (itemId: string) => void;
   setToast: (message: string) => void;
@@ -123,31 +124,36 @@ export function RealTestView(props: RealTestViewProps) {
 
     setIsGenerating(true);
     window.setTimeout(() => {
-      const aiResult = classifyAndGenerateActionCard(cleanInput);
-      const { savedItem, actionCard } = createImportedRecords(props.userId, cleanInput, aiResult);
-      const now = new Date().toISOString();
-      const record: RealUserTestRecord = {
-        id: `real_test_${globalThis.crypto?.randomUUID?.() ?? Date.now()}`,
-        savedItemId: savedItem.id,
-        sourceUrl: savedItem.sourceUrl,
-        title: savedItem.title,
-        rawShareText: savedItem.rawShareText,
-        userNote: savedItem.userNote,
-        category: savedItem.category,
-        summary: savedItem.summary,
-        keywords: savedItem.keywords,
-        entities: savedItem.entities,
-        nextAction: actionCard.nextAction,
-        createdAt: now,
-        updatedAt: now
-      };
+      void props.classifyShareInput(cleanInput)
+        .then((aiResult) => {
+          const { savedItem, actionCard } = createImportedRecords(props.userId, cleanInput, aiResult);
+          const now = new Date().toISOString();
+          const record: RealUserTestRecord = {
+            id: `real_test_${globalThis.crypto?.randomUUID?.() ?? Date.now()}`,
+            savedItemId: savedItem.id,
+            sourceUrl: savedItem.sourceUrl,
+            title: savedItem.title,
+            rawShareText: savedItem.rawShareText,
+            userNote: savedItem.userNote,
+            category: savedItem.category,
+            summary: savedItem.summary,
+            keywords: savedItem.keywords,
+            entities: savedItem.entities,
+            nextAction: actionCard.nextAction,
+            createdAt: now,
+            updatedAt: now
+          };
 
-      props.onCreateRecords(savedItem, actionCard);
-      setRecords((current) => [record, ...current]);
-      setCurrentRecordId(record.id);
-      setInput(emptyInput);
-      setIsGenerating(false);
-      props.setToast("已生成一条真实试用记录");
+          props.onCreateRecords(savedItem, actionCard);
+          setRecords((current) => [record, ...current]);
+          setCurrentRecordId(record.id);
+          setInput(emptyInput);
+          props.setToast("已生成一条真实试用记录");
+        })
+        .catch((error) => {
+          props.setToast(error instanceof Error ? error.message : "生成试用记录失败");
+        })
+        .finally(() => setIsGenerating(false));
     }, 360);
   }
 

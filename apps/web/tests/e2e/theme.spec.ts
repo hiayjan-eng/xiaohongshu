@@ -1,4 +1,4 @@
-﻿import { expect, test } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import { collectConsoleErrors, expectNoConsoleErrors, importTestNote, resetDemoData } from "./helpers";
 
 const themes = [
@@ -57,6 +57,7 @@ test.describe("MVP theme switching", () => {
       rawShareText: "剪辑教程和封面设计参考，用来确认主题切换后导入、搜索、完成仍然可用",
       userNote: "主题回归测试"
     });
+    await page.getByTestId("import-success-panel").getByRole("button", { name: "查看行动卡" }).click();
     await page.getByTestId("status-completed").click();
     await expect(page.locator(".toast")).toBeVisible();
 

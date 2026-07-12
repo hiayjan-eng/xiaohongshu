@@ -163,6 +163,119 @@ export function processImportBatch(input: ProcessImportBatchInput): ProcessImpor
   };
 }
 
+export async function processImportBatchAsync(input: ProcessImportBatchInput): Promise<ProcessImportBatchResult> {
+  const now = input.now ?? new Date();
+  const createdAt = now.toISOString();
+  const batchId = createId("batch");
+  const aiProvider = input.aiProvider ?? createMockAiProvider({ generateSmartAlbums });
+  const existingKeys = new Map<string, SavedItem>();
+  input.existingSavedItems.forEach((item) => {
+    const key = getSavedItemDedupeKey(item);
+    if (key) existingKeys.set(key, item);
+  });
+
+  const batchItems: ImportBatchItem[] = [];
+  const importedSavedItems: SavedItem[] = [];
+  const actionCards: ActionCard[] = [];
+  const duplicates: ImportBatchItem[] = [];
+  const failedItems: ImportBatchItem[] = [];
+
+  for (const [index, rawItem] of input.items.entries()) {
+    const normalized = normalizeImportItem(rawItem);
+    const itemId = createId("batch_item");
+    const baseItem: ImportBatchItem = {
+      id: itemId,
+      batchId,
+      sourceUrl: normalized.sourceUrl,
+      title: normalized.title,
+      rawShareText: normalized.rawShareText,
+      visibleText: normalized.visibleText,
+      coverUrl: normalized.coverUrl,
+      userNote: normalized.userNote,
+      status: "pending",
+      createdAt
+    };
+
+    if (!normalized.sourceUrl) {
+      const failed: ImportBatchItem = {
+        ...baseItem,
+        status: "failed",
+        errorMessage: "缺少 sourceUrl；第一版旧收藏扫描要求至少有原帖链接。"
+      };
+      batchItems.push(failed);
+      failedItems.push(failed);
+      continue;
+    }
+
+    const key = getShareInputDedupeKey(normalized);
+    const duplicate = key ? existingKeys.get(key) : undefined;
+    if (duplicate) {
+      const duplicateItem: ImportBatchItem = {
+        ...baseItem,
+        status: "duplicate",
+        duplicateOfSavedItemId: duplicate.id
+      };
+      batchItems.push(duplicateItem);
+      duplicates.push(duplicateItem);
+      continue;
+    }
+
+    try {
+      const itemDate = new Date(now.getTime() + index);
+      const classification = await Promise.resolve(aiProvider.classifyAndGenerateActionCard(normalized));
+      const records = createImportedRecords(input.userId, normalized, classification, itemDate);
+      existingKeys.set(key, records.savedItem);
+      importedSavedItems.push(records.savedItem);
+      actionCards.push(records.actionCard);
+      batchItems.push({
+        ...baseItem,
+        status: "imported",
+        createdSavedItemId: records.savedItem.id,
+        createdActionCardId: records.actionCard.id
+      });
+    } catch (error) {
+      const failed: ImportBatchItem = {
+        ...baseItem,
+        status: "failed",
+        errorMessage: error instanceof Error ? error.message : "Import failed"
+      };
+      batchItems.push(failed);
+      failedItems.push(failed);
+    }
+  }
+
+  const allSavedItems = [...importedSavedItems, ...input.existingSavedItems];
+  const generatedAlbums = await Promise.resolve(aiProvider.generateSmartAlbums({ savedItems: allSavedItems, existingAlbums: input.existingSmartAlbums ?? [], now }));
+  const smartAlbumCandidates = mergeSmartAlbumCandidates(input.existingSmartAlbums ?? [], generatedAlbums);
+  const createdAlbumCount = smartAlbumCandidates.filter((album) => album.status === "candidate").length;
+  const status = pickBatchStatus(importedSavedItems.length, duplicates.length, failedItems.length, input.items.length);
+
+  const batch: ImportBatch = {
+    id: batchId,
+    source: input.source,
+    title: input.title,
+    status,
+    rawCount: input.items.length,
+    importedCount: importedSavedItems.length,
+    duplicateCount: duplicates.length,
+    failedCount: failedItems.length,
+    createdActionCardCount: actionCards.length,
+    createdAlbumCount,
+    errorMessage: failedItems[0]?.errorMessage,
+    createdAt,
+    updatedAt: new Date(now.getTime() + Math.max(1, input.items.length)).toISOString()
+  };
+
+  return {
+    batch,
+    batchItems,
+    importedSavedItems,
+    actionCards,
+    duplicates,
+    failedItems,
+    smartAlbumCandidates
+  };
+}
 export function extensionItemsToImportItems(items: ExtensionScannedItem[]): ImportInputItem[] {
   return items.map((item) => ({
     sourceUrl: item.sourceUrl,

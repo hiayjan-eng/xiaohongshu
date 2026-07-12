@@ -1,6 +1,6 @@
 # Vercel 部署说明
 
-这份文档用于把「收藏复活系统」Web MVP 部署到 Vercel，拿到一个真正公开、方便朋友测试的网址。当前部署内容是 Web MVP，不是 PWA，不是真实 iOS / Android App，也没有接入真实小红书接口、真实 AI、登录或云同步。
+这份文档用于把「收藏复活系统」Web MVP 部署到 Vercel，拿到一个真正公开、方便朋友测试的网址。当前部署内容是 Web MVP，不是 PWA，不是真实 iOS / Android App，也没有接入真实小红书接口、登录或云同步；AI 默认仍是 mock/fallback，真实 AI 需要单独配置服务端环境变量。
 
 ## 为什么部署到 Vercel
 
@@ -12,7 +12,7 @@
 - 包管理器：pnpm monorepo
 - Web app：`apps/web`
 - 数据存储：浏览器 `localStorage`
-- AI：mock / 规则服务
+- AI：默认 mock / 规则服务，可选通过服务端 `/api/ai` 接入 OpenAI-compatible provider
 - 移动端：`apps/mobile` 只是结构和原型预留
 - 当前不包含：真实 App、PWA、登录、数据库、云同步、真实小红书接口、爬虫
 
@@ -38,6 +38,19 @@ Vercel 项目配置请填写：
 - Output Directory: `apps/web/dist`
 
 Root Directory 必须选仓库根目录，因为当前项目是 pnpm monorepo，Web app 在 `apps/web`，但依赖 `packages/*` 里的 workspace 包。如果 Root Directory 误设为 `apps/web`，Vercel 构建时可能找不到 `@revival/ai-service`、`@revival/database` 等本地包。
+## 可选：真实 AI 环境变量
+
+默认不用配置真实 AI，线上也能完整运行 mock/fallback。如果要开启真实 AI，请在 Vercel Project Settings -> Environment Variables 添加服务端变量：
+
+```bash
+AI_PROVIDER=openai-compatible
+AI_API_KEY=
+AI_BASE_URL=https://api.openai.com/v1
+AI_MODEL=<model name>
+AI_TIMEOUT_MS=30000
+```
+
+不要把真实 Key 写进代码、README、`.env.example`、截图或日志。前端不会读取 AI Key，只会调用 `/api/ai`。配置后需要重新部署 Production，再到 `/qa` 点击 `Test /api/ai` 做 smoke test。没有 Key 时真实 AI runtime test 记为 `BLOCKED_REAL_AI_RUNTIME_TEST`。
 
 根目录已经有 `vercel.json`，内容会告诉 Vercel 使用 Vite、正确的构建命令、输出目录和 SPA 路由回退规则。
 
@@ -78,7 +91,7 @@ Root Directory 必须选仓库根目录，因为当前项目是 pnpm monorepo，
 - 同一个朋友换浏览器、换设备后，也不会自动看到之前的数据。
 - 不要输入隐私信息、账号密码、身份证、手机号、私密地址或不想公开的原帖信息。
 - 测试时可以在 `/real-test` 里粘贴 3-5 条真实收藏，完成评价后点击复制试用总结，再发给你。
-- 当前 AI 分类和行动卡是 mock / 规则逻辑，适合验证产品流程和交互价值，不代表最终模型效果。
+- 当前默认 AI 分类和行动卡是 mock / 规则逻辑。配置服务端 `AI_API_KEY` 后可以走真实 provider；没有 Key 时必须继续 fallback，不能白屏。
 
 ## 部署后手动检查
 

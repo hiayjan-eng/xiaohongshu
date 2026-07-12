@@ -65,6 +65,7 @@ export function createImportedRecords(
     title: input.title || aiResult.actionCard.title,
     userNote: input.userNote,
     category: aiResult.category,
+    classificationConfidence: aiResult.confidence,
     intent: aiResult.intent,
     summary: aiResult.summary,
     keywords: aiResult.keywords,

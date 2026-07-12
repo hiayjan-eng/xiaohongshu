@@ -78,7 +78,7 @@ export async function resetDemoData(page: Page) {
 
 export async function importTestNote(page: Page, note = testNote) {
   await page.goto("/import");
-  await expect(page.getByRole("heading", { name: "把旧收藏和新收藏，都放回行动里" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "先导入一条真实收藏" })).toBeVisible();
   await page.getByTestId("import-source-url").fill(note.sourceUrl);
   await page.getByTestId("import-title").fill(note.title);
   await page.getByTestId("import-raw-share-text").fill(note.rawShareText);

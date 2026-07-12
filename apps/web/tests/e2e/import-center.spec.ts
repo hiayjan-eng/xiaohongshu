@@ -15,8 +15,8 @@ test.describe("Import Center architecture", () => {
     await resetDemoData(page);
 
     await page.goto("/import");
-    await expect(page.getByRole("heading", { name: "把旧收藏和新收藏，都放回行动里" })).toBeVisible();
-    await expect(page.getByText("新收藏导入")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "先导入一条真实收藏" })).toBeVisible();
+    await expect(page.getByText("新收藏导入", { exact: true })).toBeVisible();
     await expect(page.getByText("旧收藏扫描 Beta", { exact: true })).toBeVisible();
 
     await page.getByTestId("import-source-url").fill("https://www.xiaohongshu.com/explore/import-center-test");

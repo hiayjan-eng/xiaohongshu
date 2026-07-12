@@ -22,8 +22,8 @@ import {
   Sparkles
 } from "lucide-react";
 import { cloneTasksForCard, createPlansFromActionCards, generateSmartAlbums, PLAN_TYPE_LABELS } from "@revival/action-card-service";
-import { createMockAiProvider, getAiConfigFromEnv, getAiRuntimeStatus, isAiProviderPromise, type AiRuntimeStatus } from "@revival/ai-service";
-import { extensionItemsToImportItems, processImportBatch, type ImportInputItem, type ProcessImportBatchResult } from "@revival/import-service";
+import { createAiClient, type AiRuntimeStatus } from "@revival/ai-service";
+import { extensionItemsToImportItems, processImportBatchAsync, type ImportInputItem, type ProcessImportBatchResult } from "@revival/import-service";
 import {
   createInitialDemoData,
   createSearchLog,
@@ -65,6 +65,7 @@ import {
 
 type ViewKey = "welcome" | "dashboard" | "import" | "old-import" | "search" | "pool" | "detail" | "plans" | "albums" | "insights" | "mobile" | "settings" | "real-test" | "qa";
 type PoolViewMode = "cards" | "table";
+type ImportSuccessResult = { item: SavedItem; card: ActionCard };
 
 const navItems: Array<{ key: ViewKey; label: string; icon: typeof LayoutDashboard }> = [
   { key: "dashboard", label: "今日复活", icon: LayoutDashboard },
@@ -173,6 +174,7 @@ export function App() {
   const [state, setState] = useState<AppState>(() => loadAppState(typeof window === "undefined" ? undefined : window.localStorage));
   const [activeView, setActiveView] = useState<ViewKey>(() => getInitialView());
   const [importInput, setImportInput] = useState<ShareInput>(emptyImport);
+  const [lastImportResult, setLastImportResult] = useState<ImportSuccessResult | null>(null);
   const [isImporting, setIsImporting] = useState(false);
   const [selectedItemId, setSelectedItemId] = useState<string | undefined>(state.savedItems[0]?.id);
   const [globalQuery, setGlobalQuery] = useState("");
@@ -191,7 +193,18 @@ export function App() {
   );
   const [achievementModal, setAchievementModal] = useState<AchievementDisplay | null>(null);
   const [rewardBurstId, setRewardBurstId] = useState(0);
-  const aiStatus = useMemo(() => getAiRuntimeStatus(getAiConfigFromEnv(import.meta.env as Record<string, unknown>)), []);
+  const [aiStatus, setAiStatus] = useState<AiRuntimeStatus>({
+    mode: "mock",
+    providerName: "ServerAIProxy",
+    modelName: "mock-fallback",
+    apiKeyConfigured: false,
+    lastCallStatus: "idle",
+    fallbackActive: true
+  });
+  const aiClient = useMemo(
+    () => createAiClient({ generateSmartAlbums, onStatusChange: setAiStatus }),
+    []
+  );
   const syncStatus = useMemo(() => getSyncRuntimeStatus(import.meta.env as Record<string, unknown>), []);
 
   useEffect(() => {
@@ -318,6 +331,17 @@ export function App() {
     }));
   }
 
+  async function testAiConnection(): Promise<string> {
+    const keywords = await aiClient.generateSearchKeywords({
+      sourceUrl: "",
+      title: "AI connection smoke test",
+      rawShareText: "测试 AI provider、fallback 和关键词生成是否可用",
+      userNote: "QA probe"
+    });
+    const status = aiClient.getStatus();
+    const reason = status.lastError ? ` · ${status.lastError}` : "";
+    return `${status.providerName} · ${status.modelName} · ${status.lastCallStatus}${reason} · keywords: ${keywords.slice(0, 3).join(", ")}`;
+  }
   function handleGlobalSearch(event: FormEvent) {
     event.preventDefault();
     runSearch(globalQuery);
@@ -333,46 +357,61 @@ export function App() {
 
     setIsImporting(true);
     window.setTimeout(() => {
-      const result = runImportPipeline("manual_single", "新收藏导入", [input]);
-      commitImportResult(result);
-      const firstItem = result.importedSavedItems[0];
-      if (firstItem) {
-        setSelectedItemId(firstItem.id);
-        setActiveView("detail");
-      }
-      setImportInput(emptyImport);
-      setIsImporting(false);
-      setToast(result.batch.importedCount > 0 ? "已复活一条收藏" : result.batch.errorMessage || "这条收藏已经在收藏池里了");
+      void runImportPipeline("manual_single", "新收藏导入", [input])
+        .then((result) => {
+          commitImportResult(result);
+          const firstItem = result.importedSavedItems[0];
+          if (firstItem) {
+            const firstCard = result.actionCards.find((card) => card.savedItemId === firstItem.id);
+            setSelectedItemId(firstItem.id);
+            if (firstCard) setLastImportResult({ item: firstItem, card: firstCard });
+            setActiveView("import");
+            window.setTimeout(() => document.getElementById("import-result-panel")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
+          } else {
+            setLastImportResult(null);
+          }
+          setImportInput(emptyImport);
+          setToast(result.batch.importedCount > 0 ? "已复活一条收藏" : result.batch.errorMessage || "这条收藏已经在收藏池里了");
+        })
+        .catch((error) => {
+          setToast(error instanceof Error ? error.message : "导入失败，已保留 mock fallback");
+        })
+        .finally(() => setIsImporting(false));
     }, 420);
   }
 
-  function importExtensionPayload(payload: ExtensionImportPayload) {
+  async function importExtensionPayload(payload: ExtensionImportPayload) {
     const scannedItems = normalizeExtensionItems(payload.items);
     if (scannedItems.length === 0) {
       setToast("没有发现可导入的收藏卡片");
       return;
     }
 
-    const result = runImportPipeline("extension_scan", "旧收藏扫描 Beta", extensionItemsToImportItems(scannedItems));
-    commitImportResult(result);
-    setSelectedItemId(result.importedSavedItems[0]?.id);
-    setActiveView("old-import");
-    setToast(
-      result.batch.importedCount > 0
-        ? `旧收藏扫描完成：导入 ${result.batch.importedCount} 条，重复 ${result.batch.duplicateCount} 条，生成 ${result.batch.createdAlbumCount} 个专辑候选`
-        : "这些扫描结果已经在收藏池里了"
-    );
+    try {
+      const result = await runImportPipeline("extension_scan", "旧收藏扫描 Beta", extensionItemsToImportItems(scannedItems));
+      commitImportResult(result);
+      setSelectedItemId(result.importedSavedItems[0]?.id);
+      setActiveView("old-import");
+      setToast(
+        result.batch.importedCount > 0
+          ? `旧收藏扫描完成：导入 ${result.batch.importedCount} 条，重复 ${result.batch.duplicateCount} 条，生成 ${result.batch.createdAlbumCount} 个专辑候选`
+          : "这些扫描结果已经在收藏池里了"
+      );
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "旧收藏导入失败，已保留当前数据");
+    }
   }
 
-  function runImportPipeline(source: ImportSource, title: string, items: ImportInputItem[]): ProcessImportBatchResult {
-    return processImportBatch({
+  function runImportPipeline(source: ImportSource, title: string, items: ImportInputItem[]): Promise<ProcessImportBatchResult> {
+    return processImportBatchAsync({
       source,
       title,
       items,
       userId: state.user.id,
       existingSavedItems: state.savedItems,
       existingActionCards: state.actionCards,
-      existingSmartAlbums: smartAlbums
+      existingSmartAlbums: smartAlbums,
+      aiProvider: aiClient
     });
   }
 
@@ -388,6 +427,11 @@ export function App() {
         importBatchItems: [...result.batchItems, ...(current.importBatchItems ?? [])]
       };
     });
+  }
+  function continueImport() {
+    setImportInput(emptyImport);
+    setActiveView("import");
+    window.setTimeout(() => document.getElementById("single-import-panel")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
   }
   function unlockAchievements(ids: AchievementId[]) {
     const now = new Date().toISOString();
@@ -457,7 +501,7 @@ export function App() {
     }));
   }
 
-  function regenerateActionCard(itemId: string) {
+  async function regenerateActionCard(itemId: string) {
     const item = state.savedItems.find((entry) => entry.id === itemId);
     const card = state.actionCards.find((entry) => entry.savedItemId === itemId);
     if (!item || !card) {
@@ -465,18 +509,13 @@ export function App() {
       return;
     }
 
-    const provider = createMockAiProvider({ generateSmartAlbums });
-    const result = provider.classifyAndGenerateActionCard({
+    setToast("正在重新生成行动卡...");
+    const result = await aiClient.classifyAndGenerateActionCard({
       sourceUrl: item.sourceUrl,
       title: item.title,
       rawShareText: item.rawShareText,
       userNote: item.userNote
     });
-
-    if (isAiProviderPromise(result)) {
-      setToast("Async AI regeneration is not enabled yet; mock fallback remains active");
-      return;
-    }
 
     const now = new Date().toISOString();
     setState((current) => ({
@@ -486,6 +525,7 @@ export function App() {
           ? {
               ...entry,
               category: result.category,
+              classificationConfidence: result.confidence,
               intent: result.intent,
               summary: result.summary,
               keywords: result.keywords,
@@ -512,15 +552,17 @@ export function App() {
           : entry
       )
     }));
-    setToast("Action card regenerated with mock AI fallback");
+    setToast(aiClient.getStatus().fallbackActive ? "行动卡已用 mock fallback 重新生成" : "行动卡已用真实 AI 重新生成");
   }
 
-  function regenerateSmartAlbums() {
+  async function regenerateSmartAlbums() {
+    setToast("正在重新整理智能专辑...");
+    const generatedAlbums = await aiClient.generateSmartAlbums({ savedItems: state.savedItems, existingAlbums: smartAlbums, now: new Date() });
     setState((current) => ({
       ...current,
-      smartAlbums: mergeGeneratedSmartAlbums(current.smartAlbums ?? [], current.savedItems)
+      smartAlbums: mergeSmartAlbums(current.smartAlbums ?? [], generatedAlbums)
     }));
-    setToast("Smart album candidates regenerated with mock AI fallback");
+    setToast(aiClient.getStatus().fallbackActive ? "智能专辑已用 mock fallback 重新生成" : "智能专辑已用真实 AI 重新生成");
   }
 
   function updateTaskStatus(cardId: string, taskId: string, status: ItemStatus) {
@@ -754,6 +796,11 @@ export function App() {
               isImporting={isImporting}
               importBatches={importBatches}
               setActiveView={setActiveView}
+              lastImportResult={lastImportResult}
+              aiStatus={aiStatus}
+              changeStatus={changeStatus}
+              viewActionCard={viewActionCard}
+              onContinueImport={continueImport}
             />
           )}
 
@@ -808,6 +855,8 @@ export function App() {
               updateCardField={updateCardField}
               updateTaskStatus={updateTaskStatus}
               regenerateActionCard={regenerateActionCard}
+              setActiveView={setActiveView}
+              onContinueImport={continueImport}
             />
           )}
 
@@ -877,6 +926,7 @@ export function App() {
               savedItems={state.savedItems}
               actionCards={state.actionCards}
               onCreateRecords={addRealTestImportedRecords}
+              classifyShareInput={(input) => Promise.resolve(aiClient.classifyAndGenerateActionCard(input))}
               openSource={openSource}
               viewActionCard={viewActionCard}
               setToast={setToast}
@@ -894,6 +944,7 @@ export function App() {
               resetDemoData={resetDemoData}
               importDemoData={importDemoData}
               runSearch={runSearch}
+              testAiConnection={testAiConnection}
               openSource={openSource}
               viewActionCard={viewActionCard}
               onOpenRealTest={() => setActiveView("real-test")}
@@ -1148,41 +1199,54 @@ function ImportView(props: {
   isImporting: boolean;
   importBatches: ImportBatch[];
   setActiveView: (view: ViewKey) => void;
+  lastImportResult: ImportSuccessResult | null;
+  aiStatus: AiRuntimeStatus;
+  changeStatus: (itemId: string, status: ItemStatus) => void;
+  viewActionCard: (itemId: string) => void;
+  onContinueImport: () => void;
 }) {
-  const methods = [
+  const usingMock = props.aiStatus.mode === "mock" || props.aiStatus.fallbackActive;
+  const methods: Array<{ title: string; description: string; action: string; secondaryAction?: string; status: string; primary: boolean; onClick?: () => void; onSecondaryClick?: () => void }> = [
     {
       title: "新收藏导入",
-      description: "适合你刚刚看到、想马上保存的一条内容。",
+      description: "如果你是第一次测试，先导入一条真实收藏。只要有链接，再补一个标题或分享文案，就能生成行动卡。",
       action: "复活一条新收藏",
-      status: "已支持",
+      status: "主入口",
+      primary: true,
       onClick: () => document.getElementById("single-import-panel")?.scrollIntoView({ behavior: "smooth", block: "start" })
     },
     {
       title: "旧收藏扫描 Beta",
-      description: "适合从小红书网页版收藏夹里导入已经加载出来的旧收藏。",
-      action: "查看扫描说明",
-      status: "Beta",
-      onClick: () => props.setActiveView("old-import")
+      description: "高级测试功能，需要先安装本地浏览器扩展 Beta。普通朋友测试可以先跳过。",
+      action: "我已安装扩展，去旧收藏扫描页",
+      secondaryAction: "查看扩展安装说明",
+      status: "高级测试功能",
+      primary: false,
+      onClick: () => props.setActiveView("old-import"),
+      onSecondaryClick: () => props.setActiveView("old-import")
     },
     {
       title: "批量链接导入",
       description: "一次粘贴多条链接，系统自动拆分、去重、分类。",
       action: "Coming soon",
-      status: "预留",
+      status: "Coming soon",
+      primary: false,
       onClick: undefined
     },
     {
       title: "浏览器书签导入",
       description: "后续支持 Chrome / Edge 书签导入，把网页收藏整理成行动卡。",
       action: "Coming soon",
-      status: "预留",
+      status: "Coming soon",
+      primary: false,
       onClick: undefined
     },
     {
       title: "手机分享入口",
       description: "未来在手机小红书里点击分享，选择收藏复活 App。",
-      action: "App 阶段支持",
-      status: "预留",
+      action: "Coming soon",
+      status: "Coming soon",
+      primary: false,
       onClick: undefined
     }
   ];
@@ -1192,10 +1256,36 @@ function ImportView(props: {
       <div className="page-title-row airy-title">
         <div>
           <p className="eyebrow">导入中心</p>
-          <h1>把旧收藏和新收藏，都放回行动里</h1>
+          <h1>先导入一条真实收藏</h1>
         </div>
-        <p className="page-lead">不管它来自小红书、浏览器收藏、批量链接，还是未来手机分享入口，系统都会先整理、去重、分类，再变成行动卡和智能专辑。</p>
+        <p className="page-lead">朋友测试建议从新收藏导入开始：导入一条收藏，看行动卡是否具体，再去智能专辑和搜索里验证能不能找回原帖。</p>
       </div>
+
+      {props.lastImportResult && (
+        <section id="import-result-panel" className="tool-panel single import-success-panel" data-testid="import-success-panel">
+          <div className="section-heading-soft">
+            <span><CheckCircle2 size={18} /> 已复活一条收藏</span>
+            <small>{props.lastImportResult.item.category} · {props.lastImportResult.card.estimatedTime}</small>
+          </div>
+          <div className="import-success-body">
+            <strong>{props.lastImportResult.card.title}</strong>
+            <p>{props.lastImportResult.card.nextAction}</p>
+            {props.lastImportResult.item.classificationConfidence === "low" && (
+              <p className="quiet-copy">这条收藏信息较少，分类可能不准，可以补充一句备注后重新生成。</p>
+            )}
+            {usingMock && (
+              <p className="quiet-copy">当前使用：本地规则 / Mock AI。生成质量可能有限，配置真实 AI 后分类和行动卡会更具体。</p>
+            )}
+          </div>
+          <div className="card-actions">
+            <button className="primary-button" onClick={props.onContinueImport} data-testid="continue-import">继续导入一条</button>
+            <button className="secondary-action" onClick={() => props.setActiveView("import")}>回到导入中心</button>
+            <button className="secondary-action" onClick={() => props.setActiveView("albums")}>查看智能专辑</button>
+            <button className="secondary-action" onClick={() => props.changeStatus(props.lastImportResult!.item.id, "today")}>加入今日复活</button>
+            <button className="ghost-action" onClick={() => props.viewActionCard(props.lastImportResult!.item.id)}>查看行动卡</button>
+          </div>
+        </section>
+      )}
 
       <div className="import-method-grid">
         {methods.map((method) => (
@@ -1203,12 +1293,24 @@ function ImportView(props: {
             <span>{method.status}</span>
             <strong>{method.title}</strong>
             <p>{method.description}</p>
-            <button className={method.onClick ? "primary-button" : "secondary-action"} onClick={method.onClick} disabled={!method.onClick}>
+            <button className={method.primary ? "primary-button" : "secondary-action"} onClick={method.onClick} disabled={!method.onClick}>
               {method.action}
             </button>
+            {method.secondaryAction && (
+              <button className="ghost-action" onClick={method.onSecondaryClick}>{method.secondaryAction}</button>
+            )}
           </article>
         ))}
       </div>
+
+      <section id="single-import-panel" className="tool-panel single revive-panel import-page-panel">
+        <div className="section-heading-soft">
+          <span><Share2 size={18} /> 复活一条新收藏</span>
+          <small>第一次测试，先从这里开始</small>
+        </div>
+        {usingMock && <p className="quiet-copy">当前使用：本地规则 / Mock AI。它能跑通流程，但真实 AI 会让分类和行动卡更贴近原帖主题。</p>}
+        <QuickImportForm input={props.importInput} setInput={props.setImportInput} onSubmit={props.handleImport} isLoading={props.isImporting} />
+      </section>
 
       <section className="tool-panel single import-batches-panel">
         <PanelHeader icon={<Clock3 size={18} />} title="最近导入记录" meta={`${props.importBatches.length} 批`} />
@@ -1228,21 +1330,12 @@ function ImportView(props: {
               <button onClick={() => props.setActiveView(batch.source === "extension_scan" ? "old-import" : "albums")}>查看详情</button>
             </article>
           ))}
-          {props.importBatches.length === 0 && <EmptyState title="还没有导入记录" text="先复活一条新收藏，或者用旧收藏扫描 Beta 导入一批已加载收藏。" />}
+          {props.importBatches.length === 0 && <EmptyState title="还没有导入记录" text="先导入一条真实收藏；旧收藏扫描需要本地扩展 Beta，普通朋友测试可以先跳过。" />}
         </div>
-      </section>
-
-      <section id="single-import-panel" className="tool-panel single revive-panel import-page-panel">
-        <div className="section-heading-soft">
-          <span><Share2 size={18} /> 复活一条新收藏</span>
-          <small>走统一 ImportBatch 管线</small>
-        </div>
-        <QuickImportForm input={props.importInput} setInput={props.setImportInput} onSubmit={props.handleImport} isLoading={props.isImporting} />
       </section>
     </>
   );
 }
-
 function OldImportView(props: {
   latestBatch?: ImportBatch;
   batchItems: ImportBatchItem[];
@@ -1255,20 +1348,44 @@ function OldImportView(props: {
     <>
       <div className="page-title-row airy-title">
         <div>
-          <p className="eyebrow">旧收藏扫描 Beta</p>
+          <p className="eyebrow">旧收藏扫描 Beta · 高级测试功能</p>
           <h1>把旧收藏先整理成专辑</h1>
         </div>
-        <p className="page-lead">当前版本通过 Chrome / Edge 扩展，在你本人主动点击后读取小红书网页版当前已加载的收藏卡片。它不会登录账号、不会绕过验证码，也不承诺完整扫描全部历史收藏。</p>
+        <p className="page-lead">当前功能需要先安装本地浏览器扩展 Beta。它不是 Chrome / Edge 商店正式扩展，普通测试用户可以先不用这个功能，直接从新收藏导入开始。</p>
       </div>
 
-      <section className="extension-import-guide">
+      <section className="extension-import-guide" data-testid="old-import-extension-warning">
         <div>
-          <span><Sparkles size={18} /> 如何扫描</span>
-          <strong>打开你自己的小红书网页版收藏夹，点击浏览器扩展“旧收藏扫描 Beta”，确认列表后导入。</strong>
-          <small>导入后会先生成 ImportBatch，再生成行动卡和智能专辑候选。第一版只处理当前页面已加载 DOM 中的标题、链接、封面地址和可见短文本。</small>
+          <span><Sparkles size={18} /> 需要本地扩展 Beta</span>
+          <strong>这个页面只接收浏览器扩展传来的扫描结果，网页本身不会读取你的小红书收藏夹。</strong>
+          <small>扩展只在你本人登录的小红书网页版、你主动点击扫描后，读取当前已加载 DOM 中的标题、链接、封面地址和可见短文本。不做云端爬虫，不模拟登录，不绕过验证码。</small>
         </div>
         <code>apps/extension</code>
       </section>
+
+      <section className="tool-panel single">
+        <div className="section-heading-soft">
+          <span><ClipboardList size={18} /> 扩展 Beta 安装步骤</span>
+          <small>只适合愿意安装本地 unpacked 扩展的高级测试者</small>
+        </div>
+        <details className="quiet-copy" open>
+          <summary>查看安装说明</summary>
+          <ol>
+            <li>下载或找到项目里的 apps/extension 构建包。</li>
+            <li>打开 Chrome / Edge 扩展管理页。</li>
+            <li>开启开发者模式。</li>
+            <li>选择“加载已解压扩展”，加载扩展目录。</li>
+            <li>打开本人小红书网页版收藏夹。</li>
+            <li>点击扩展扫描，确认待导入清单后再导入收藏复活。</li>
+          </ol>
+        </details>
+      </section>
+
+      <div className="old-import-actions">
+        <button className="primary-button" onClick={() => props.setActiveView("import")}>没有扩展？先用新收藏导入测试</button>
+        <button className="secondary-action" onClick={() => props.setActiveView("albums")}>查看智能专辑</button>
+        <button className="secondary-action" onClick={() => props.recommendations.slice(0, 3).forEach((entry) => props.changeStatus(entry.item.id, "today"))}>今日先复活 3 条</button>
+      </div>
 
       <section className="qa-grid">
         <Metric label="扫描数量" value={(props.latestBatch?.rawCount ?? 0).toString()} />
@@ -1277,12 +1394,6 @@ function OldImportView(props: {
         <Metric label="失败" value={(props.latestBatch?.failedCount ?? 0).toString()} />
         <Metric label="生成专辑" value={(props.latestBatch?.createdAlbumCount ?? 0).toString()} />
       </section>
-
-      <div className="old-import-actions">
-        <button className="primary-button" onClick={() => props.setActiveView("albums")}>查看智能专辑</button>
-        <button className="secondary-action" onClick={() => props.recommendations.slice(0, 3).forEach((entry) => props.changeStatus(entry.item.id, "today"))}>今日先复活 3 条</button>
-        <button className="secondary-action" onClick={() => props.setActiveView("import")}>返回导入中心</button>
-      </div>
 
       <section className="tool-panel single import-batches-panel">
         <PanelHeader icon={<List size={18} />} title="最近一次扫描明细" meta={props.latestBatch ? IMPORT_STATUS_LABELS[props.latestBatch.status] : "暂无"} />
@@ -1297,13 +1408,12 @@ function OldImportView(props: {
               {item.createdSavedItemId && <button onClick={() => props.setActiveView("albums")}>看专辑</button>}
             </article>
           ))}
-          {!props.latestBatch && <EmptyState title="还没有旧收藏扫描记录" text="先加载 apps/extension 扩展，在小红书网页版收藏夹里扫描并导入。" />}
+          {!props.latestBatch && <EmptyState title="还没有旧收藏扫描记录" text="如果没有安装本地扩展 Beta，可以先回到导入中心，手动导入一条真实收藏测试完整闭环。" />}
         </div>
       </section>
     </>
   );
-}
-function SearchView(props: {
+}function SearchView(props: {
   query: string;
   results: SearchResult[];
   runSearch: (query: string) => void;
@@ -1484,6 +1594,8 @@ function DetailView(props: {
   updateCardField: (cardId: string, field: "title" | "goal" | "nextAction", value: string) => void;
   updateTaskStatus: (cardId: string, taskId: string, status: ItemStatus) => void;
   regenerateActionCard: (itemId: string) => void;
+  setActiveView: (view: ViewKey) => void;
+  onContinueImport: () => void;
 }) {
   return (
     <>
@@ -1492,12 +1604,16 @@ function DetailView(props: {
           <p className="eyebrow">{props.item.category} · {DISPLAY_STATUS_LABELS[props.item.status]}</p>
           <input className="detail-title-input" value={props.card.title} onChange={(event) => props.updateCardField(props.card.id, "title", event.target.value)} />
           <p>{props.item.summary}</p>
+          {props.item.classificationConfidence === "low" && <p className="quiet-copy">这条收藏信息较少，分类可能不准，可以补充一句备注后重新生成。</p>}
         </div>
         <div className="detail-actions">
           <button className="primary-button" onClick={() => props.changeStatus(props.item.id, "today")} data-testid="add-to-today">
             <CalendarCheck size={17} />
             加入今日
           </button>
+          <button className="secondary-action" onClick={props.onContinueImport} data-testid="detail-continue-import">继续导入一条</button>
+          <button className="secondary-action" onClick={() => props.setActiveView("import")}>回到导入中心</button>
+          <button className="secondary-action" onClick={() => props.setActiveView("albums")}>查看智能专辑</button>
           <button className="secondary-action" onClick={() => props.regenerateActionCard(props.item.id)}>Regenerate</button>
           <button className="icon-text-button" onClick={() => props.openSource(props.item)} data-testid="detail-open-source">
             <ExternalLink size={17} />
@@ -2006,6 +2122,9 @@ function SettingsView(props: {
           <span>Fallback</span>
           <strong>{props.aiStatus.fallbackActive ? "Mock fallback ready" : "Not active"}</strong>
         </div>
+        {(props.aiStatus.mode === "mock" || props.aiStatus.fallbackActive) && (
+          <p className="quiet-copy">当前使用：本地规则 / Mock AI。产品闭环可以正常测试，但配置真实 AI 后，分类和行动卡会更具体。</p>
+        )}
       </section>
 
       <section className="tool-panel single settings-list" data-testid="sync-status-panel">
@@ -2066,10 +2185,12 @@ function QaView(props: {
   resetDemoData: () => void;
   importDemoData: () => void;
   runSearch: (query: string) => void;
+  testAiConnection: () => Promise<string>;
   openSource: (item: SavedItem, origin?: OpenSourceOrigin) => void;
   viewActionCard: (itemId: string) => void;
   onOpenRealTest: () => void;
 }) {
+  const [aiProbeResult, setAiProbeResult] = useState("");
   const [qaQuery, setQaQuery] = useState("剪辑");
   const qaResults = useMemo(
     () => searchSavedItems(qaQuery, props.state.savedItems, props.state.actionCards).slice(0, 6),
@@ -2101,6 +2222,26 @@ function QaView(props: {
         <Metric label="Sync" value={props.syncStatus.mode === "local" ? "Local" : "Supabase"} />
       </section>
 
+      <section className="tool-panel single qa-panel" data-testid="qa-ai-panel">
+        <PanelHeader icon={<Sparkles size={18} />} title="AI provider probe" meta={props.aiStatus.lastCallStatus} />
+        <div className="qa-status-list">
+          <span>provider：<strong>{props.aiStatus.providerName}</strong></span>
+          <span>model：<strong>{props.aiStatus.modelName}</strong></span>
+          <span>fallback：<strong>{props.aiStatus.fallbackActive ? "active" : "not active"}</strong></span>
+          <span>key：<strong>{props.aiStatus.apiKeyConfigured ? "server configured" : "not configured / mock"}</strong></span>
+        </div>
+        <div className="qa-actions">
+          <button
+            onClick={() => {
+              setAiProbeResult("Testing /api/ai...");
+              void props.testAiConnection().then(setAiProbeResult).catch((error) => setAiProbeResult(error instanceof Error ? error.message : "AI probe failed"));
+            }}
+          >
+            Test /api/ai
+          </button>
+          <span>{aiProbeResult || props.aiStatus.lastError || "No AI request has been made in this session."}</span>
+        </div>
+      </section>
       <section className="tool-panel single qa-panel" data-testid="qa-friend-test-reminder">
         <PanelHeader icon={<ClipboardList size={18} />} title="线上朋友测试提醒" meta="Web MVP" />
         <div className="qa-status-list">
@@ -2168,6 +2309,7 @@ function QuickImportForm(props: {
   isLoading?: boolean;
 }) {
   const update = (field: keyof ShareInput, value: string) => props.setInput({ ...props.input, [field]: value });
+  const onlyUrlProvided = Boolean(props.input.sourceUrl.trim()) && !props.input.title.trim() && !props.input.rawShareText.trim() && !props.input.userNote.trim();
 
   return (
     <form className={props.compact ? "quick-import compact" : "quick-import"} onSubmit={props.onSubmit} data-testid="quick-import-form">
@@ -2191,6 +2333,7 @@ function QuickImportForm(props: {
         {props.isLoading ? <span className="loading-dot" aria-hidden="true" /> : <Import size={17} />}
         {props.isLoading ? "正在把收藏变成行动卡..." : "生成行动卡"}
       </button>
+      {onlyUrlProvided && <p className="import-hint">只有链接时系统理解会比较弱，建议补一句你为什么收藏它。</p>}
       <p className="import-hint">第一版用模拟分享导入，后续会接入手机系统分享入口。</p>
     </form>
   );
@@ -2573,6 +2716,27 @@ function normalizeExtensionItems(items: ExtensionScannedItem[]): ExtensionScanne
     .slice(0, 80);
 }
 
+function mergeSmartAlbums(existingAlbums: SmartAlbum[], generatedAlbums: SmartAlbum[]): SmartAlbum[] {
+  const generatedById = new Map(generatedAlbums.map((album) => [album.id, album]));
+  const merged = generatedAlbums.map((album) => {
+    const existing = existingAlbums.find((entry) => entry.id === album.id);
+    if (!existing) return album;
+    return {
+      ...album,
+      title: existing.title,
+      description: existing.description || album.description,
+      status: existing.status,
+      createdAt: existing.createdAt,
+      updatedAt: album.updatedAt
+    };
+  });
+
+  existingAlbums
+    .filter((album) => album.status === "archived" && !generatedById.has(album.id))
+    .forEach((album) => merged.push(album));
+
+  return merged.sort((a, b) => b.priority - a.priority || b.savedItemIds.length - a.savedItemIds.length);
+}
 function mergeGeneratedSmartAlbums(existingAlbums: SmartAlbum[], savedItems: SavedItem[]): SmartAlbum[] {
   const existingById = new Map(existingAlbums.map((album) => [album.id, album]));
   const generated = generateSmartAlbums(savedItems);

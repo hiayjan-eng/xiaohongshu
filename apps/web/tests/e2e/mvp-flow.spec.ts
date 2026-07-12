@@ -4,7 +4,7 @@ import { collectConsoleErrors, expectNoConsoleErrors, importTestNote, readAppSta
 const pages = [
   { path: "/", heading: "别让收藏夹替你努力" },
   { path: "/dashboard", heading: "今天，从一条收藏开始" },
-  { path: "/import", heading: "把旧收藏和新收藏，都放回行动里" },
+  { path: "/import", heading: "先导入一条真实收藏" },
   { path: "/albums", heading: "智能专辑" },
   { path: "/old-import", heading: "把旧收藏先整理成专辑" },
   { path: "/search", heading: "找回你收藏过的那一条" },

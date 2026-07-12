@@ -12,11 +12,21 @@ export const PLAN_TYPE_LABELS: Record<PlanType, string> = {
 
 const categoryPlanType: Record<Category, PlanType> = {
   技能学习: "learning",
+  内容创作: "creative",
+  小红书运营: "creative",
+  AI工具: "workflow",
+  职场学习: "learning",
   旅行地点: "travel",
   美食探店: "travel",
   菜谱做饭: "recipe",
   穿搭变美: "life",
+  购物参考: "life",
   家居生活: "life",
+  生活方式: "life",
+  情绪成长: "life",
+  亲密关系: "life",
+  健身运动: "life",
+  读书学习: "learning",
   工作效率: "workflow",
   灵感素材: "creative",
   其他: "mixed"

@@ -143,29 +143,29 @@ This uses Node `fetch` to verify `/`, `/dashboard`, `/import`, `/albums`, `/old-
 Current GitHub sync note: local `main` may be ahead of `origin/main` if this environment cannot reach GitHub. When connectivity is restored, run `git push origin main`. A recovery bundle can be generated under `release-artifacts/` for handoff.
 ## AI provider configuration
 
-The default AI mode is still mock/local rules. Do not commit real API keys.
+默认模式仍然是 mock/local rules，不需要网络，也不需要 API Key。真实 AI 现在通过服务端 `/api/ai` 代理接入：前端只调用自己的后端接口，真实 Key 只能放在 Vercel Environment Variables 或本地服务端 `.env.local` 中，不能放进任何会进入浏览器 bundle 的变量名里。
 
-Copy `.env.example` to `.env.local` for local experiments:
+`.env.example` 只保留空模板：
 
 ```bash
-VITE_AI_PROVIDER=mock
-VITE_AI_API_KEY=
-VITE_AI_BASE_URL=
-VITE_AI_MODEL=
+AI_PROVIDER=mock
+AI_API_KEY=
+AI_BASE_URL=https://api.openai.com/v1
+AI_MODEL=
+AI_TIMEOUT_MS=30000
 ```
 
-Supported planned values:
+支持的模式：
 
-- `VITE_AI_PROVIDER=mock`: default local mock provider, no network and no key.
-- `VITE_AI_PROVIDER=openai-compatible`: OpenAI-compatible chat completions provider. Requires `VITE_AI_API_KEY`; without it, the app must fall back to mock.
+- `AI_PROVIDER=mock`：默认本地 mock provider，不发起真实模型请求。
+- `AI_PROVIDER=openai-compatible`：服务端 OpenAI-compatible chat completions provider，需要在服务端配置 `AI_API_KEY`。
 
-For Vercel, configure environment variables in Project Settings. Never commit `.env` or real secrets.
-
+如果没有 Key、接口超时、返回 JSON 不合法，Web 端会继续 fallback 到 mock，导入、搜索、智能专辑和真实试用页不能白屏。详细配置见 `docs/AI_PROVIDER_SETUP.md` 和 `docs/AI_PROVIDER_AND_PROMPTS.md`。
 ## Phase 2/3 架构状态
 
 当前版本已经把 AI 和存储的下一阶段接入点拆出来，但默认仍然是稳定的本地 Web MVP。
 
-- AI：`packages/ai-service` 提供 `AiProvider`、`MockAiProvider` 和 OpenAI-compatible provider 链路。没有 `VITE_AI_API_KEY` 时继续使用 mock fallback，不消耗网络请求。
+- AI：`packages/ai-service` 提供 `AiProvider`、`MockAiProvider` 和 OpenAI-compatible provider 链路。没有服务端 `AI_API_KEY` 时继续使用 mock fallback，不消耗网络请求。
 - Prompt：统一放在 `packages/ai-service/src/prompts.ts`，边界是只生成私人摘要、行动建议和搜索索引，不复制小红书原帖全文。
 - 同步：`packages/storage-service` 覆盖 SavedItem、ActionCard、ImportBatch、SmartAlbum、Task、Plan、Achievement、SearchLog、RealUserTestRecord。默认 localStorage；Supabase adapter 需要项目 URL、anon key、Auth 和 RLS 验证后才能启用。
 - 设置页：现在会显示 AI 状态和同步状态，避免把 mock/localStorage 误认为真实云端能力。
