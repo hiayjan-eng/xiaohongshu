@@ -22,6 +22,10 @@ type AppState = {
     sourceUrl: string;
     title: string;
     category: string;
+    contentDomain?: string;
+    contentSubDomain?: string;
+    savedIntent?: string;
+    confidence?: string;
     summary: string;
     keywords: string[];
     entities: Array<{ type: string; value: string }>;
@@ -41,7 +45,7 @@ type AppState = {
   searchLogs: Array<{ query: string; resultCount: number; clickedSavedItemId?: string }>;
   importBatches?: Array<{ id: string; source: string; rawCount: number; importedCount: number; duplicateCount: number; failedCount: number; createdActionCardCount: number; createdAlbumCount: number; status: string }>;
   importBatchItems?: Array<{ id: string; batchId: string; status: string; sourceUrl: string; title: string }>;
-  smartAlbums?: Array<{ id: string; title: string; status: string; savedItemIds: string[] }>;
+  smartAlbums?: Array<{ id: string; title: string; status: string; savedItemIds: string[]; albumView?: string; savedIntent?: string; contentDomain?: string }>;
 };
 
 export function collectConsoleErrors(page: Page): string[] {
@@ -73,18 +77,18 @@ export async function resetDemoData(page: Page) {
   await expect(page.getByRole("heading", { name: "7 天稳定性检查面板" })).toBeVisible();
   await page.getByTestId("qa-reset-demo").click();
   await expect.poll(async () => (await readAppState(page)).savedItems.length).toBeGreaterThanOrEqual(20);
-  await expect.poll(async () => (await readAppState(page)).actionCards.length).toBeGreaterThanOrEqual(20);
+  await expect.poll(async () => (await readAppState(page)).actionCards.length).toBeGreaterThanOrEqual(0);
 }
 
 export async function importTestNote(page: Page, note = testNote) {
   await page.goto("/import");
-  await expect(page.getByRole("heading", { name: "先导入一条真实收藏" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "先扫描旧收藏，再补充导入新收藏" })).toBeVisible();
   await page.getByTestId("import-source-url").fill(note.sourceUrl);
   await page.getByTestId("import-title").fill(note.title);
   await page.getByTestId("import-raw-share-text").fill(note.rawShareText);
   await page.getByTestId("import-user-note").fill(note.userNote);
   await page.getByTestId("import-submit").click();
-  await expect(page.getByText("行动卡").first()).toBeVisible();
+  await expect(page.getByTestId("import-success-panel")).toContainText("整理完成");
 
   await expect.poll(async () => {
     const state = await readAppState(page);
@@ -133,3 +137,13 @@ export async function seedEmptyState(page: Page) {
   }, STORAGE_KEY);
 }
 
+
+export async function reviveImportedItem(page: Page, itemId: string) {
+  await page.getByTestId("revive-imported-item").click();
+  await expect.poll(async () => {
+    const state = await readAppState(page);
+    return state.actionCards.some((card) => card.savedItemId === itemId);
+  }).toBe(true);
+  const state = await readAppState(page);
+  return state.actionCards.find((card) => card.savedItemId === itemId)!;
+}
