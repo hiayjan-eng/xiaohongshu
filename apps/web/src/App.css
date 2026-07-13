@@ -5240,3 +5240,48 @@ select,
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+.extension-connection-card {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid color-mix(in srgb, var(--color-warning) 28%, var(--color-border));
+  background: color-mix(in srgb, var(--color-accent-soft) 72%, var(--color-surface));
+  color: var(--color-text);
+}
+
+.extension-connection-card strong {
+  font-size: 16px;
+}
+
+.extension-connection-card span {
+  color: var(--color-muted);
+  line-height: 1.65;
+}
+
+.extension-connection-card.connected {
+  border-color: color-mix(in srgb, var(--color-success) 36%, var(--color-border));
+  background: color-mix(in srgb, var(--color-surface-soft) 76%, var(--color-surface));
+}
+
+.install-steps {
+  display: grid;
+  gap: 10px;
+  margin: 16px 0 0;
+  padding-left: 20px;
+  color: var(--color-text);
+}
+
+.install-steps li {
+  padding-left: 4px;
+  line-height: 1.7;
+}
+
+.install-steps strong,
+.install-steps span {
+  display: block;
+}
+
+.install-steps span {
+  color: var(--color-muted);
+}
