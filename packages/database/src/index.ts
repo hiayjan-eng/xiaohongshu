@@ -509,7 +509,7 @@ function inferSubCategoryFromInput(input: ShareInput, category: Category): strin
     if (/prompt|提示词|多角色|圆桌|Jung|Mankiw|Munger|Musk/i.test(text)) return "Prompt 工程";
     if (/决策|战略|工作安排|时间分配/.test(text)) return "决策辅助";
     if (/工作流|自动化|SOP/.test(text)) return "自动化工作流";
-    return "AI工具";
+    return "AI 工具";
   }
   if (category === "情绪与关系") return /关系|亲密|表达|需求/.test(text) ? "亲密关系" : "自我观察";
   if (category === "工作与职业") {
