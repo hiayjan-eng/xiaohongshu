@@ -71,7 +71,7 @@ import {
 
 type ViewKey = "welcome" | "dashboard" | "import" | "old-import" | "search" | "pool" | "detail" | "plans" | "albums" | "insights" | "mobile" | "settings" | "real-test" | "qa";
 
-const EXTENSION_BETA_VERSION = "0.2.1";
+const EXTENSION_BETA_VERSION = "0.2.2";
 const EXTENSION_ZIP_FILE_NAME = `collection-revival-extension-beta-v${EXTENSION_BETA_VERSION}.zip`;
 const EXTENSION_PROTOCOL_VERSION = "collection-revival-web-bridge-v1";
 const EXTENSION_WEB_SOURCE = "collection-revival-web";
@@ -1546,9 +1546,33 @@ function OldImportView(props: {
     failureReason?: ExtensionFailureReason;
     message: string;
   };
+  type ExtensionScanState = {
+    status?: "idle" | "scanning" | "paused" | "completed" | "error";
+    stage?: string;
+    mode?: "limit" | "all";
+    limit?: number | null;
+    batch?: number;
+    lastAdded?: number;
+    noNewRounds?: number;
+    duplicateCount?: number;
+    missingLinkCount?: number;
+    missingTitleCount?: number;
+    totalFound?: number;
+    selectedCount?: number;
+    items?: unknown[];
+    message?: string;
+    pageUrl?: string;
+    updatedAt?: string;
+    error?: string;
+    milestones?: string[];
+    selectorVersion?: string;
+  };
   const handshakeRequestRef = useRef("");
   const timeoutRef = useRef<number | undefined>(undefined);
+  const retryTimersRef = useRef<number[]>([]);
   const [selectedGuide, setSelectedGuide] = useState<"chrome" | "edge">("chrome");
+  const [scanState, setScanState] = useState<ExtensionScanState | undefined>();
+  const [syncState, setSyncState] = useState<"idle" | "restoring" | "syncing" | "synced" | "failed">("idle");
   const [extensionStatus, setExtensionStatus] = useState<ExtensionStatus>({
     connected: false,
     checked: false,
@@ -1582,7 +1606,7 @@ function OldImportView(props: {
       requestId,
       lastCheckedAt: new Date().toLocaleString(),
       failureReason: undefined,
-      message: "正在检测扩展连接。v0.2.1 会返回带 requestId 的 PONG。"
+      message: "正在检测扩展连接。v0.2.2 会返回带 requestId 的 PONG。"
     }));
     timeoutRef.current = window.setTimeout(() => {
       setExtensionStatus((current) => current.pongReceived
@@ -1598,6 +1622,35 @@ function OldImportView(props: {
           }
       );
     }, 3000);
+  }
+
+  function requestScanStatus(requestId = `scan-status-${Date.now()}`) {
+    setSyncState("syncing");
+    window.postMessage({
+      source: EXTENSION_WEB_SOURCE,
+      type: "COLLECTION_REVIVAL_EXTENSION_SCAN_STATUS_REQUEST",
+      requestId,
+      protocolVersion: EXTENSION_PROTOCOL_VERSION,
+      webVersion: EXTENSION_BETA_VERSION,
+      timestamp: new Date().toISOString()
+    }, window.location.origin);
+  }
+
+  function scheduleReconnect(reason: string) {
+    retryTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+    retryTimersRef.current = [];
+    setSyncState("restoring");
+    [0, 300, 800, 1500, 3000].forEach((delay, index) => {
+      const timer = window.setTimeout(() => {
+        const requestId = `${reason}-${Date.now()}-${index}`;
+        pingExtension();
+        requestScanStatus(requestId);
+        if (index === 4) {
+          window.setTimeout(() => setSyncState((current) => current === "synced" ? current : "failed"), 1800);
+        }
+      }, delay);
+      retryTimersRef.current.push(timer);
+    });
   }
 
   useEffect(() => {
@@ -1629,7 +1682,13 @@ function OldImportView(props: {
       if (event.source !== window) return;
       if (event.origin !== window.location.origin) return;
       if (event.data?.source !== EXTENSION_SOURCE) return;
-      if (!["COLLECTION_REVIVAL_EXTENSION_READY", "COLLECTION_REVIVAL_EXTENSION_PONG"].includes(event.data?.type)) return;
+      if (!["COLLECTION_REVIVAL_EXTENSION_READY", "COLLECTION_REVIVAL_EXTENSION_PONG", "COLLECTION_REVIVAL_EXTENSION_SCAN_STATUS"].includes(event.data?.type)) return;
+
+      if (event.data.type === "COLLECTION_REVIVAL_EXTENSION_SCAN_STATUS") {
+        setScanState(event.data.scanState || undefined);
+        setSyncState("synced");
+        return;
+      }
 
       const version = String(event.data.extensionVersion || event.data.version || "");
       const protocolVersion = String(event.data.protocolVersion || "");
@@ -1660,11 +1719,22 @@ function OldImportView(props: {
               ? `扩展已连接 · v${version}`
               : "已收到扩展 READY。请点击“检测扩展”，完成 PING / PONG 握手。"
       }));
+      if (requestMatches || event.data.type === "COLLECTION_REVIVAL_EXTENSION_READY") {
+        requestScanStatus(event.data.requestId || `bridge-${Date.now()}`);
+      }
     }
     window.addEventListener("collection-revival-extension-bridge", handleBridgeEvent);
     window.addEventListener("message", handleExtensionMessage);
     applyDomSignal();
     window.postMessage({ source: EXTENSION_WEB_SOURCE, type: "COLLECTION_REVIVAL_EXTENSION_PING", requestId: "initial-ready-check", protocolVersion: EXTENSION_PROTOCOL_VERSION }, window.location.origin);
+    requestScanStatus("initial-scan-status");
+    const restoreOnFocus = () => scheduleReconnect("page-visible");
+    const restoreOnVisibility = () => {
+      if (document.visibilityState === "visible") scheduleReconnect("visibility");
+    };
+    window.addEventListener("focus", restoreOnFocus);
+    window.addEventListener("pageshow", restoreOnFocus);
+    document.addEventListener("visibilitychange", restoreOnVisibility);
     const timer = window.setTimeout(() => {
       applyDomSignal();
       setExtensionStatus((current) => current.readyReceived || current.domSignalReceived ? current : { ...current, checked: true, failureReason: "CONTENT_SCRIPT_NOT_INJECTED" });
@@ -1672,8 +1742,12 @@ function OldImportView(props: {
     return () => {
       window.removeEventListener("collection-revival-extension-bridge", handleBridgeEvent);
       window.removeEventListener("message", handleExtensionMessage);
+      window.removeEventListener("focus", restoreOnFocus);
+      window.removeEventListener("pageshow", restoreOnFocus);
+      document.removeEventListener("visibilitychange", restoreOnVisibility);
       window.clearTimeout(timer);
       if (timeoutRef.current) window.clearTimeout(timeoutRef.current);
+      retryTimersRef.current.forEach((retryTimer) => window.clearTimeout(retryTimer));
     };
   }, []);
 
@@ -3539,8 +3613,6 @@ function buildInsights(items: SavedItem[]) {
     categoryDistribution
   };
 }
-
-
 
 
 
