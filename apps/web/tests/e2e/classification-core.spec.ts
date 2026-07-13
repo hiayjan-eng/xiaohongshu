@@ -22,7 +22,7 @@ test.describe("classification service core", () => {
     expect(hiring.contentDomain).toBe("工作与职业");
     expect(hiring.contentSubDomain).toMatch(/招聘求职|创业团队/);
     expect(hiring.savedIntent).toMatch(/求职关注|创业团队参考|以后联系/);
-    expect(hiring.classificationShadow.provider).toBe("hybrid-rule-semantic-local");
+    expect(hiring.shadow.provider).toBe("hybrid-rule-semantic-local");
 
     const business = classifyCollectionInput({
       sourceUrl: "https://www.xiaohongshu.com/explore/business",
