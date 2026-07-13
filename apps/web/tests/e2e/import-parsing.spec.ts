@@ -1,7 +1,8 @@
 import { expect, test } from "@playwright/test";
-import { collectConsoleErrors, expectNoConsoleErrors, readAppState, STORAGE_KEY } from "./helpers";
+import { collectConsoleErrors, expectNoConsoleErrors, getOpenedUrls, installWindowOpenSpy, readAppState, STORAGE_KEY } from "./helpers";
 
 const realShareText = "84【3个方法，让codex帮你猛猛干活！！ - 哈哈du（AI版） | 小红书";
+const completeShareText = "84 【3个方法，让codex帮你猛猛干活！！ - 哈哈du（AI版） | 小红书 - 你的生活兴趣社区】 😆 rATpqUVrDCynYon 😆 https://www.xiaohongshu.com/discovery/item/6a15293600000000080251c2?source=webshare&xhsshare=pc_web&xsec_token=ABobC_c5yh6oYzxIhcHIIOEH1BA37iKtmIhraFY25m_D4=&xsec_source=pc_share";
 
 async function seedLegacyOtherData(page: import("@playwright/test").Page) {
   await page.goto("/");
@@ -104,6 +105,43 @@ test.describe("real share text import parsing", () => {
     await expect(importedPoolCard).toBeVisible();
     await expect(importedPoolCard.getByTestId("open-source-unavailable")).toContainText("暂无原帖链接");
     await expect(importedPoolCard.getByTestId("open-source")).toHaveCount(0);
+
+    await expectNoConsoleErrors(errors);
+  });
+
+  test("extracts a real Xiaohongshu URL from a complete share text and keeps open-original usable", async ({ page }) => {
+    const errors = collectConsoleErrors(page);
+    await installWindowOpenSpy(page);
+
+    await page.goto("/import");
+    await page.evaluate((key) => window.localStorage.removeItem(key), STORAGE_KEY);
+    await page.reload();
+    await page.getByTestId("import-source-url").fill(completeShareText);
+    await page.getByTestId("import-submit").click();
+
+    await expect(page.getByTestId("import-success-panel")).toBeVisible();
+    await expect(page.getByTestId("import-success-panel")).toContainText("AI 与效率");
+    await expect(page.locator("body")).not.toContainText("Cannot read properties of undefined");
+
+    const state = await readAppState(page);
+    const imported = state.savedItems.find((item) => item.sourceUrl.includes("/discovery/item/6a15293600000000080251c2")) as (typeof state.savedItems[number] & { subCategory?: string; sourcePlatform?: string; rawShareText: string }) | undefined;
+    expect(imported).toBeTruthy();
+    expect(imported?.sourceUrl).toContain("https://www.xiaohongshu.com/discovery/item/6a15293600000000080251c2");
+    expect(imported?.sourceUrl).toContain("source=webshare");
+    expect(imported?.sourcePlatform).toBe("xiaohongshu");
+    expect(imported?.title).toBe("3个方法，让codex帮你猛猛干活！！");
+    expect(imported?.rawShareText).toContain("3个方法，让codex帮你猛猛干活");
+    expect(imported?.rawShareText).not.toContain("https://www.xiaohongshu.com/discovery/item");
+    expect(imported?.category).toBe("AI 与效率");
+    expect(imported?.subCategory).toMatch(/AI 工具|效率工作流|自动化工作流|软件教程/);
+
+    await page.goto("/pool");
+    const importedPoolCard = page.getByTestId("saved-item-card").filter({ hasText: "3个方法，让codex帮你猛猛干活" }).first();
+    await expect(importedPoolCard).toBeVisible();
+    await expect(importedPoolCard.getByTestId("open-source")).toBeVisible();
+    await expect(importedPoolCard.getByTestId("open-source-unavailable")).toHaveCount(0);
+    await importedPoolCard.getByTestId("open-source").click();
+    await expect.poll(async () => (await getOpenedUrls(page)).some((url) => url.includes("/discovery/item/6a15293600000000080251c2"))).toBe(true);
 
     await expectNoConsoleErrors(errors);
   });

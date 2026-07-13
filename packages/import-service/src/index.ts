@@ -369,10 +369,15 @@ function splitUrlFromText(value: string): { url: string; text: string } {
 }
 
 function extractShareTitle(value: string): string {
-  const clean = cleanText(value.replace(/复制打开小红书|小红书/g, " "));
+  const clean = cleanText(value.replace(/复制打开小红书|小红书\s*-\s*你的生活兴趣社区|小红书|你的生活兴趣社区/g, " "));
   const bracket = clean.match(/[【\[]([^】\]]+)[】\]]/);
-  const candidate = bracket?.[1] ?? clean;
-  return cleanText(candidate.replace(/^\d+\s*/, "").replace(/\s*[-｜|]\s*[^-｜|]+$/, "")).slice(0, 48);
+  let candidate = bracket?.[1] ?? clean;
+  if (!bracket) candidate = candidate.replace(/^\d+\s*/, "");
+  candidate = candidate.trim();
+  const beforePlatform = candidate.split(/[｜|]/)[0] ?? candidate;
+  const withoutAuthor = beforePlatform.replace(/\s+[-—–]\s+[^-—–]+$/, "");
+  const title = cleanText(withoutAuthor || beforePlatform || candidate).replace(/😆/g, "").trim();
+  return title.slice(0, 48);
 }
 
 function hasImportableContent(input: ShareInput): boolean {
