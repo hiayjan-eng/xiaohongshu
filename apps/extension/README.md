@@ -13,8 +13,8 @@ pnpm --filter @revival/extension build
 构建产物：
 
 - `release-artifacts/extension-beta`：加载已解压扩展时选择这个目录。
-- `release-artifacts/collection-revival-extension-beta.zip`：可给测试用户下载的 Beta ZIP。
-- `apps/web/public/downloads/collection-revival-extension-beta.zip`：Web 端 `/old-import` 页面使用的下载文件。
+- `release-artifacts/collection-revival-extension-beta-v0.2.0.zip`：可给测试用户下载的 Beta ZIP。
+- `apps/web/public/downloads/collection-revival-extension-beta-v0.2.0.zip`：Web 端 `/old-import` 页面使用的下载文件。
 
 ## 安装
 
