@@ -110,6 +110,10 @@
             sendResponse({ ok: false, error: pageStatus.reason, scanState: runtime.state, pageStatus });
             return;
           }
+          if (!pageStatus.looksCollection) {
+            sendResponse({ ok: false, error: "当前页面还不能确认是收藏标签。请先打开本人小红书主页的“收藏”标签，再开始扫描。", scanState: runtime.state, pageStatus });
+            return;
+          }
           runtime.stopRequested = false;
           runtime.state = {
             ...createEmptyState(),
@@ -335,6 +339,7 @@
 
   function scanVisibleXhsCards() {
     const pageStatus = getPageStatus();
+    if (!pageStatus.looksCollection) return { items: [], pageStatus };
     const rootInfo = findCollectionRoot();
     const root = rootInfo?.element || document.body;
     const anchors = Array.from(root.querySelectorAll("a[href]"))
