@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>收藏复活扫描</title>
+    <title>收藏复活扫描 Beta</title>
     <link rel="stylesheet" href="./popup.css" />
   </head>
   <body>
@@ -12,34 +12,45 @@
         <span class="brand-dot">复</span>
         <div>
           <strong>旧收藏扫描 Beta</strong>
-          <small>只扫描当前已加载页面</small>
+          <small>用户主动扫描，本机处理可见页面</small>
         </div>
       </header>
 
       <section class="notice">
-        <strong>使用边界</strong>
-        <p>请先打开你本人已登录的小红书网页版收藏夹。Beta 只读取当前页面 DOM 中已加载出来的卡片，导入前你可以先勾选确认。</p>
+        <strong>安全边界</strong>
+        <p>请先打开你本人已登录的小红书网页版收藏页。扩展只读取当前页面已加载出来的卡片，不模拟登录，不绕过验证码，不在后台偷偷扫描。</p>
       </section>
 
-      <section id="pageHealth" class="page-health">等待检测当前标签页</section>
+      <section id="pageHealth" class="page-health">正在检测当前标签页...</section>
+      <button id="openCollection" class="secondary wide">打开我的小红书收藏页</button>
 
       <label class="field">
         <span>导入到 Web 地址</span>
         <input id="webAppUrl" placeholder="https://xiaohongshu-green.vercel.app/old-import" />
       </label>
 
-      <div class="actions">
-        <button id="scanVisible" class="primary">扫描当前可见卡片</button>
-        <button id="scanScroll" class="secondary">轻滚动后扫描</button>
+      <label class="toggle-row">
+        <input id="autoScrollToggle" type="checkbox" checked />
+        <span>自动向下加载更多收藏</span>
+      </label>
+
+      <div class="actions triple">
+        <button id="scanVisible" class="secondary">扫描当前可见</button>
+        <button id="startScan" class="primary">开始扫描旧收藏</button>
+        <button id="pauseScan" class="secondary" disabled>暂停</button>
+      </div>
+      <div class="actions double">
+        <button id="resumeScan" class="secondary" disabled>继续</button>
+        <button id="clearCheckpoint" class="secondary">清空断点</button>
       </div>
 
       <div id="status" class="status">等待扫描</div>
 
       <section class="stats" id="statsGrid" aria-label="扫描统计">
-        <span><strong>0</strong><small>总数</small></span>
-        <span><strong>0</strong><small>有链接</small></span>
-        <span><strong>0</strong><small>重复</small></span>
+        <span><strong>0</strong><small>已发现</small></span>
+        <span><strong>0</strong><small>已去重</small></span>
         <span><strong>0</strong><small>缺标题</small></span>
+        <span><strong>0</strong><small>缺链接</small></span>
       </section>
 
       <section class="results">
@@ -48,14 +59,15 @@
           <span id="count">0 条</span>
         </div>
         <div class="select-actions">
+          <input id="searchBox" placeholder="按标题搜索" />
           <button id="selectAll" class="link-button" disabled>全选</button>
-          <button id="clearSelection" class="link-button" disabled>取消全选</button>
+          <button id="clearSelection" class="link-button" disabled>取消</button>
         </div>
         <div id="list" class="result-list"></div>
       </section>
 
       <div class="actions bottom">
-        <button id="importToWeb" class="primary" disabled>导入并查看结果</button>
+        <button id="importToWeb" class="primary" disabled>导入收藏复活</button>
         <button id="exportJson" class="secondary" disabled>导出 JSON</button>
       </div>
     </main>
