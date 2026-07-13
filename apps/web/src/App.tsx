@@ -1874,7 +1874,7 @@ function OldImportView(props: {
           <button className="secondary-action" onClick={() => navigator.clipboard?.writeText("edge://extensions/")}>复制 edge://extensions</button>
           <button className="secondary-action" onClick={pingExtension} data-testid="detect-extension">我已安装，检测扩展</button>
           <button className="secondary-action" onClick={refreshAndDetect}>刷新并重新检测</button>
-          <a className="primary-button" href="https://www.xiaohongshu.com/explore" target="_blank" rel="noreferrer">打开小红书收藏页</a>
+          <a className="primary-button" href="https://www.xiaohongshu.com/user/profile" target="_blank" rel="noreferrer">打开小红书，去我的收藏页</a>
         </div>
       </section>
 
@@ -1894,6 +1894,8 @@ function OldImportView(props: {
           <Metric label="扫描批次" value={(scanState?.batch ?? 0).toString()} />
           <Metric label="待导入" value={(scanState?.selectedCount ?? 0).toString()} />
           <Metric label="重复" value={(scanState?.duplicateCount ?? 0).toString()} />
+          <Metric label="有链接" value={Math.max(0, scanTotal - (scanState?.missingLinkCount ?? 0)).toString()} />
+          <Metric label="缺标题" value={(scanState?.missingTitleCount ?? 0).toString()} />
           <Metric label="缺链接" value={(scanState?.missingLinkCount ?? 0).toString()} />
           <Metric label="最近更新" value={scanState?.updatedAt ? new Date(scanState.updatedAt).toLocaleTimeString() : "未同步"} />
         </div>
@@ -3664,7 +3666,6 @@ function buildInsights(items: SavedItem[]) {
     categoryDistribution
   };
 }
-
 
 
 
