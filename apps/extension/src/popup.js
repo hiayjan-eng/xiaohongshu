@@ -2,7 +2,7 @@ const DEFAULT_WEB_APP_URL = "https://xiaohongshu-green.vercel.app/old-import";
 const SETTINGS_KEY = "revival-extension-settings";
 const CHECKPOINT_KEY = "revival-extension-checkpoint";
 const SCAN_STATE_KEY = "revival-extension-scan-state";
-const XHS_COLLECTION_URL = "https://www.xiaohongshu.com/explore";
+const XHS_COLLECTION_URL = "https://www.xiaohongshu.com/user/profile";
 const WEB_APP_ORIGINS = ["https://xiaohongshu-green.vercel.app", "http://localhost:5173", "http://127.0.0.1:5173"];
 const STAGES = ["recognizing", "loading", "extracting", "deduping", "complete"];
 const STAGE_LABELS = {
@@ -539,8 +539,10 @@ function createPill(text, tone) {
 function renderStats(stats) {
   const cells = [
     [stats.total, "已发现"],
+    [stats.withLinks, "有链接"],
     [state.scanState.lastAdded || 0, "本轮新增"],
     [stats.duplicates, "重复"],
+    [stats.missingTitles, "缺标题"],
     [stats.missingLinks, "缺链接"],
     [stats.pendingImport, "待导入"]
   ];
