@@ -68,12 +68,6 @@ for (const marker of backgroundMarkers) {
   if (!background.includes(marker)) throw new Error(`Missing background recovery marker: ${marker}`);
 }
 
-assertPopupStructure();
-assertProgressAndListUi();
-assertScannerBehavior();
-
-console.log("extension beta manifest and scripts ok");
-
 function assertPopupStructure() {
   assertOrdered(popupHtml, [
     "popup-header",
@@ -447,6 +441,12 @@ function hasAncestorClassContaining(element, value) {
   }
   return false;
 }
+
+assertPopupStructure();
+assertProgressAndListUi();
+assertScannerBehavior();
+
+console.log("extension beta manifest and scripts ok");
 
 function assertOrdered(source, needles, label) {
   let cursor = -1;
