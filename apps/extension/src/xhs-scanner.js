@@ -171,9 +171,13 @@
   }
 
   async function persistState() {
-    const selectedKeys = runtime.state.selectedKeys?.length
-      ? runtime.state.selectedKeys
-      : runtime.state.items.filter((item) => !item.isDuplicate).map(itemKey);
+    const selectedSet = new Set(runtime.state.selectedKeys || []);
+    runtime.state.items
+      .filter((item) => !item.isDuplicate)
+      .map(itemKey)
+      .filter(Boolean)
+      .forEach((key) => selectedSet.add(key));
+    const selectedKeys = [...selectedSet];
     runtime.state = {
       ...runtime.state,
       totalFound: runtime.state.items.length,
