@@ -382,7 +382,7 @@
     });
 
     const scored = candidates
-      .map((candidate) => ({ ...candidate, score: countVisibleNoteLinks(candidate.element) }))
+      .map((candidate) => ({ ...candidate, score: scoreCollectionCandidate(candidate) }))
       .filter((candidate) => candidate.score > 0)
       .sort((a, b) => b.score - a.score);
 
@@ -414,9 +414,32 @@
     const candidates = Array.from(root.querySelectorAll("[class*='feeds'], [class*='note-list'], [class*='content'], main, section"));
     return candidates
       .filter(isElementVisible)
-      .map((element) => ({ element, score: countVisibleNoteLinks(element) }))
+      .map((element) => ({ element, score: scoreCollectionCandidate({ element, containerType: "nested-note-container" }) }))
       .filter((candidate) => candidate.score > 0)
       .sort((a, b) => b.score - a.score)[0]?.element;
+  }
+
+  function scoreCollectionCandidate(candidate) {
+    const noteCount = countVisibleNoteLinks(candidate.element);
+    if (noteCount <= 0) return 0;
+    const descriptor = getElementDescriptor(candidate.element);
+    let score = noteCount * 10;
+    if (candidate.containerType === "active-collection-tab-nearby") score += 90;
+    if (/收藏|favorite|collection|fav/i.test(descriptor)) score += 70;
+    if (/note-list|feeds|waterfall|masonry/i.test(descriptor)) score += 18;
+    if (candidate.element === document.body) score -= 80;
+    if (/^(main|section)$/i.test(candidate.element.tagName || "") && !/收藏|favorite|collection|fav/i.test(descriptor)) score -= 28;
+    return score;
+  }
+
+  function getElementDescriptor(element) {
+    return normalizeScannedText([
+      element.id || "",
+      String(element.className || ""),
+      element.getAttribute?.("data-testid") || "",
+      element.getAttribute?.("role") || "",
+      (element.textContent || "").slice(0, 180)
+    ].join(" "));
   }
 
   function countVisibleNoteLinks(root) {
