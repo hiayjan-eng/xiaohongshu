@@ -8,8 +8,10 @@ import {
   type AiClassificationResult,
   type AppState,
   type Category,
+  type ClassificationCorrection,
   type ClassificationConfidence,
   type ItemStatus,
+  type PlanCard,
   type SavedItem,
   type SavedIntent,
   type SearchLog,
@@ -70,11 +72,19 @@ export function createSavedItemRecord(
     confidence,
     whyThisDomain: aiResult.whyThisDomain || aiResult.whyThisCategory || "基于标题、分享文案和备注判断内容主题。",
     whyThisIntent: aiResult.whyThisIntent || aiResult.intent || "基于用户备注和内容线索推断收藏用途。",
+    classificationReason: aiResult.classificationReason || aiResult.whyThisDomain || aiResult.whyThisCategory,
+    positiveEvidence: aiResult.positiveEvidence ?? [],
+    negativeEvidence: aiResult.negativeEvidence ?? [],
+    conflictingEvidence: aiResult.conflictingEvidence ?? [],
+    dominantIntent: aiResult.dominantIntent || savedIntent,
+    classificationShadow: aiResult.classificationShadow,
     category: contentDomain,
     subCategory: contentSubDomain,
     classificationConfidence: confidence,
     intent: savedIntent,
     whyThisCategory: aiResult.whyThisDomain || aiResult.whyThisCategory || "基于标题、分享文案和备注判断内容主题。",
+    rawTitle: input.title || input.rawShareText,
+    cleanedTitle: normalizeStoredTitle(input.title, input.rawShareText || aiResult.actionCard?.title),
     summary: normalizeStoredSummary(aiResult.summary, contentDomain),
     keywords: aiResult.keywords ?? [],
     entities: aiResult.entities ?? [],
@@ -172,6 +182,8 @@ export function createInitialDemoData(): AppState {
     actionCards: [],
     searchLogs: [],
     smartAlbums: [],
+    planCards: [],
+    classificationCorrections: [],
     importBatches: [],
     importBatchItems: []
   };
@@ -343,6 +355,8 @@ function normalizeAppState(state: AppState): AppState {
     schemaVersion: APP_SCHEMA_VERSION,
     savedItems,
     actionCards,
+    planCards: (state.planCards ?? []).map(normalizePlanCard),
+    classificationCorrections: state.classificationCorrections ?? [],
     searchLogs: state.searchLogs ?? [],
     smartAlbums: (state.smartAlbums ?? []).map(normalizeSmartAlbum),
     importBatches: state.importBatches ?? [],
@@ -359,6 +373,11 @@ function normalizeSavedItem(item: SavedItem): SavedItem {
     confidence?: unknown;
     whyThisDomain?: string;
     whyThisIntent?: string;
+    classificationReason?: string;
+    positiveEvidence?: unknown;
+    negativeEvidence?: unknown;
+    conflictingEvidence?: unknown;
+    dominantIntent?: string;
     subCategory?: string;
     whyThisCategory?: string;
     category?: string;
@@ -383,6 +402,13 @@ function normalizeSavedItem(item: SavedItem): SavedItem {
     confidence,
     whyThisDomain,
     whyThisIntent,
+    classificationReason: raw.classificationReason || whyThisDomain,
+    positiveEvidence: Array.isArray(raw.positiveEvidence) ? raw.positiveEvidence.filter(isString) : [],
+    negativeEvidence: Array.isArray(raw.negativeEvidence) ? raw.negativeEvidence.filter(isString) : [],
+    conflictingEvidence: Array.isArray(raw.conflictingEvidence) ? raw.conflictingEvidence.filter(isString) : [],
+    dominantIntent: raw.dominantIntent || savedIntent,
+    rawTitle: (item.rawTitle || item.title || item.rawShareText || "").normalize("NFC"),
+    cleanedTitle: normalizeStoredTitle(item.cleanedTitle || item.title, item.rawShareText),
     category: contentDomain,
     subCategory: contentSubDomain,
     title: normalizeStoredTitle(item.title, item.rawShareText),
@@ -391,6 +417,15 @@ function normalizeSavedItem(item: SavedItem): SavedItem {
     whyThisCategory: whyThisDomain,
     classificationConfidence: confidence,
     searchableText: item.searchableText || buildSearchableText(item, contentDomain, contentSubDomain, savedIntent, item.keywords ?? [], item.entities ?? [])
+  };
+}
+
+function normalizePlanCard(card: PlanCard): PlanCard {
+  return {
+    ...card,
+    estimatedMinutes: Number.isFinite(card.estimatedMinutes) ? card.estimatedMinutes : 20,
+    status: card.status === "doing" || card.status === "done" || card.status === "cancelled" ? card.status : "planned",
+    reminderEnabled: Boolean(card.reminderEnabled)
   };
 }
 
@@ -477,6 +512,17 @@ function inferSubCategoryFromInput(input: ShareInput, category: Category): strin
     return "AI工具";
   }
   if (category === "情绪与关系") return /关系|亲密|表达|需求/.test(text) ? "亲密关系" : "自我观察";
+  if (category === "工作与职业") {
+    if (/招聘|岗位|简历|面试/.test(text)) return "招聘求职";
+    if (/创业公司|团队|合伙人|加入/.test(text)) return "创业团队";
+    return "职场成长";
+  }
+  if (category === "商业与经营") {
+    if (/独立站/.test(text)) return "独立站运营";
+    if (/跨境|电商/.test(text)) return "跨境电商";
+    if (/选品|定价|客单价|毛利|溢价/.test(text)) return "选品与定价";
+    return "商业案例";
+  }
   return category === "暂存" ? "待补充备注" : category;
 }
 
@@ -486,10 +532,13 @@ function normalizeConfidence(value: unknown, category: Category): Classification
 }
 
 function normalizeSavedIntent(value: unknown): SavedIntent {
-  if (value === "想学习" || value === "想复现" || value === "想去" || value === "想买" || value === "想做" || value === "内容创作参考" || value === "工作决策参考" || value === "情绪共鸣" || value === "以后查阅" || value === "暂时保存") {
+  if (value === "想学习" || value === "想复现" || value === "想去" || value === "想买" || value === "想做" || value === "内容创作参考" || value === "工作决策参考" || value === "求职关注" || value === "创业团队参考" || value === "以后联系" || value === "商业案例参考" || value === "情绪共鸣" || value === "以后查阅" || value === "暂时保存") {
     return value;
   }
   const text = String(value ?? "");
+  if (/招聘|求职|岗位|简历|面试/.test(text)) return "求职关注";
+  if (/创业团队|加入公司|合伙人|以后联系/.test(text)) return "创业团队参考";
+  if (/商业案例|独立站|跨境|选品|定价|客单价|毛利/.test(text)) return "商业案例参考";
   if (/创作|选题|封面|写文章|写作|内容/.test(text)) return "内容创作参考";
   if (/工作|决策|效率|SOP|流程|自动化/.test(text)) return "工作决策参考";
   if (/复现|照着|模仿|做一次/.test(text)) return "想复现";
@@ -519,4 +568,86 @@ function buildSearchableText(input: Pick<ShareInput, "sourceUrl" | "rawShareText
     keywords.join(" "),
     entities.map((entity) => `${entity.type}:${entity.value}`).join(" ")
   ].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+}
+
+export interface ScannedTextMigrationReport {
+  migratedCount: number;
+  repairedTitleCount: number;
+  failedCount: number;
+  backupJson: string;
+  state: AppState;
+}
+
+export function migrateScannedTextV2(state: AppState): ScannedTextMigrationReport {
+  const backupJson = JSON.stringify(state, null, 2);
+  let migratedCount = 0;
+  let repairedTitleCount = 0;
+  let failedCount = 0;
+  const savedItems = state.savedItems.map((item) => {
+    try {
+      const rawTitle = item.rawTitle || item.title || item.rawShareText || "";
+      const cleanedTitle = cleanScannedTitle(rawTitle, item.rawShareText);
+      const title = cleanedTitle || normalizeStoredTitle(item.title, item.rawShareText);
+      const repaired = title !== item.title || cleanedTitle !== item.cleanedTitle;
+      if (repaired) repairedTitleCount += 1;
+      migratedCount += 1;
+      return {
+        ...item,
+        rawTitle,
+        cleanedTitle: title,
+        title,
+        searchableText: buildSearchableText(
+          { sourceUrl: item.sourceUrl, rawShareText: cleanScannedText(item.rawShareText), title, userNote: item.userNote },
+          item.contentDomain,
+          item.contentSubDomain,
+          item.savedIntent,
+          item.keywords,
+          item.entities
+        ),
+        updatedAt: new Date().toISOString()
+      };
+    } catch {
+      failedCount += 1;
+      return item;
+    }
+  });
+
+  return {
+    migratedCount,
+    repairedTitleCount,
+    failedCount,
+    backupJson,
+    state: { ...state, savedItems, schemaVersion: APP_SCHEMA_VERSION }
+  };
+}
+
+function cleanScannedTitle(title: string, rawShareText: string): string {
+  const source = title || rawShareText;
+  const withoutUrl = cleanScannedText(source).replace(/https?:\/\/\S+/g, " ");
+  const bracket = withoutUrl.match(/[【\[]([^】\]]+)[】\]]/);
+  const candidate = bracket?.[1] ?? withoutUrl.replace(/^\d+[\s.、-]*/, "");
+  return candidate
+    .replace(/\s+[-—–]\s+[^|｜】]+(\s*[|｜]\s*小红书.*)?$/, "")
+    .replace(/小红书\s*-\s*你的生活兴趣社区|你的生活兴趣社区/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 80);
+}
+
+function cleanScannedText(value: string): string {
+  const textarea = typeof document === "undefined" ? undefined : document.createElement("textarea");
+  if (textarea) {
+    textarea.innerHTML = value;
+  }
+  const decoded = textarea?.value ?? value.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, "\"");
+  return decoded
+    .normalize("NFC")
+    .replace(/[\uFEFF\u00AD]/g, "")
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isString(value: unknown): value is string {
+  return typeof value === "string";
 }
