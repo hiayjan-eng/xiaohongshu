@@ -24,5 +24,15 @@ if (!manifest.permissions.includes("downloads")) throw new Error("downloads perm
 
 execFileSync(process.execPath, ["--check", fileURLToPath(new URL("../src/popup.js", import.meta.url))], { stdio: "inherit" });
 execFileSync(process.execPath, ["--check", fileURLToPath(new URL("../src/content-script.js", import.meta.url))], { stdio: "inherit" });
+const popupJs = readFileSync(new URL("../src/popup.js", import.meta.url), "utf8");
+const contentScript = readFileSync(new URL("../src/content-script.js", import.meta.url), "utf8");
+const popupMarkers = ["CHECKPOINT_KEY", "pauseScan", "resumeScan", "browser-extension-beta", "autoScrollToggle", "clearCheckpoint"];
+const contentMarkers = ["REVIVAL_GET_PAGE_STATUS", "REVIVAL_SCAN_STEP", "scrollOneStep", "blocked", "captcha"];
+for (const marker of popupMarkers) {
+  if (!popupJs.includes(marker)) throw new Error(`Missing popup beta capability marker: ${marker}`);
+}
+for (const marker of contentMarkers) {
+  if (!contentScript.includes(marker)) throw new Error(`Missing content script beta capability marker: ${marker}`);
+}
 
 console.log("extension beta manifest and scripts ok");
