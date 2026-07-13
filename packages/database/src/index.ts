@@ -462,3 +462,61 @@ function normalizeStoredSummary(summary: string, category: Category): string {
 function cleanLegacyText(value: string): string {
   return value.replace(/\s+/g, " ").trim();
 }
+function inferSubCategoryFromInput(input: ShareInput, category: Category): string {
+  const text = [input.title, input.rawShareText, input.userNote].join(" ");
+  if (category === "内容创作") {
+    if (/剪辑|视频|短视频|运镜/.test(text)) return "视频剪辑";
+    if (/封面|排版/.test(text)) return "封面设计";
+    if (/选题/.test(text)) return "选题策划";
+    if (/运营|账号/.test(text)) return "账号运营";
+  }
+  if (category === "AI 与效率") {
+    if (/prompt|提示词|多角色|圆桌|Jung|Mankiw|Munger|Musk/i.test(text)) return "Prompt 工程";
+    if (/决策|战略|工作安排|时间分配/.test(text)) return "决策辅助";
+    if (/工作流|自动化|SOP/.test(text)) return "自动化工作流";
+    return "AI工具";
+  }
+  if (category === "情绪与关系") return /关系|亲密|表达|需求/.test(text) ? "亲密关系" : "自我观察";
+  return category === "暂存" ? "待补充备注" : category;
+}
+
+function normalizeConfidence(value: unknown, category: Category): ClassificationConfidence {
+  if (value === "high" || value === "medium" || value === "low") return value;
+  return category === "暂存" ? "low" : "medium";
+}
+
+function normalizeSavedIntent(value: unknown): SavedIntent {
+  if (value === "想学习" || value === "想复现" || value === "想去" || value === "想买" || value === "想做" || value === "内容创作参考" || value === "工作决策参考" || value === "情绪共鸣" || value === "以后查阅" || value === "暂时保存") {
+    return value;
+  }
+  const text = String(value ?? "");
+  if (/创作|选题|封面|写文章|写作|内容/.test(text)) return "内容创作参考";
+  if (/工作|决策|效率|SOP|流程|自动化/.test(text)) return "工作决策参考";
+  if (/复现|照着|模仿|做一次/.test(text)) return "想复现";
+  if (/学习|教程|学会|练习/.test(text)) return "想学习";
+  if (/去|旅行|路线|探店|展览|咖啡|餐厅/.test(text)) return "想去";
+  if (/买|种草|价格|单品|购物/.test(text)) return "想买";
+  if (/情绪|关系|共鸣|触动|复盘/.test(text)) return "情绪共鸣";
+  if (/做|执行|尝试/.test(text)) return "想做";
+  return "以后查阅";
+}
+
+function uniqueSavedIntents(values: unknown[]): SavedIntent[] {
+  const seen = new Set<SavedIntent>();
+  values.forEach((value) => seen.add(normalizeSavedIntent(value)));
+  return [...seen];
+}
+
+function buildSearchableText(input: Pick<ShareInput, "sourceUrl" | "rawShareText" | "title" | "userNote">, category: Category, subCategory: string, savedIntent: SavedIntent, keywords: string[], entities: Array<{ type: string; value: string }>): string {
+  return [
+    input.sourceUrl,
+    input.rawShareText,
+    input.title,
+    input.userNote,
+    category,
+    subCategory,
+    savedIntent,
+    keywords.join(" "),
+    entities.map((entity) => `${entity.type}:${entity.value}`).join(" ")
+  ].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+}
