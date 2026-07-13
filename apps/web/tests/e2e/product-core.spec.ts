@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { collectConsoleErrors, expectNoConsoleErrors, importTestNote, readAppState, resetDemoData } from "./helpers";
+import { migrateScannedTextV2 } from "../../../../packages/database/src/index";
 
 test.describe("product core stabilization", () => {
   test("hides internal QA and real-test from the normal sidebar but keeps routes accessible", async ({ page }) => {
@@ -95,5 +96,53 @@ test.describe("product core stabilization", () => {
     await expect(page.getByTestId("today-plan-cards")).toBeVisible();
 
     await expectNoConsoleErrors(errors);
+  });
+
+  test("migrates scanned title text without destroying special characters or emoji", () => {
+    const report = migrateScannedTextV2({
+      schemaVersion: 2,
+      user: { id: "user_local_001", name: "本地用户", email: "local@revival.app", createdAt: "2026-07-06T00:00:00.000Z" },
+      savedItems: [
+        {
+          id: "dirty_text_item",
+          userId: "user_local_001",
+          sourcePlatform: "xiaohongshu",
+          sourceUrl: "https://www.xiaohongshu.com/explore/dirty",
+          rawShareText: "88 【全÷回血 😆 独立站选品 - 作者A | 小红书】 https://www.xiaohongshu.com/explore/dirty",
+          title: "88 【全÷回血 😆 独立站选品 - 作者A | 小红书】 https://www.xiaohongshu.com/explore/dirty",
+          userNote: "",
+          contentDomain: "商业与经营",
+          contentSubDomain: "选品与定价",
+          savedIntent: "商业案例参考",
+          secondaryIntents: [],
+          confidence: "medium",
+          whyThisDomain: "测试",
+          whyThisIntent: "测试",
+          category: "商业与经营",
+          subCategory: "选品与定价",
+          intent: "商业案例参考",
+          whyThisCategory: "测试",
+          summary: "测试",
+          keywords: ["独立站", "选品"],
+          entities: [],
+          searchableText: "",
+          status: "not_started",
+          createdAt: "2026-07-06T00:00:00.000Z",
+          updatedAt: "2026-07-06T00:00:00.000Z"
+        }
+      ],
+      actionCards: [],
+      searchLogs: [],
+      smartAlbums: [],
+      importBatches: [],
+      importBatchItems: []
+    });
+    expect(report.migratedCount).toBe(1);
+    expect(report.repairedTitleCount).toBe(1);
+    expect(report.state.savedItems[0].rawTitle).toContain("全÷回血");
+    expect(report.state.savedItems[0].title).toContain("全÷回血");
+    expect(report.state.savedItems[0].title).toContain("😆");
+    expect(report.state.savedItems[0].title).not.toContain("https://");
+    expect(report.state.savedItems[0].searchableText).toContain("商业与经营");
   });
 });
