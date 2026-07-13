@@ -1,4 +1,4 @@
-import type { ActionCard, Category, Plan, PlanType, SavedItem, SmartAlbum, SmartAlbumPriority, Task } from "@revival/shared-types";
+import type { ActionCard, Category, Plan, PlanType, SavedIntent, SavedItem, SmartAlbum, SmartAlbumPriority, Task } from "@revival/shared-types";
 
 export const PLAN_TYPE_LABELS: Record<PlanType, string> = {
   learning: "学习计划",
@@ -31,20 +31,8 @@ export function findActionCardBySavedItem(actionCards: ActionCard[], savedItemId
   return actionCards.find((card) => card.savedItemId === savedItemId);
 }
 
-export function createPlansFromActionCards(userId: string, savedItems: SavedItem[], actionCards: ActionCard[], now = new Date()): Plan[] {
-  const activeItemIds = new Set(savedItems.filter((item) => item.status !== "completed" && item.status !== "snoozed").map((item) => item.id));
-  const grouped = actionCards
-    .filter((card) => activeItemIds.has(card.savedItemId))
-    .reduce<Record<PlanType, ActionCard[]>>((groups, card) => {
-      const type = getPlanTypeForCategory(card.category);
-      groups[type] = groups[type] ?? [];
-      groups[type].push(card);
-      return groups;
-    }, {} as Record<PlanType, ActionCard[]>);
-
-  return Object.entries(grouped)
-    .filter(([, cards]) => cards.length > 0)
-    .map(([type, cards]) => buildPlan(userId, type as PlanType, cards, savedItems, now));
+export function createPlansFromActionCards(_userId: string, _savedItems: SavedItem[], _actionCards: ActionCard[], _now = new Date()): Plan[] {
+  return [];
 }
 
 function buildPlan(userId: string, type: PlanType, cards: ActionCard[], savedItems: SavedItem[], now: Date): Plan {
@@ -114,23 +102,38 @@ export function cloneTasksForCard(cardId: string, drafts: Array<Omit<Task, "id" 
 
 type AlbumCluster = {
   key: string;
+  albumView: "content_domain" | "saved_intent";
   category: Category;
   subCategory: string;
+  savedIntent?: SavedIntent;
   items: SavedItem[];
   keywords: string[];
 };
 
 const albumTitleByCategory: Record<Category, string[]> = {
-  内容创作: ["把内容灵感变成可发布选题", "小红书图文创作灵感", "封面标题和选题素材"],
-  "AI 与效率": ["把 AI 工具真正用进日常工作", "效率工作流复现清单", "可复制 SOP 候选"],
+  内容创作: ["视频剪辑和内容制作", "封面标题和选题素材", "小红书图文创作灵感"],
+  "AI 与效率": ["AI Prompt 和决策辅助", "效率工作流复现清单", "可复制工具方法"],
   技能学习: ["最近最想学会的技能", "一次只练一个小动作", "技能入门练习清单"],
-  出行与探店: ["这个周末可以去哪里", "想去的城市和路线", "探店与展览候选"],
-  饮食与健康: ["低卡晚餐和备餐", "今天可以开始的饮食小计划", "健康练习清单"],
+  出行与探店: ["周末展览和城市去处", "想去的城市和路线", "探店与展览候选"],
+  饮食与健康: ["低卡饮食与备餐", "今天可以开始的饮食小计划", "健康练习清单"],
   生活与家居: ["把家里一个角落整理好", "租房改造和收纳计划", "周末生活改造"],
   穿搭与消费: ["少花钱也能试试的风格", "理性种草和替代清单", "穿搭消费参考"],
-  情绪与关系: ["值得写进复盘的关系观察", "情绪和表达练习", "自我观察记录"],
+  情绪与关系: ["情绪表达与关系沟通", "值得写进复盘的关系观察", "自我观察记录"],
   读书与思考: ["值得继续追问的观点", "读书笔记和思考线索", "把观点写成自己的话"],
   暂存: ["需要补一句备注的收藏", "待判断的旧线索", "先别急着整理完"]
+};
+
+const albumTitleByIntent: Record<SavedIntent, string> = {
+  想学习: "最近想学会的东西",
+  想复现: "可以复现的教程",
+  想去: "想去的地方",
+  想买: "想买但还没决定的东西",
+  想做: "可以照着做一次",
+  内容创作参考: "可以写成内容的灵感",
+  工作决策参考: "工作决策参考",
+  情绪共鸣: "值得写进手帐或复盘",
+  以后查阅: "只是想以后再看的内容",
+  暂时保存: "待补充用途的收藏"
 };
 
 export function generateSmartAlbums(savedItems: SavedItem[], now = new Date()): SmartAlbum[] {
@@ -139,50 +142,72 @@ export function generateSmartAlbums(savedItems: SavedItem[], now = new Date()): 
   return clusters
     .map((cluster) => buildSmartAlbum(cluster, now))
     .sort((a, b) => b.priorityScore - a.priorityScore || b.savedItemIds.length - a.savedItemIds.length)
-    .slice(0, 8);
+    .slice(0, 12);
 }
 
 function buildAlbumClusters(items: SavedItem[]): AlbumCluster[] {
-  const groups = new Map<string, SavedItem[]>();
+  const domainGroups = new Map<string, SavedItem[]>();
+  const intentGroups = new Map<string, SavedItem[]>();
+
   items.forEach((item) => {
-    const theme = pickThemeKey(item);
-    const key = `${item.category}:${theme}`;
-    groups.set(key, [...(groups.get(key) ?? []), item]);
+    const domain = normalizeRuntimeCategory(item.contentDomain ?? item.category);
+    const subDomain = item.contentSubDomain || item.subCategory || item.keywords[0] || "主题整理";
+    const domainKey = `${domain}:${subDomain}`;
+    domainGroups.set(domainKey, [...(domainGroups.get(domainKey) ?? []), item]);
+
+    const intent = normalizeSavedIntent(item.savedIntent || item.intent);
+    const intentKey = `intent:${intent}`;
+    intentGroups.set(intentKey, [...(intentGroups.get(intentKey) ?? []), item]);
   });
 
-  return [...groups.entries()].map(([key, group]) => {
-    const first = group[0];
-    const keywords = pickAlbumKeywords(group);
-    return {
-      key,
-      category: normalizeRuntimeCategory(first.category),
-      subCategory: first.subCategory || keywords[0] || "主题整理",
-      items: [...group].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
-      keywords
-    };
-  });
+  const domainClusters = [...domainGroups.entries()].map(([key, group]) => buildCluster(key, "content_domain", group));
+  const intentClusters = [...intentGroups.entries()].map(([key, group]) => buildCluster(key, "saved_intent", group));
+  return [...domainClusters, ...intentClusters].filter((cluster) => cluster.items.length > 0);
+}
+
+function buildCluster(key: string, albumView: "content_domain" | "saved_intent", group: SavedItem[]): AlbumCluster {
+  const sortedItems = [...group].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  const first = sortedItems[0];
+  const category = normalizeRuntimeCategory(first.contentDomain ?? first.category);
+  const savedIntent = normalizeSavedIntent(first.savedIntent || first.intent);
+  const keywords = pickAlbumKeywords(sortedItems);
+  return {
+    key,
+    albumView,
+    category,
+    subCategory: albumView === "saved_intent" ? savedIntent : first.contentSubDomain || first.subCategory || keywords[0] || "主题整理",
+    savedIntent: albumView === "saved_intent" ? savedIntent : undefined,
+    items: sortedItems,
+    keywords
+  };
 }
 
 function buildSmartAlbum(cluster: AlbumCluster, now: Date): SmartAlbum {
   const createdAt = now.toISOString();
   const recommended = cluster.items.slice(0, 3);
   const title = pickAlbumTitle(cluster);
-  const priorityScore = cluster.items.length * 12 + cluster.keywords.length * 3 + (cluster.category === "暂存" ? -8 : 0);
+  const priorityScore = cluster.items.length * 12 + cluster.keywords.length * 3 + (cluster.category === "暂存" ? -8 : 0) + (cluster.albumView === "saved_intent" ? 3 : 0);
   const priority: SmartAlbumPriority = priorityScore >= 36 ? "high" : priorityScore >= 18 ? "medium" : "low";
 
   return {
-    id: `album_${slugify(cluster.category)}_${slugify(cluster.subCategory)}_${slugify(cluster.keywords[0] ?? cluster.key)}`,
+    id: `album_${cluster.albumView}_${slugify(cluster.savedIntent ?? cluster.category)}_${slugify(cluster.subCategory)}_${slugify(cluster.keywords[0] ?? cluster.key)}`,
     title,
-    description: `从 ${cluster.items.length} 条「${cluster.subCategory}」收藏里整理出的主题，不需要一次处理完，先复活最值得开始的 3 条。`,
+    description: cluster.albumView === "saved_intent"
+      ? `从 ${cluster.items.length} 条“${cluster.savedIntent}”用途的收藏里整理出的视角，先挑 3 条最值得复活。`
+      : `从 ${cluster.items.length} 条「${cluster.subCategory}」主题收藏里整理出的视角，先复活最值得开始的 3 条。`,
+    albumView: cluster.albumView,
+    contentDomain: cluster.category,
+    contentSubDomain: cluster.albumView === "content_domain" ? cluster.subCategory : undefined,
+    savedIntent: cluster.savedIntent,
     category: cluster.category,
-    albumType: inferAlbumType(cluster.category, cluster.subCategory),
+    albumType: cluster.albumView === "saved_intent" ? "intent_album" : inferAlbumType(cluster.category, cluster.subCategory),
     keywords: cluster.keywords,
     savedItemIds: cluster.items.map((item) => item.id),
     recommendedItemIds: recommended.map((item) => item.id),
     coverItemId: recommended[0]?.id,
-    whyThisAlbum: `这些收藏都指向「${cluster.subCategory}」这个使用场景，适合合并成一个行动主题。`,
-    whyStartHere: recommended[0] ? `先从「${recommended[0].title}」开始，因为它最近保存、信息更完整，比较容易行动。` : "先挑信息最完整的一条开始。",
-    suggestedFirstAction: buildSuggestedFirstAction(cluster.category, cluster.subCategory),
+    whyThisAlbum: buildWhyThisAlbum(cluster),
+    whyStartHere: recommended[0] ? `先从「${recommended[0].title}」开始，因为它最近保存、信息更完整，比较容易判断要不要复活。` : "先挑信息最完整的一条开始。",
+    suggestedFirstAction: buildSuggestedFirstAction(cluster.category, cluster.subCategory, cluster.savedIntent),
     priority,
     priorityScore,
     status: "candidate",
@@ -191,15 +216,11 @@ function buildSmartAlbum(cluster: AlbumCluster, now: Date): SmartAlbum {
   };
 }
 
-function pickThemeKey(item: SavedItem): string {
-  return item.subCategory || item.keywords[0] || item.category;
-}
-
 function pickAlbumKeywords(items: SavedItem[]): string[] {
   const counts = new Map<string, number>();
   items.forEach((item) => {
-    [item.subCategory, ...item.keywords, ...item.entities.map((entity) => entity.value)]
-      .map((keyword) => keyword.trim())
+    [item.contentSubDomain || item.subCategory, item.savedIntent, ...item.secondaryIntents, ...item.keywords, ...item.entities.map((entity) => entity.value)]
+      .map((keyword) => String(keyword || "").trim())
       .filter((keyword) => keyword.length >= 2 && keyword.length <= 18)
       .forEach((keyword) => counts.set(keyword, (counts.get(keyword) ?? 0) + 1));
   });
@@ -207,12 +228,19 @@ function pickAlbumKeywords(items: SavedItem[]): string[] {
 }
 
 function pickAlbumTitle(cluster: AlbumCluster): string {
-  const primary = cluster.keywords[0];
-  if (primary && cluster.category === "出行与探店") return `${primary}：这个周末可以去哪里`;
+  if (cluster.albumView === "saved_intent" && cluster.savedIntent) return albumTitleByIntent[cluster.savedIntent];
+  const primary = cluster.keywords.find((keyword) => keyword !== cluster.subCategory) ?? cluster.subCategory;
+  if (primary && cluster.category === "AI 与效率") return `${primary}：AI Prompt 和效率方法`;
+  if (primary && cluster.category === "内容创作") return `${primary}：内容制作素材`;
+  if (primary && cluster.category === "情绪与关系") return `${primary}：关系和自我观察`;
+  if (primary && cluster.category === "出行与探店") return `${primary}：周末可以去哪里`;
   if (primary && cluster.category === "饮食与健康") return `${primary}：先做一份清单`;
-  if (primary && cluster.category === "内容创作") return `${primary}：变成一个可发布选题`;
-  if (primary && cluster.category === "AI 与效率") return `${primary}：复现到日常工作里`;
   return albumTitleByCategory[cluster.category]?.[0] ?? `${cluster.subCategory || "待补充备注"}：先复活 3 条`;
+}
+
+function buildWhyThisAlbum(cluster: AlbumCluster): string {
+  if (cluster.albumView === "saved_intent") return `这些收藏的用途都接近“${cluster.savedIntent}”，但内容主题可以不同，所以放在用途视角里一起看。`;
+  return `这些收藏内容本身都围绕“${cluster.category} / ${cluster.subCategory}”，用途可以不同，但主题适合一起整理。`;
 }
 
 function inferAlbumType(category: Category, subCategory: string): string {
@@ -225,18 +253,30 @@ function inferAlbumType(category: Category, subCategory: string): string {
   return "life_theme";
 }
 
-function buildSuggestedFirstAction(category: Category, subCategory: string): string {
-  if (category === "内容创作") return "先打开推荐的第一条，写出 1 个自己的选题标题。";
-  if (category === "AI 与效率") return "先复现第一条里的第一个工具步骤，保存截图或 prompt。";
+function buildSuggestedFirstAction(category: Category, subCategory: string, savedIntent?: SavedIntent): string {
+  if (savedIntent === "内容创作参考") return "先挑一条，决定它是借鉴标题、封面、结构还是观点，再生成行动卡。";
+  if (savedIntent === "工作决策参考") return "先挑一条最贴近当前工作的收藏，生成一张用于今天决策的小行动卡。";
+  if (savedIntent === "想复现") return "先挑一条教程，选择“照着做一次”，只复现第一步。";
+  if (category === "内容创作") return "先打开推荐的第一条，判断它适合做选题、封面还是脚本参考。";
+  if (category === "AI 与效率") return "先选择一个工具或 Prompt，用在今天真实工作的一小步里。";
   if (category === "出行与探店") return "先确认地点、时间、交通和预算，再放进一个候选日期。";
   if (category === "饮食与健康") return "先抄出食材或动作清单，标记今天能不能做。";
-  if (category === "生活与家居") return "先选一个不超过 1 平米的小区域，列出移动、丢掉、购买三类动作。";
-  if (category === "穿搭与消费") return "先提取风格关键词和核心单品，检查自己是否已有替代。";
   if (category === "情绪与关系") return "先摘出一句最触动的观点，再写一个自己的例子。";
-  if (category === "读书与思考") return "先用自己的话改写 3 句，并写下 1 个追问。";
-  return `先补一句为什么收藏这组「${subCategory}」，再重新生成行动卡。`;
+  return `先补一句为什么收藏这组“${subCategory}”，再决定要不要复活。`;
 }
 
+function normalizeSavedIntent(value: unknown): SavedIntent {
+  if (value === "想学习" || value === "想复现" || value === "想去" || value === "想买" || value === "想做" || value === "内容创作参考" || value === "工作决策参考" || value === "情绪共鸣" || value === "以后查阅" || value === "暂时保存") return value;
+  const text = String(value ?? "");
+  if (/创作|选题|封面|内容/.test(text)) return "内容创作参考";
+  if (/工作|决策|效率|SOP|流程|自动化/.test(text)) return "工作决策参考";
+  if (/复现|照着|模仿/.test(text)) return "想复现";
+  if (/学习|教程|练习/.test(text)) return "想学习";
+  if (/旅行|路线|探店|展览|去/.test(text)) return "想去";
+  if (/买|购物|种草|消费/.test(text)) return "想买";
+  if (/情绪|关系|共鸣/.test(text)) return "情绪共鸣";
+  return "以后查阅";
+}
 function dedupeItems(items: SavedItem[]): SavedItem[] {
   const seen = new Set<string>();
   return items.filter((item) => {
