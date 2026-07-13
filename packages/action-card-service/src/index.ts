@@ -14,6 +14,8 @@ const categoryPlanType: Record<Category, PlanType> = {
   内容创作: "creative",
   "AI 与效率": "workflow",
   技能学习: "learning",
+  工作与职业: "workflow",
+  商业与经营: "workflow",
   出行与探店: "travel",
   饮食与健康: "recipe",
   生活与家居: "life",
@@ -114,6 +116,8 @@ const albumTitleByCategory: Record<Category, string[]> = {
   内容创作: ["视频剪辑和内容制作", "封面标题和选题素材", "小红书图文创作灵感"],
   "AI 与效率": ["AI Prompt 和决策辅助", "效率工作流复现清单", "可复制工具方法"],
   技能学习: ["最近最想学会的技能", "一次只练一个小动作", "技能入门练习清单"],
+  工作与职业: ["招聘求职和团队机会", "值得后续联系的职业线索", "职场成长和工作方法"],
+  商业与经营: ["商业案例和经营方法", "独立站与跨境经营", "选品定价和变现参考"],
   出行与探店: ["周末展览和城市去处", "想去的城市和路线", "探店与展览候选"],
   饮食与健康: ["低卡饮食与备餐", "今天可以开始的饮食小计划", "健康练习清单"],
   生活与家居: ["把家里一个角落整理好", "租房改造和收纳计划", "周末生活改造"],
@@ -131,6 +135,10 @@ const albumTitleByIntent: Record<SavedIntent, string> = {
   想做: "可以照着做一次",
   内容创作参考: "可以写成内容的灵感",
   工作决策参考: "工作决策参考",
+  求职关注: "求职和岗位线索",
+  创业团队参考: "创业团队和合作机会",
+  以后联系: "后续可能要联系的人和机会",
+  商业案例参考: "值得拆解的商业案例",
   情绪共鸣: "值得写进手帐或复盘",
   以后查阅: "只是想以后再看的内容",
   暂时保存: "待补充用途的收藏"
@@ -148,34 +156,44 @@ export function generateSmartAlbums(savedItems: SavedItem[], now = new Date()): 
 function buildAlbumClusters(items: SavedItem[]): AlbumCluster[] {
   const domainGroups = new Map<string, SavedItem[]>();
   const intentGroups = new Map<string, SavedItem[]>();
+  const lowConfidenceItems: SavedItem[] = [];
 
   items.forEach((item) => {
     const domain = normalizeRuntimeCategory(item.contentDomain ?? item.category);
     const subDomain = item.contentSubDomain || item.subCategory || item.keywords[0] || "主题整理";
-    const domainKey = `${domain}:${subDomain}`;
-    domainGroups.set(domainKey, [...(domainGroups.get(domainKey) ?? []), item]);
+    if (item.confidence === "low" || item.classificationConfidence === "low" || domain === "暂存") {
+      lowConfidenceItems.push(item);
+    } else {
+      const domainKey = `${domain}:${subDomain}`;
+      domainGroups.set(domainKey, [...(domainGroups.get(domainKey) ?? []), item]);
+    }
 
     const intent = normalizeSavedIntent(item.savedIntent || item.intent);
     const intentKey = `intent:${intent}`;
     intentGroups.set(intentKey, [...(intentGroups.get(intentKey) ?? []), item]);
   });
 
-  const domainClusters = [...domainGroups.entries()].map(([key, group]) => buildCluster(key, "content_domain", group));
-  const intentClusters = [...intentGroups.entries()].map(([key, group]) => buildCluster(key, "saved_intent", group));
-  return [...domainClusters, ...intentClusters].filter((cluster) => cluster.items.length > 0);
+  const domainClusters = [...domainGroups.entries()]
+    .filter(([, group]) => group.length >= 2)
+    .map(([key, group]) => buildCluster(key, "content_domain", group));
+  const lowConfidenceCluster = lowConfidenceItems.length > 0 ? [buildCluster("暂存:待确认分类", "content_domain", lowConfidenceItems)] : [];
+  const intentClusters = [...intentGroups.entries()]
+    .filter(([, group]) => group.length >= 2)
+    .map(([key, group]) => buildCluster(key, "saved_intent", group));
+  return [...domainClusters, ...lowConfidenceCluster, ...intentClusters].filter((cluster) => cluster.items.length > 0);
 }
 
 function buildCluster(key: string, albumView: "content_domain" | "saved_intent", group: SavedItem[]): AlbumCluster {
   const sortedItems = [...group].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   const first = sortedItems[0];
-  const category = normalizeRuntimeCategory(first.contentDomain ?? first.category);
+  const category = key.startsWith("暂存:") ? "暂存" : normalizeRuntimeCategory(first.contentDomain ?? first.category);
   const savedIntent = normalizeSavedIntent(first.savedIntent || first.intent);
   const keywords = pickAlbumKeywords(sortedItems);
   return {
     key,
     albumView,
     category,
-    subCategory: albumView === "saved_intent" ? savedIntent : first.contentSubDomain || first.subCategory || keywords[0] || "主题整理",
+    subCategory: key.startsWith("暂存:") ? "待确认分类" : albumView === "saved_intent" ? savedIntent : first.contentSubDomain || first.subCategory || keywords[0] || "主题整理",
     savedIntent: albumView === "saved_intent" ? savedIntent : undefined,
     items: sortedItems,
     keywords
@@ -232,6 +250,8 @@ function pickAlbumTitle(cluster: AlbumCluster): string {
   const primary = cluster.keywords.find((keyword) => keyword !== cluster.subCategory) ?? cluster.subCategory;
   if (primary && cluster.category === "AI 与效率") return `${primary}：AI Prompt 和效率方法`;
   if (primary && cluster.category === "内容创作") return `${primary}：内容制作素材`;
+  if (primary && cluster.category === "工作与职业") return `${primary}：职业机会和工作线索`;
+  if (primary && cluster.category === "商业与经营") return `${primary}：商业经营参考`;
   if (primary && cluster.category === "情绪与关系") return `${primary}：关系和自我观察`;
   if (primary && cluster.category === "出行与探店") return `${primary}：周末可以去哪里`;
   if (primary && cluster.category === "饮食与健康") return `${primary}：先做一份清单`;
@@ -246,6 +266,8 @@ function buildWhyThisAlbum(cluster: AlbumCluster): string {
 function inferAlbumType(category: Category, subCategory: string): string {
   if (category === "内容创作") return "creative_theme";
   if (category === "AI 与效率") return "workflow_theme";
+  if (category === "工作与职业") return "career_theme";
+  if (category === "商业与经营") return "business_theme";
   if (category === "技能学习") return "learning_theme";
   if (category === "出行与探店") return subCategory.includes("探店") ? "shop_theme" : "travel_theme";
   if (category === "饮食与健康") return "recipe_health_theme";
@@ -256,9 +278,14 @@ function inferAlbumType(category: Category, subCategory: string): string {
 function buildSuggestedFirstAction(category: Category, subCategory: string, savedIntent?: SavedIntent): string {
   if (savedIntent === "内容创作参考") return "先挑一条，决定它是借鉴标题、封面、结构还是观点，再生成行动卡。";
   if (savedIntent === "工作决策参考") return "先挑一条最贴近当前工作的收藏，生成一张用于今天决策的小行动卡。";
+  if (savedIntent === "求职关注") return "先挑一条岗位或团队机会，确认角色、地点、要求和下一步联系动作。";
+  if (savedIntent === "创业团队参考") return "先挑一条团队机会，判断它和你的城市、能力、时间是否匹配。";
+  if (savedIntent === "商业案例参考") return "先挑一条商业案例，记录它的用户、产品、定价和可复用判断。";
   if (savedIntent === "想复现") return "先挑一条教程，选择“照着做一次”，只复现第一步。";
   if (category === "内容创作") return "先打开推荐的第一条，判断它适合做选题、封面还是脚本参考。";
   if (category === "AI 与效率") return "先选择一个工具或 Prompt，用在今天真实工作的一小步里。";
+  if (category === "工作与职业") return "先确认岗位、团队、城市和联系入口，再决定要不要跟进。";
+  if (category === "商业与经营") return "先记录这个案例的产品、客单价、获客方式和可借鉴点。";
   if (category === "出行与探店") return "先确认地点、时间、交通和预算，再放进一个候选日期。";
   if (category === "饮食与健康") return "先抄出食材或动作清单，标记今天能不能做。";
   if (category === "情绪与关系") return "先摘出一句最触动的观点，再写一个自己的例子。";
@@ -266,8 +293,11 @@ function buildSuggestedFirstAction(category: Category, subCategory: string, save
 }
 
 function normalizeSavedIntent(value: unknown): SavedIntent {
-  if (value === "想学习" || value === "想复现" || value === "想去" || value === "想买" || value === "想做" || value === "内容创作参考" || value === "工作决策参考" || value === "情绪共鸣" || value === "以后查阅" || value === "暂时保存") return value;
+  if (value === "想学习" || value === "想复现" || value === "想去" || value === "想买" || value === "想做" || value === "内容创作参考" || value === "工作决策参考" || value === "求职关注" || value === "创业团队参考" || value === "以后联系" || value === "商业案例参考" || value === "情绪共鸣" || value === "以后查阅" || value === "暂时保存") return value;
   const text = String(value ?? "");
+  if (/招聘|求职|岗位|简历|面试/.test(text)) return "求职关注";
+  if (/创业团队|合伙人|加入公司|以后联系/.test(text)) return "创业团队参考";
+  if (/商业案例|独立站|跨境|选品|定价|客单价|毛利/.test(text)) return "商业案例参考";
   if (/创作|选题|封面|内容/.test(text)) return "内容创作参考";
   if (/工作|决策|效率|SOP|流程|自动化/.test(text)) return "工作决策参考";
   if (/复现|照着|模仿/.test(text)) return "想复现";
