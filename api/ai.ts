@@ -1,5 +1,12 @@
 declare const process: { env: Record<string, string | undefined> };
-declare const fetch: unknown;
+type FetchResponse = {
+  ok: boolean;
+  status: number;
+  statusText: string;
+  json: () => Promise<unknown>;
+  text: () => Promise<string>;
+};
+declare const fetch: (input: string, init?: Record<string, unknown>) => Promise<FetchResponse>;
 
 type ApiRequest = {
   method?: string;
@@ -127,28 +134,38 @@ async function sendMockFallback(res: ApiResponse, task: AiTask, payload: unknown
 }
 
 async function executeRealProviderTask(config: AiConfig, task: AiTask, payload: unknown): Promise<unknown> {
-  const [{ generateSmartAlbums }, aiService] = await Promise.all([
-    import("../packages/action-card-service/src/index"),
-    import("../packages/ai-service/src/index")
-  ]);
-  const provider = aiService.createAiProvider(config, aiService.createMockAiProvider({ generateSmartAlbums }));
+  const fallback = await executeMockTask(task, payload);
+  const response = await fetch(`${config.baseUrl}/chat/completions`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${config.apiKey}`
+    },
+    body: JSON.stringify({
+      model: config.model,
+      temperature: 0.2,
+      messages: [
+        {
+          role: "system",
+          content: "You are a private collection revival assistant. Return strict JSON only. Never copy full original posts."
+        },
+        {
+          role: "user",
+          content: buildProviderPrompt(task, payload, fallback)
+        }
+      ]
+    })
+  });
 
-  switch (task) {
-    case "classify_action_card":
-      return provider.classifyAndGenerateActionCard(normalizeShareInput(payload));
-    case "generate_smart_albums":
-      return provider.generateSmartAlbums(normalizeSmartAlbumInput(payload));
-    case "regenerate_action_card": {
-      const record = isRecord(payload) ? payload : {};
-      return provider.regenerateActionCard(typeof record.savedItemId === "string" ? record.savedItemId : "", record);
-    }
-    case "summarize_import_batch":
-      return provider.summarizeImportBatch(payload);
-    case "generate_search_keywords":
-      return provider.generateSearchKeywords(normalizeShareInput(payload));
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(`AI_API_ERROR_${response.status}${text ? `: ${text.slice(0, 160)}` : ""}`);
   }
-}
 
+  const raw = await response.json();
+  const content = readString((raw as any)?.choices?.[0]?.message?.content);
+  return extractJson(content) ?? fallback;
+}
 async function executeMockTask(task: AiTask, payload: unknown): Promise<unknown> {
   switch (task) {
     case "classify_action_card":
@@ -174,6 +191,36 @@ async function executeMockTask(task: AiTask, payload: unknown): Promise<unknown>
   }
 }
 
+function buildProviderPrompt(task: AiTask, payload: unknown, fallback: unknown): string {
+  return [
+    "Task: " + task,
+    "Return strict JSON matching the fallback shape. Make action steps concrete, private, and 5-30 minutes long.",
+    "Input:",
+    JSON.stringify(payload),
+    "Fallback shape:",
+    JSON.stringify(fallback)
+  ].join("\n");
+}
+
+function extractJson(value: string): unknown {
+  if (!value) return undefined;
+  const cleaned = value.trim().replace(/^```(?:json)?/i, "").replace(/```$/i, "").trim();
+  for (const candidate of [cleaned, sliceJson(cleaned, "{", "}"), sliceJson(cleaned, "[", "]")]) {
+    if (!candidate) continue;
+    try {
+      return JSON.parse(candidate);
+    } catch {
+      // Try the next possible JSON slice.
+    }
+  }
+  return undefined;
+}
+
+function sliceJson(value: string, startToken: "{" | "[", endToken: "}" | "]"): string {
+  const start = value.indexOf(startToken);
+  const end = value.lastIndexOf(endToken);
+  return start >= 0 && end > start ? value.slice(start, end + 1) : "";
+}
 function buildMockClassification(input: ReturnType<typeof normalizeShareInput>) {
   const text = [input.title, input.rawShareText, input.userNote, input.sourceUrl].filter(Boolean).join(" ");
   const category = inferCategory(text);
