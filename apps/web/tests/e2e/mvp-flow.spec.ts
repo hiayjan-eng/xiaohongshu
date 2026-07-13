@@ -3,8 +3,8 @@ import { collectConsoleErrors, expectNoConsoleErrors, importTestNote, readAppSta
 
 const pages = [
   { path: "/", heading: "别让收藏夹替你努力" },
-  { path: "/dashboard", heading: "今天，从一条收藏开始" },
-  { path: "/import", heading: "先导入一条真实收藏" },
+  { path: "/dashboard", heading: "先把旧收藏捡回来" },
+  { path: "/import", heading: "先扫描旧收藏，再补充导入新收藏" },
   { path: "/albums", heading: "智能专辑" },
   { path: "/old-import", heading: "把旧收藏先整理成专辑" },
   { path: "/search", heading: "找回你收藏过的那一条" },
@@ -30,7 +30,7 @@ test.describe("MVP page health and import flow", () => {
 
     let state = await readAppState(page);
     expect(state.savedItems.length).toBeGreaterThanOrEqual(20);
-    expect(state.actionCards.length).toBeGreaterThanOrEqual(20);
+    expect(state.actionCards.length).toBe(0);
     await expect(page.getByText("SavedItem")).toBeVisible();
     await expect(page.getByText("ActionCard")).toBeVisible();
     await expect(page.getByText("今日推荐")).toBeVisible();
@@ -56,17 +56,17 @@ test.describe("MVP page health and import flow", () => {
     await page.getByTestId("qa-import-demo").click();
     await expect.poll(async () => (await readAppState(page)).savedItems.length).toBeGreaterThanOrEqual(20);
     state = await readAppState(page);
-    expect(state.actionCards.length).toBeGreaterThanOrEqual(20);
+    expect(state.actionCards.length).toBe(0);
     await expectNoConsoleErrors(errors);
   });
 
-  test("imports a new Xiaohongshu share and persists searchable action-card data", async ({ page }) => {
+  test("imports a new Xiaohongshu share as searchable saved index and creates card on demand", async ({ page }) => {
     const errors = collectConsoleErrors(page);
     await resetDemoData(page);
     const item = await importTestNote(page);
     const state = await readAppState(page);
     const savedItem = state.savedItems.find((entry) => entry.id === item.id);
-    const actionCard = state.actionCards.find((card) => card.savedItemId === item.id);
+    expect(state.actionCards.some((card) => card.savedItemId === item.id)).toBe(false);
 
     expect(savedItem?.sourceUrl).toBe("https://www.xiaohongshu.com/explore/test-revival-note");
     expect(savedItem?.title).toBe("小红书封面设计技巧");
@@ -77,8 +77,10 @@ test.describe("MVP page health and import flow", () => {
     expect(savedItem?.keywords.length).toBeGreaterThan(0);
     expect(savedItem?.entities.length).toBeGreaterThan(0);
     expect(savedItem?.searchableText).toContain("封面");
+    await page.getByTestId("revive-imported-item").click();
+    await expect.poll(async () => (await readAppState(page)).actionCards.some((card) => card.savedItemId === item.id)).toBe(true);
+    const actionCard = (await readAppState(page)).actionCards.find((card) => card.savedItemId === item.id);
     expect(actionCard?.nextAction).toBeTruthy();
-    expect(actionCard?.output).toBeTruthy();
     expect(actionCard?.tasks.length).toBeGreaterThan(0);
     expect(state.importBatches?.[0]?.source).toBe("manual_single");
     expect(state.importBatches?.[0]?.importedCount).toBe(1);
