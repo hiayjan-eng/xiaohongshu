@@ -1,4 +1,4 @@
-# 浏览器扩展 Beta 与商店准备包
+﻿# 浏览器扩展 Beta 与商店准备包
 
 当前扩展已经从 POC 进入本地 Beta：它仍然是用户手动安装的 unpacked extension，不是 Chrome Web Store / Edge Add-ons 正式版。它的作用是让用户在自己已登录的小红书网页版页面里，主动点击后扫描当前已加载的收藏卡片，再把待导入清单交给 Web MVP 的 `/old-import`。
 
@@ -13,13 +13,25 @@ pnpm --filter @revival/extension build
 会生成两个产物：
 
 - `release-artifacts/extension-beta`：Chrome / Edge 开发者模式下加载的已解压扩展目录。
-- `release-artifacts/collection-revival-extension-beta-v0.2.1.zip`：给测试用户下载或留档的 Beta ZIP。
+- `release-artifacts/collection-revival-extension-beta-v0.2.2.zip`：给测试用户下载或留档的 Beta ZIP。
 
 同时构建脚本会复制一份到：
 
-- `apps/web/public/downloads/collection-revival-extension-beta-v0.2.1.zip`
+- `apps/web/public/downloads/collection-revival-extension-beta-v0.2.2.zip`
 
 线上 `/old-import` 可以用这个 ZIP 作为测试安装入口。
+
+## v0.2.2 更新说明
+
+- 扫描主按钮前置到 popup 首屏。
+- 新增扫描进度条、扫描上限选择和实时数量反馈。
+- “尽可能扫描全部”使用动态进度，不显示虚假的固定百分比。
+- 扫描范围收紧到当前激活收藏区域中的可见卡片，减少隐藏标签或非收藏内容混入。
+- 新增疑似本人发布筛选，只标记不默认删除。
+- Web 端可以同步扩展里的扫描状态，返回 `/old-import` 后会自动恢复连接和同步进度。
+- 增加 background 自动补注入 Web Bridge，降低 Chrome / Edge 安装或更新后反复刷新概率。
+- 增加标题、作者、URL 和可见文本的清洗逻辑，减少乱码、不可见字符和脏标题。
+- 结果列表限制首屏渲染数量，避免 1000 条以上结果造成 popup 卡顿。
 
 ## 已具备的 Beta 能力
 
@@ -69,3 +81,4 @@ pnpm --filter @revival/extension build
 ## 不能做的边界
 
 不要加入自动登录、验证码绕过、后台定时爬取、云端批量抓取、公共数据收集，也不要把小红书原帖全文、评论、视频或图片复制进本产品。正式版仍然应该坚持“用户本机、用户本人页面、用户主动点击、先确认后导入”的边界。
+
