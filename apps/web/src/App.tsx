@@ -791,7 +791,8 @@ export function App() {
       <ThemeProvider themeId={themeId}>
         <WelcomeHero
           onEnterWorkspace={() => setActiveView("dashboard")}
-          onStartImport={() => setActiveView("import")}
+          onStartImport={() => setActiveView("old-import")}
+          onQuickImport={() => setActiveView("import")}
           onToday={() => setActiveView("dashboard")}
         />
         <RewardConfetti burstId={rewardBurstId} />
@@ -847,7 +848,7 @@ export function App() {
           <div className="topbar-actions">
             <button className="icon-text-button" onClick={() => setActiveView("import")}>
               <Share2 size={17} />
-              复活一条
+              导入一条
             </button>
             <div className="user-chip">{state.user.name}</div>
           </div>
@@ -1064,7 +1065,7 @@ export function App() {
   );
 }
 
-function WelcomeHero(props: { onEnterWorkspace: () => void; onStartImport: () => void; onToday: () => void }) {
+function WelcomeHero(props: { onEnterWorkspace: () => void; onStartImport: () => void; onQuickImport: () => void; onToday: () => void }) {
   const [spotlight, setSpotlight] = useState({ x: 66, y: 36 });
   const demoItems = [
     { source: "深圳周末路线", meta: "小红书链接", action: "今天先选 1 个街区", time: "15分钟" },
@@ -1097,7 +1098,7 @@ function WelcomeHero(props: { onEnterWorkspace: () => void; onStartImport: () =>
         </button>
         <div className="welcome-nav-actions">
           <button className="welcome-link-button" onClick={props.onEnterWorkspace}>进入工作台</button>
-          <button className="welcome-outline-button" onClick={props.onStartImport}>模拟分享</button>
+          <button className="welcome-outline-button" onClick={props.onQuickImport}>导入一条新收藏</button>
         </div>
       </nav>
 
@@ -1105,11 +1106,11 @@ function WelcomeHero(props: { onEnterWorkspace: () => void; onStartImport: () =>
         <div className="welcome-copy reveal-up">
           <span className="welcome-kicker"><Sparkles size={16} /> AI 收藏行动助手</span>
           <h1>别让收藏夹替你努力</h1>
-          <p>把小红书里那些想学、想去、想做、想试的内容，变成今天可以开始的一步。</p>
+          <p>先把吃灰的旧收藏整理成主题和用途；真正想行动时，再生成一张小行动卡。</p>
           <div className="welcome-cta-row">
             <button className="welcome-primary-button" onClick={props.onStartImport}>
               <Share2 size={18} />
-              复活一条收藏
+              扫描我的旧收藏
             </button>
             <button className="welcome-secondary-button" onClick={props.onToday}>
               <Play size={17} />
@@ -1118,7 +1119,7 @@ function WelcomeHero(props: { onEnterWorkspace: () => void; onStartImport: () =>
           </div>
           <div className="welcome-proof-row" aria-label="产品能力">
             <span>自动分类</span>
-            <span>行动卡</span>
+            <span>用途识别</span>
             <span>找回原帖</span>
             <span>今日 1-3 条</span>
           </div>
@@ -1150,7 +1151,7 @@ function WelcomeHero(props: { onEnterWorkspace: () => void; onStartImport: () =>
             {demoItems.map((item, index) => (
               <article className="revived-card" style={{ "--stagger": index } as React.CSSProperties} key={item.action}>
                 <div className="revived-meta">
-                  <span>行动卡</span>
+                  <span>用途识别</span>
                   <small>{item.time}</small>
                 </div>
                 <strong>{item.action}</strong>
@@ -1190,8 +1191,8 @@ function DashboardView(props: {
       <section className="dashboard-hero-v3 reveal-up">
         <div className="dashboard-hero-copy-v3">
           <span className="welcome-kicker"><Sparkles size={16} /> 今日复活</span>
-          <h1>今天，从一条收藏开始</h1>
-          <p>不用翻收藏夹，系统每天帮你挑 1-3 条可以真正行动的内容。</p>
+          <h1>先把旧收藏捡回来</h1>
+          <p>扫描旧收藏，整理成主题和用途；等你决定复活哪一条，再生成行动卡。</p>
           <div className="dashboard-search-prompt" aria-label="全局搜索提示">
             <Search size={18} />
             <span>搜地点、技能、店名、菜名、工具名，找回你收藏过的原帖</span>
@@ -1232,7 +1233,7 @@ function DashboardView(props: {
 
         <section className="quick-revive-board reveal-up delay-2">
           <div className="section-heading-soft">
-            <span><Share2 size={18} /> 复活一条新收藏</span>
+            <span><Share2 size={18} /> 导入一条新收藏</span>
             <small>分享入口预留，先用模拟导入跑通</small>
           </div>
           <p className="panel-intro">把刚刚心动的链接放进来，系统会自动判断它适合学习、出行、做饭、探店还是创作。</p>
@@ -1313,22 +1314,22 @@ function ImportView(props: {
   const usingMock = props.aiStatus.mode === "mock" || props.aiStatus.fallbackActive;
   const methods: Array<{ title: string; description: string; action: string; secondaryAction?: string; status: string; primary: boolean; onClick?: () => void; onSecondaryClick?: () => void }> = [
     {
-      title: "新收藏导入",
-      description: "如果你是第一次测试，先导入一条真实收藏。只要有链接，再补一个标题或分享文案，就能生成行动卡。",
-      action: "复活一条新收藏",
-      status: "主入口",
-      primary: true,
-      onClick: () => document.getElementById("single-import-panel")?.scrollIntoView({ behavior: "smooth", block: "start" })
-    },
-    {
       title: "旧收藏扫描 Beta",
-      description: "高级测试功能，需要先安装本地浏览器扩展 Beta。普通朋友测试可以先跳过。",
-      action: "我已安装扩展，去旧收藏扫描页",
-      secondaryAction: "查看扩展安装说明",
-      status: "高级测试功能",
-      primary: false,
+      description: "产品主路径：扫描你本人小红书网页版已加载的旧收藏，先整理成主题和用途。当前需要安装桌面浏览器扩展 Beta。",
+      action: "进入旧收藏扫描控制台",
+      secondaryAction: "下载/查看扩展安装说明",
+      status: "主入口 · Beta",
+      primary: true,
       onClick: () => props.setActiveView("old-import"),
       onSecondaryClick: () => props.setActiveView("old-import")
+    },
+    {
+      title: "新收藏导入",
+      description: "手动粘贴适合补充测试，也适合新看到的一条收藏。导入后先进入索引，不会立刻变成任务。",
+      action: "导入一条新收藏",
+      status: "补充入口",
+      primary: false,
+      onClick: () => document.getElementById("single-import-panel")?.scrollIntoView({ behavior: "smooth", block: "start" })
     },
     {
       title: "批量链接导入",
@@ -1340,7 +1341,7 @@ function ImportView(props: {
     },
     {
       title: "浏览器书签导入",
-      description: "后续支持 Chrome / Edge 书签导入，把网页收藏整理成行动卡。",
+      description: "后续支持 Chrome / Edge 书签导入，把网页收藏整理成行动索引。",
       action: "Coming soon",
       status: "Coming soon",
       primary: false,
@@ -1353,17 +1354,16 @@ function ImportView(props: {
       status: "Coming soon",
       primary: false,
       onClick: undefined
-    }
-  ];
+    }  ];
 
   return (
     <>
       <div className="page-title-row airy-title">
         <div>
           <p className="eyebrow">导入中心</p>
-          <h1>先导入一条真实收藏</h1>
+          <h1>先扫描旧收藏，再补充导入新收藏</h1>
         </div>
-        <p className="page-lead">朋友测试建议从新收藏导入开始：导入一条收藏，看行动卡是否具体，再去智能专辑和搜索里验证能不能找回原帖。</p>
+        <p className="page-lead">旧收藏扫描是主路径；如果你还没安装扩展，可以先用手动导入补充测试。导入后先生成收藏索引和智能专辑，想行动时再复活单条。</p>
       </div>
 
       {props.lastImportResult && (
@@ -1423,7 +1423,7 @@ function ImportView(props: {
 
       <section id="single-import-panel" className="tool-panel single revive-panel import-page-panel">
         <div className="section-heading-soft">
-          <span><Share2 size={18} /> 复活一条新收藏</span>
+          <span><Share2 size={18} /> 导入一条新收藏</span>
           <small>第一次测试，先从这里开始</small>
         </div>
         {usingMock && <p className="quiet-copy">当前使用：本地规则 / Mock AI。它能跑通流程，但真实 AI 会让分类和行动卡更贴近原帖主题。</p>}
@@ -1689,7 +1689,7 @@ function PoolView(props: {
                   <td>{formatDate(item.createdAt)}</td>
                   <td>
                     <div className="table-actions">
-                      <button onClick={() => props.viewActionCard(item.id)}>行动卡</button>
+                      <button onClick={() => props.viewActionCard(item.id)}>查看</button>
                       {hasSourceUrl(item) ? <button onClick={() => props.openSource(item)}>原帖</button> : <button disabled>暂无原帖</button>}
                     </div>
                   </td>
@@ -2035,7 +2035,7 @@ function SmartAlbumsView(props: {
                         <small>{card?.nextAction ?? item.summary}</small>
                       </span>
                       <div>
-                        <button onClick={() => props.viewActionCard(item.id)}>查看卡片</button>
+                        <button onClick={() => props.viewActionCard(item.id)}>{card ? "查看卡片" : "复活这条"}</button>
                         {hasSourceUrl(item) ? <button onClick={() => props.openSource(item)}>原帖</button> : <button disabled>暂无原帖</button>}
                       </div>
                     </article>
@@ -2069,7 +2069,7 @@ function SmartAlbumsView(props: {
                     <span>{card?.nextAction ?? item.summary}</span>
                   </div>
                   <div className="qa-row-actions">
-                    <button onClick={() => props.viewActionCard(item.id)}>行动卡</button>
+                    <button onClick={() => props.viewActionCard(item.id)}>查看</button>
                     {hasSourceUrl(item) ? <button onClick={() => props.openSource(item)}>原帖</button> : <button disabled>暂无原帖</button>}
                   </div>
                 </article>
@@ -2688,8 +2688,8 @@ function SavedItemCard(props: {
       <p>{formatItemSummary(props.item)}</p>
       <div className="tag-list">
         {props.item.keywords.slice(0, 5).map((keyword) => <span key={keyword}>{keyword}</span>)}
+        <span>{props.actionCard ? "已有行动卡" : "尚未复活"}</span>
       </div>
-      <StatusButtons item={props.item} changeStatus={props.changeStatus} />
       <div className="card-actions">
         {hasSourceUrl(props.item) ? (
           <button onClick={() => props.openSource(props.item)} data-testid="open-source">
@@ -2704,7 +2704,7 @@ function SavedItemCard(props: {
         )}
         <button className="primary-button" onClick={() => props.viewActionCard(props.item.id)} data-testid="view-action-card">
           <Play size={16} />
-          查看卡片
+          {props.actionCard ? "查看卡片" : "复活这条"}
         </button>
       </div>
       {props.actionCard && <small className="next-action">{isCompleted ? "不是收藏更多，是完成一条。" : props.actionCard.nextAction}</small>}
@@ -2994,7 +2994,7 @@ function readExtensionImportFromHash(): ExtensionImportPayload | null {
   const encoded = window.location.hash.replace("#extension-import=", "");
   try {
     const payload = decodeBase64UrlJson<ExtensionImportPayload>(encoded);
-    if (payload?.source !== "browser-extension-poc" || !Array.isArray(payload.items)) return null;
+    if ((payload?.source !== "browser-extension-poc" && payload?.source !== "browser-extension-beta") || !Array.isArray(payload.items)) return null;
     return payload;
   } catch {
     return null;
@@ -3083,16 +3083,16 @@ function normalizeImportInput(input: ShareInput): ShareInput {
   return parseShareInput(input);
 }
 
-function normalizeDisplayCategory(item: Pick<SavedItem, "category" | "subCategory" | "classificationConfidence">): { category: Category; subCategory: string } {
-  const category = (item.category as string) === "其他" ? "暂存" : item.category;
+function normalizeDisplayCategory(item: Pick<SavedItem, "category" | "subCategory" | "classificationConfidence"> & Partial<Pick<SavedItem, "contentDomain" | "contentSubDomain" | "confidence">>): { category: Category; subCategory: string; confidence?: string } {
+  const category = (item.contentDomain || item.category as string) === "其他" ? "暂存" : item.contentDomain || item.category;
   const safeCategory = (CATEGORIES as readonly string[]).includes(category) ? category as Category : "暂存";
-  const subCategory = item.subCategory && item.subCategory !== "其他" ? item.subCategory : safeCategory === "暂存" ? "待补充备注" : "主题整理";
-  return { category: safeCategory, subCategory };
+  const subCategory = item.contentSubDomain || (item.subCategory && item.subCategory !== "其他" ? item.subCategory : safeCategory === "暂存" ? "待补充备注" : "主题整理");
+  return { category: safeCategory, subCategory, confidence: item.confidence ?? item.classificationConfidence };
 }
 
-function formatCategoryLabel(item: Pick<SavedItem, "category" | "subCategory" | "classificationConfidence">): string {
-  const { category, subCategory } = normalizeDisplayCategory(item);
-  return category + " / " + subCategory + (item.classificationConfidence === "low" ? " · 低置信" : "");
+function formatCategoryLabel(item: Pick<SavedItem, "category" | "subCategory" | "classificationConfidence"> & Partial<Pick<SavedItem, "contentDomain" | "contentSubDomain" | "confidence">>): string {
+  const { category, subCategory, confidence } = normalizeDisplayCategory(item);
+  return category + " / " + subCategory + (confidence === "low" ? " · 低置信" : "");
 }
 
 function formatItemTitle(item: Pick<SavedItem, "title" | "rawShareText">): string {
