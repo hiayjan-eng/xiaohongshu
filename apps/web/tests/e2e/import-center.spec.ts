@@ -15,7 +15,7 @@ test.describe("Import Center architecture", () => {
     await resetDemoData(page);
 
     await page.goto("/import");
-    await expect(page.getByRole("heading", { name: "先导入一条真实收藏" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "先扫描旧收藏，再补充导入新收藏" })).toBeVisible();
     await expect(page.getByText("新收藏导入", { exact: true })).toBeVisible();
     await expect(page.getByText("旧收藏扫描 Beta", { exact: true })).toBeVisible();
 
@@ -27,6 +27,7 @@ test.describe("Import Center architecture", () => {
     await expect.poll(async () => (await readAppState(page)).importBatches?.[0]?.source).toBe("manual_single");
     const state = await readAppState(page);
     expect(state.importBatches?.[0]?.importedCount).toBe(1);
+    expect(state.importBatches?.[0]?.createdActionCardCount).toBe(0);
     expect(state.importBatchItems?.[0]?.status).toBe("imported");
     expect(state.savedItems.some((item) => item.sourceUrl.includes("import-center-test"))).toBe(true);
     await expectNoConsoleErrors(errors);
@@ -37,7 +38,7 @@ test.describe("Import Center architecture", () => {
     await resetDemoData(page);
 
     const payload = {
-      source: "browser-extension-poc",
+      source: "browser-extension-beta",
       sourcePlatform: "xiaohongshu",
       scannedAt: new Date().toISOString(),
       pageUrl: "https://www.xiaohongshu.com/user/profile/mock/collections",
