@@ -225,6 +225,31 @@ button:disabled {
   color: #7a4b32;
 }
 
+.diagnostics {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.diagnostics div {
+  display: grid;
+  gap: 3px;
+  padding: 9px 10px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.diagnostics span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.diagnostics strong {
+  color: var(--primary-dark);
+  font-size: 12px;
+}
+
 .stats {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
