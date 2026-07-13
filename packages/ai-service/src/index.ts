@@ -4,9 +4,12 @@ import type {
   AiClassificationResult,
   Category,
   ClassificationConfidence,
+  ContentDomain,
   EntityTag,
   ImportBatch,
+  ReviveIntent,
   SavedItem,
+  SavedIntent,
   ShareInput,
   SmartAlbum,
   TaskDraft
@@ -367,6 +370,12 @@ type CategoryInference = {
   whyThisCategory: string;
 };
 
+type SavedIntentInference = {
+  savedIntent: SavedIntent;
+  secondaryIntents: SavedIntent[];
+  whyThisIntent: string;
+};
+
 const categoryRules: CategoryRule[] = [
   { category: "内容创作", subCategory: "创作灵感", entityType: "creative_topic", terms: ["小红书", "账号运营", "笔记", "封面", "标题", "开头钩子", "评论区", "选题", "文案", "拍摄", "脚本", "图文", "排版", "短视频", "涨粉", "爆款", "内容运营"], intent: "用户可能想把这条收藏转成可发布的选题、封面结构、开头文案或内容复盘素材", whyThisCategory: "命中了内容创作、账号运营、标题封面或拍摄脚本相关线索" },
   { category: "AI 与效率", subCategory: "AI 工具", entityType: "tool", terms: ["AI工具", "AI 工具", "ChatGPT", "Claude", "Gemini", "Midjourney", "Codex", "codex", "代码助手", "AI编程", "AI 编程", "提示词", "prompt", "工作流", "自动化", "智能体", "插件", "工具清单", "SOP", "效率", "Notion", "Excel", "飞书", "办公"], intent: "用户可能想复现一个工具用法、提示词或工作流，并把它用进日常工作", whyThisCategory: "命中了 AI 工具、效率流程、自动化或 SOP 相关线索" },
@@ -414,12 +423,30 @@ const entityDictionary: Record<string, string[]> = {
 export function classifyAndGenerateActionCard(input: ShareInput): AiClassificationResult {
   const text = combineInput(input);
   const inference = inferCategoryWithConfidence(text, input);
+  const savedIntent = inferSavedIntent(text, input, inference);
   const entities = extractEntities(text, inference.category);
   const keywords = extractKeywords(text, inference.category, inference.subCategory, entities);
   const summary = buildSummary(input, inference.category, inference.subCategory, keywords, inference.confidence);
-  const actionCard = generateActionCard(inference.category, inference.subCategory, input, keywords, entities, inference.confidence, inference.intent);
-  const searchableText = buildSearchableText(input, inference, summary, keywords, entities, actionCard);
-  return { ...inference, summary, keywords, entities, searchableText, actionCard };
+  const actionCard = generateActionCard(inference.category, inference.subCategory, input, keywords, entities, inference.confidence, savedIntent.savedIntent);
+  const searchableText = buildSearchableText(input, inference, summary, keywords, entities, actionCard, savedIntent);
+  return {
+    contentDomain: inference.category,
+    contentSubDomain: inference.subCategory,
+    savedIntent: savedIntent.savedIntent,
+    secondaryIntents: savedIntent.secondaryIntents,
+    confidence: inference.confidence,
+    whyThisDomain: inference.whyThisCategory,
+    whyThisIntent: savedIntent.whyThisIntent,
+    category: inference.category,
+    subCategory: inference.subCategory,
+    intent: savedIntent.savedIntent,
+    whyThisCategory: inference.whyThisCategory,
+    summary,
+    keywords,
+    entities,
+    searchableText,
+    actionCard
+  };
 }
 
 function combineInput(input: ShareInput): string {
@@ -431,6 +458,10 @@ function inferCategoryWithConfidence(text: string, input: ShareInput): CategoryI
   const normalized = text.toLocaleLowerCase();
   const signalText = [input.title, input.rawShareText, input.userNote].filter(Boolean).join(" ").replace(/https?:\/\/\S+/g, "").trim();
   if (signalText.length < 4) return lowInfoInference("当前只有链接或极少文本，系统无法判断它更像学习、出行、做饭、创作还是消费。");
+
+  const special = inferSpecialCategory(normalized);
+  if (special) return special;
+
   const scored = categoryRules.map((rule) => ({ rule, score: rule.terms.reduce((sum, term) => normalized.includes(term.toLocaleLowerCase()) ? sum + (term.length >= 4 ? 2 : 1) : sum, 0) })).sort((a, b) => b.score - a.score);
   const best = scored[0];
   if (!best || best.score === 0) return lowInfoInference("没有命中足够明确的主题词，暂时不强行归到具体专辑。");
@@ -446,6 +477,75 @@ function inferCategoryWithConfidence(text: string, input: ShareInput): CategoryI
   };
 }
 
+function inferSpecialCategory(normalized: string): CategoryInference | undefined {
+  if (/(不用剪辑软件|ai\s*剪辑|ai剪辑|剪辑视频教程|视频教程)/i.test(normalized) && /剪辑|视频/.test(normalized)) {
+    return {
+      category: "内容创作",
+      subCategory: "视频剪辑",
+      confidence: "high",
+      intent: "用户可能想学习或复现一个 AI 辅助的视频剪辑方法。",
+      whyThisCategory: "虽然提到了 AI，但内容本身讲的是视频剪辑和内容制作，因此归入内容创作 / 视频剪辑。"
+    };
+  }
+  if (/(长脑子最快|顶级好脑|jung|mankiw|munger|musk|多角色|圆桌|战略认知|决策辅助)/i.test(normalized)) {
+    return {
+      category: "AI 与效率",
+      subCategory: /决策|战略|工作安排|时间分配/.test(normalized) ? "决策辅助" : "Prompt 工程",
+      confidence: "high",
+      intent: "用户可能想复现一个多角色 Prompt，用它辅助工作安排、商业认知或决策。",
+      whyThisCategory: "核心内容是多角色 Prompt 和 AI 辅助决策，不因出现自媒体、写作或账号运营而改成内容创作。"
+    };
+  }
+  return undefined;
+}
+
+
+function inferSavedIntent(text: string, input: ShareInput, inference: CategoryInference): SavedIntentInference {
+  const noteText = input.userNote.toLocaleLowerCase();
+  const allText = text.toLocaleLowerCase();
+  const fromNote = pickIntentFromText(noteText);
+  const primary = fromNote ?? pickIntentFromText(allText) ?? defaultIntentForCategory(inference.category);
+  const secondary = [
+    defaultIntentForCategory(inference.category),
+    /复现|照着|教程|方法|prompt|提示词|codex|工作流/i.test(allText) ? "想复现" as SavedIntent : undefined,
+    /写文章|写成内容|选题|封面|账号|小红书|自媒体/.test(noteText) ? "内容创作参考" as SavedIntent : undefined,
+    /决策|工作安排|商业认知|时间分配|变现|效率|sop/i.test(allText) ? "工作决策参考" as SavedIntent : undefined
+  ].filter((item): item is SavedIntent => Boolean(item));
+  return {
+    savedIntent: primary,
+    secondaryIntents: unique([primary, ...secondary]).filter((intent) => intent !== primary),
+    whyThisIntent: buildIntentReason(primary, input, inference)
+  };
+}
+
+function pickIntentFromText(text: string): SavedIntent | undefined {
+  if (!text) return undefined;
+  if (/写文章|写成内容|内容创作|选题|封面|账号|自媒体/.test(text)) return "内容创作参考";
+  if (/决策|工作安排|商业认知|时间分配|变现|sop|流程|自动化|效率/.test(text)) return "工作决策参考";
+  if (/复现|照着|复制|模仿|跑一遍|用到/.test(text)) return "想复现";
+  if (/学习|学会|教程|训练|练习|入门/.test(text)) return "想学习";
+  if (/想去|周末|旅行|展览|路线|探店|咖啡|餐厅/.test(text)) return "想去";
+  if (/想买|购买|种草|平替|测评|价格|下单/.test(text)) return "想买";
+  if (/做饭|做一次|执行|尝试|整理|改造/.test(text)) return "想做";
+  if (/情绪|触动|共鸣|关系|复盘|手帐/.test(text)) return "情绪共鸣";
+  return undefined;
+}
+
+function defaultIntentForCategory(category: ContentDomain): SavedIntent {
+  if (category === "内容创作") return "内容创作参考";
+  if (category === "AI 与效率") return "工作决策参考";
+  if (category === "技能学习" || category === "读书与思考") return "想学习";
+  if (category === "出行与探店") return "想去";
+  if (category === "穿搭与消费") return "想买";
+  if (category === "情绪与关系") return "情绪共鸣";
+  if (category === "暂存") return "暂时保存";
+  return "想做";
+}
+
+function buildIntentReason(intent: SavedIntent, input: ShareInput, inference: CategoryInference): string {
+  if (input.userNote.trim()) return `优先参考了你的备注，判断这条收藏更像“${intent}”。`;
+  return `根据标题和分享文本，它的内容主题是“${inference.category} / ${inference.subCategory}”，当前最可能的收藏用途是“${intent}”。`;
+}
 function lowInfoInference(whyThisCategory: string): CategoryInference {
   return { category: "暂存", subCategory: "待补充备注", confidence: "low", intent: "信息不足，先把它作为待补充收藏保存，之后补一句收藏原因再重新生成行动卡。", whyThisCategory };
 }
@@ -459,8 +559,10 @@ function inferSubCategory(category: Category, text: string, fallback: string): s
     if (has("拍摄", "短视频", "镜头")) return "拍摄脚本";
   }
   if (category === "AI 与效率") {
-    if (has("ai", "chatgpt", "claude", "提示词", "prompt", "智能体")) return "AI 工具";
-    if (has("sop", "工作流", "自动化", "流程")) return "效率工作流";
+    if (has("prompt", "提示词", "多角色", "圆桌", "jung", "mankiw", "munger", "musk")) return "Prompt 工程";
+    if (has("决策", "战略", "认知", "工作安排", "时间分配")) return "决策辅助";
+    if (has("ai", "chatgpt", "claude", "智能体", "codex")) return "AI 工具";
+    if (has("sop", "工作流", "自动化", "流程")) return "自动化工作流";
     if (has("职场", "汇报", "面试", "简历", "会议")) return "职场学习";
   }
   if (category === "技能学习") {
@@ -521,9 +623,9 @@ function buildSummary(input: ShareInput, category: Category, subCategory: string
   if (category === "暂存" || confidence === "low") return `这条收藏目前信息偏少，系统先按“${subCategory}”保存；补充一句收藏原因后，可以生成更具体的行动建议。`;
   return `这条收藏看起来与“${subCategory}”有关，可以先围绕“${topic}”做一个 5-30 分钟的小行动，而不是继续放在收藏夹里。`;
 }
-function generateActionCard(category: Category, subCategory: string, input: ShareInput, keywords: string[], entities: EntityTag[], confidence: ClassificationConfidence, intent: string): ActionCardDraft {
+function generateActionCard(category: Category, subCategory: string, input: ShareInput, keywords: string[], entities: EntityTag[], confidence: ClassificationConfidence, savedIntent: SavedIntent | ReviveIntent | string): ActionCardDraft {
   const topic = pickTopic(input, keywords, entities, category);
-  if (category === "暂存" || confidence === "low" || isLowInformationInput(input)) return buildLowInfoCard(topic, input, keywords, intent);
+  if (category === "暂存" || confidence === "low" || isLowInformationInput(input)) return buildLowInfoCard(topic, input, keywords, String(savedIntent));
   const common = { category, subCategory, topic };
 
   if (category === "内容创作") return card(common, "创作复用卡", `把“${topic}”转成 1 条能放进自己账号的选题或封面结构。`, "你收藏它大概率不是为了再看一遍，而是想复用标题、封面、开头或内容结构。", `打开原帖，只看“标题结构、封面构图、开头钩子、评论区高频问题”四处；用你的账号方向改写 1 个选题标题。`, ["原帖标题", "封面构图", "开头钩子", "评论区高频问题"], "1 条可发布选题或 1 个封面结构草稿", "20分钟", "中", "写出 1 个自己的选题标题，并标注它借鉴了原帖的哪个结构。", "不要整篇照抄，也不要一次整理成庞大的选题库。", "如果看不出可复用点，先补一句：我想借鉴它的标题、封面、内容结构还是评论洞察。", "如果这个选题能用，再把它加入本周创作计划。", [task("圈出 4 个复用点", "打开原帖，分别记下标题结构、封面构图、开头钩子、评论区问题。", "8分钟"), task("改写 1 个选题", "把复用点套到自己的账号方向，只写 1 条标题。", "8分钟"), task("保存产出", "把选题标题和借鉴点写进行动卡备注。", "4分钟")], { 可复用结构: ["标题结构", "封面构图", "开头钩子", "评论区问题"] });
@@ -594,11 +696,11 @@ function task(title: string, description: string, estimatedTime: string): TaskDr
   return { title, description, estimatedTime };
 }
 
-function buildSearchableText(input: ShareInput, inference: CategoryInference, summary: string, keywords: string[], entities: EntityTag[], actionCard: ActionCardDraft): string {
+function buildSearchableText(input: ShareInput, inference: CategoryInference, summary: string, keywords: string[], entities: EntityTag[], actionCard: ActionCardDraft, savedIntent: SavedIntentInference): string {
   const fieldText = Object.entries(actionCard.structuredFields).flatMap(([key, value]) => [key, Array.isArray(value) ? value.join(" ") : value]).join(" ");
   const taskText = actionCard.tasks.map((item) => `${item.title} ${item.description}`).join(" ");
   const entityText = entities.map((item) => `${item.type}:${item.value}`).join(" ");
-  return [input.sourceUrl, input.rawShareText, input.title, input.userNote, inference.category, inference.subCategory, inference.intent, inference.whyThisCategory, summary, keywords.join(" "), entityText, actionCard.title, actionCard.goal, actionCard.whySaved, actionCard.nextAction, actionCard.openOriginalFocus.join(" "), actionCard.output, actionCard.doneCriteria, actionCard.avoidDoing, actionCard.ifInfoMissing, actionCard.followUp, fieldText, taskText].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+  return [input.sourceUrl, input.rawShareText, input.title, input.userNote, inference.category, inference.subCategory, savedIntent.savedIntent, savedIntent.secondaryIntents.join(" "), inference.intent, inference.whyThisCategory, savedIntent.whyThisIntent, summary, keywords.join(" "), entityText, actionCard.title, actionCard.goal, actionCard.whySaved, actionCard.nextAction, actionCard.openOriginalFocus.join(" "), actionCard.output, actionCard.doneCriteria, actionCard.avoidDoing, actionCard.ifInfoMissing, actionCard.followUp, fieldText, taskText].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
 }
 
 function pickTopic(input: ShareInput, keywords: string[], entities: EntityTag[], category: Category): string {
