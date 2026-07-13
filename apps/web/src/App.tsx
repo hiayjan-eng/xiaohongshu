@@ -3813,11 +3813,18 @@ function getInitialAlbumId(): string | undefined {
 function detectDeveloperMode(): boolean {
   if (typeof window === "undefined") return false;
   const query = new URLSearchParams(window.location.search);
+  if (query.get("dev") === "0") {
+    window.localStorage.setItem("developerMode", "false");
+    return false;
+  }
   if (query.get("dev") === "1") {
     window.localStorage.setItem("developerMode", "true");
     return true;
   }
-  return import.meta.env.DEV || window.localStorage.getItem("developerMode") === "true";
+  const stored = window.localStorage.getItem("developerMode");
+  if (stored === "true") return true;
+  if (stored === "false") return false;
+  return import.meta.env.DEV;
 }
 
 function createHandshakeRequestId(): string {
