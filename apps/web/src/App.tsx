@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   Archive,
   BarChart3,
@@ -71,8 +71,11 @@ import {
 
 type ViewKey = "welcome" | "dashboard" | "import" | "old-import" | "search" | "pool" | "detail" | "plans" | "albums" | "insights" | "mobile" | "settings" | "real-test" | "qa";
 
-const EXTENSION_BETA_VERSION = "0.2.0";
+const EXTENSION_BETA_VERSION = "0.2.1";
 const EXTENSION_ZIP_FILE_NAME = `collection-revival-extension-beta-v${EXTENSION_BETA_VERSION}.zip`;
+const EXTENSION_PROTOCOL_VERSION = "collection-revival-web-bridge-v1";
+const EXTENSION_WEB_SOURCE = "collection-revival-web";
+const EXTENSION_SOURCE = "collection-revival-extension";
 type PoolViewMode = "cards" | "table";
 type ImportSuccessResult = { item: SavedItem; card?: ActionCard };
 
@@ -1518,49 +1521,176 @@ function OldImportView(props: {
   changeStatus: (itemId: string, status: ItemStatus) => void;
 }) {
   const items = props.latestBatch ? props.batchItems.filter((item) => item.batchId === props.latestBatch?.id) : [];
-  const [extensionStatus, setExtensionStatus] = useState<{ connected: boolean; checked: boolean; version?: string; message: string }>({
+  type ExtensionFailureReason =
+    | "PAGE_REFRESH_REQUIRED"
+    | "EXTENSION_NOT_DETECTED"
+    | "CONTENT_SCRIPT_NOT_INJECTED"
+    | "EXTENSION_VERSION_TOO_OLD"
+    | "PROTOCOL_VERSION_MISMATCH"
+    | "HANDSHAKE_TIMEOUT"
+    | "UNSUPPORTED_BROWSER"
+    | "EXTENSION_DISABLED";
+  type ExtensionStatus = {
+    connected: boolean;
+    checked: boolean;
+    readyReceived: boolean;
+    pingSent: boolean;
+    pongReceived: boolean;
+    version?: string;
+    protocolVersion?: string;
+    browser: string;
+    capabilities: string[];
+    requestId?: string;
+    lastCheckedAt?: string;
+    failureReason?: ExtensionFailureReason;
+    message: string;
+  };
+  const handshakeRequestRef = useRef("");
+  const timeoutRef = useRef<number | undefined>(undefined);
+  const [selectedGuide, setSelectedGuide] = useState<"chrome" | "edge">("chrome");
+  const [extensionStatus, setExtensionStatus] = useState<ExtensionStatus>({
     connected: false,
     checked: false,
+    readyReceived: false,
+    pingSent: false,
+    pongReceived: false,
+    browser: detectBrowserName(),
+    capabilities: [],
     message: "还没有检测扩展。安装后点击“检测扩展连接”，或刷新这个页面。"
   });
 
   function pingExtension() {
-    window.postMessage({ source: "collection-revival-web", type: "COLLECTION_REVIVAL_EXTENSION_PING" }, "*");
+    const requestId = createHandshakeRequestId();
+    handshakeRequestRef.current = requestId;
+    if (timeoutRef.current) window.clearTimeout(timeoutRef.current);
+    window.postMessage({
+      source: EXTENSION_WEB_SOURCE,
+      type: "COLLECTION_REVIVAL_EXTENSION_PING",
+      requestId,
+      protocolVersion: EXTENSION_PROTOCOL_VERSION,
+      webVersion: EXTENSION_BETA_VERSION,
+      timestamp: new Date().toISOString()
+    }, window.location.origin);
     setExtensionStatus((current) => ({
       ...current,
+      connected: false,
       checked: true,
-      message: current.connected ? current.message : "正在检测扩展连接。如果已经安装，请刷新页面或确认扩展已加载。"
+      pingSent: true,
+      pongReceived: false,
+      requestId,
+      lastCheckedAt: new Date().toLocaleString(),
+      failureReason: undefined,
+      message: "正在检测扩展连接。v0.2.1 会返回带 requestId 的 PONG。"
     }));
-    window.setTimeout(() => {
-      setExtensionStatus((current) => current.connected
+    timeoutRef.current = window.setTimeout(() => {
+      setExtensionStatus((current) => current.pongReceived
         ? current
-        : { connected: false, checked: true, message: "未检测到扩展。请先下载 ZIP、解压，并在 Chrome / Edge 开发者模式里加载已解压文件夹。" }
+        : {
+            ...current,
+            connected: false,
+            checked: true,
+            failureReason: current.readyReceived ? "HANDSHAKE_TIMEOUT" : "PAGE_REFRESH_REQUIRED",
+            message: current.readyReceived
+              ? "扩展脚本已出现过，但这次没有收到 PONG。请在扩展管理页点击重新加载，再刷新本页后检测。"
+              : "扩展可能已经安装，但当前网页还没有加载连接脚本。请刷新本页面后再次检测。"
+          }
       );
-    }, 900);
+    }, 3000);
   }
 
   useEffect(() => {
     function handleExtensionMessage(event: MessageEvent) {
       if (event.source !== window) return;
-      if (event.data?.source !== "collection-revival-extension") return;
-      if (event.data?.type !== "COLLECTION_REVIVAL_EXTENSION_READY") return;
-      setExtensionStatus({
-        connected: true,
+      if (event.origin !== window.location.origin) return;
+      if (event.data?.source !== EXTENSION_SOURCE) return;
+      if (!["COLLECTION_REVIVAL_EXTENSION_READY", "COLLECTION_REVIVAL_EXTENSION_PONG"].includes(event.data?.type)) return;
+
+      const version = String(event.data.extensionVersion || event.data.version || "");
+      const protocolVersion = String(event.data.protocolVersion || "");
+      const capabilities = Array.isArray(event.data.capabilities) ? event.data.capabilities.map(String) : [];
+      const browser = String(event.data.browser || detectBrowserName());
+      const versionTooOld = version !== EXTENSION_BETA_VERSION;
+      const protocolMismatch = Boolean(protocolVersion && protocolVersion !== EXTENSION_PROTOCOL_VERSION);
+      const isPong = event.data.type === "COLLECTION_REVIVAL_EXTENSION_PONG";
+      const requestMatches = isPong && event.data.requestId && event.data.requestId === handshakeRequestRef.current;
+
+      setExtensionStatus((current) => ({
+        ...current,
+        connected: requestMatches && !versionTooOld && !protocolMismatch,
         checked: true,
-        version: event.data.version,
-        message: `扩展已连接${event.data.version ? ` · v${event.data.version}` : ""}。现在可以打开小红书收藏页，在扩展里开始扫描。`
-      });
+        readyReceived: true,
+        pongReceived: current.pongReceived || Boolean(requestMatches),
+        version,
+        protocolVersion,
+        browser,
+        capabilities,
+        failureReason: versionTooOld ? "EXTENSION_VERSION_TOO_OLD" : protocolMismatch ? "PROTOCOL_VERSION_MISMATCH" : requestMatches ? undefined : current.failureReason,
+        message: versionTooOld
+          ? `检测到旧版扩展 v${version || "未知"}，请下载 v${EXTENSION_BETA_VERSION}，并在扩展管理页重新加载。`
+          : protocolMismatch
+            ? "扩展协议版本不一致，请下载最新 ZIP 并重新加载扩展。"
+            : requestMatches
+              ? `扩展已连接 · v${version}`
+              : "已收到扩展 READY。请点击“检测扩展”，完成 PING / PONG 握手。"
+      }));
     }
     window.addEventListener("message", handleExtensionMessage);
-    window.postMessage({ source: "collection-revival-web", type: "COLLECTION_REVIVAL_EXTENSION_PING" }, "*");
+    window.postMessage({ source: EXTENSION_WEB_SOURCE, type: "COLLECTION_REVIVAL_EXTENSION_PING", requestId: "initial-ready-check", protocolVersion: EXTENSION_PROTOCOL_VERSION }, window.location.origin);
     const timer = window.setTimeout(() => {
-      setExtensionStatus((current) => current.connected ? current : { ...current, checked: true });
+      setExtensionStatus((current) => current.readyReceived ? current : { ...current, checked: true, failureReason: "CONTENT_SCRIPT_NOT_INJECTED" });
     }, 1000);
     return () => {
       window.removeEventListener("message", handleExtensionMessage);
       window.clearTimeout(timer);
+      if (timeoutRef.current) window.clearTimeout(timeoutRef.current);
     };
   }, []);
+
+  function refreshAndDetect() {
+    window.location.reload();
+  }
+
+  function copyDiagnostics() {
+    const report = [
+      "收藏复活扩展连接诊断",
+      `当前浏览器：${extensionStatus.browser}`,
+      `Web 版本：${EXTENSION_BETA_VERSION}`,
+      `Web 协议版本：${EXTENSION_PROTOCOL_VERSION}`,
+      `扩展 READY 是否收到：${extensionStatus.readyReceived ? "是" : "否"}`,
+      `PING 是否发出：${extensionStatus.pingSent ? "是" : "否"}`,
+      `PONG 是否收到：${extensionStatus.pongReceived ? "是" : "否"}`,
+      `扩展版本：${extensionStatus.version || "未检测到"}`,
+      `扩展协议版本：${extensionStatus.protocolVersion || "未检测到"}`,
+      `最后一次 requestId：${extensionStatus.requestId || "无"}`,
+      `最后一次检测时间：${extensionStatus.lastCheckedAt || "未检测"}`,
+      `当前失败原因：${extensionStatus.failureReason || "无"}`,
+      `扩展能力：${extensionStatus.capabilities.join(", ") || "未检测到"}`
+    ].join("\n");
+    void navigator.clipboard?.writeText(report);
+  }
+
+  const guideSteps = selectedGuide === "chrome"
+    ? [
+        "下载并解压 ZIP。",
+        "打开 chrome://extensions。",
+        "在页面右上角开启“开发者模式”。",
+        "点击页面左上角“加载未打包的扩展程序”。",
+        "选择解压后、直接包含 manifest.json 的文件夹。",
+        "确认扩展开关已开启。",
+        "回到收藏复活网页并刷新。",
+        "点击“检测扩展”。"
+      ]
+    : [
+        "下载并解压 ZIP。",
+        "打开 edge://extensions。",
+        "在页面左下角开启“开发人员模式”。",
+        "点击页面上方“加载解压缩的扩展”。",
+        "选择解压后、直接包含 manifest.json 的文件夹。",
+        "确认扩展开关已开启。",
+        "回到收藏复活网页并刷新。",
+        "点击“检测扩展”。"
+      ];
+  const statusClass = extensionStatus.connected ? "extension-connection-card connected" : extensionStatus.failureReason ? "extension-connection-card warning" : "extension-connection-card";
 
   return (
     <>
@@ -1576,7 +1706,7 @@ function OldImportView(props: {
         <div>
           <span><Sparkles size={18} /> 桌面浏览器扩展 Beta</span>
           <strong>旧收藏扫描是主入口，但当前仍需要先安装本地 Beta 扩展。网页本身不会读取你的小红书收藏夹。</strong>
-          <small>扩展只在你本人登录的小红书网页版、你主动点击扫描后，读取当前已加载 DOM 中的标题、链接、封面、作者和可见短文本。不做云端爬虫，不模拟登录，不绕过验证码。</small>
+          <small>推荐版本 v{EXTENSION_BETA_VERSION}。扩展只在你本人登录的小红书网页版、你主动点击扫描后，读取当前已加载 DOM 中的标题、链接、封面、作者和可见短文本。不做云端爬虫，不模拟登录，不绕过验证码。</small>
         </div>
         <a className="primary-button" href={`/downloads/${EXTENSION_ZIP_FILE_NAME}`} download={EXTENSION_ZIP_FILE_NAME}>下载旧收藏扫描 Beta ZIP</a>
       </section>
@@ -1586,25 +1716,55 @@ function OldImportView(props: {
           <span><ClipboardList size={18} /> 安装助手</span>
           <small>当前是本地 Beta，普通用户只需要下载 ZIP、解压、加载文件夹，不需要接触源码目录。</small>
         </div>
-        <div className={extensionStatus.connected ? "extension-connection-card connected" : "extension-connection-card"} data-testid="extension-connection-status">
-          <strong>{extensionStatus.connected ? "扩展已连接" : "扩展未连接"}</strong>
+        <div className={statusClass} data-testid="extension-connection-status">
+          <strong>{extensionStatus.connected ? `扩展已连接 · v${extensionStatus.version}` : extensionStatus.failureReason === "EXTENSION_VERSION_TOO_OLD" ? "检测到旧版扩展" : "扩展未连接"}</strong>
           <span>{extensionStatus.message}</span>
         </div>
+        {extensionStatus.failureReason && (
+          <div className="extension-connection-hint">
+            <strong>{extensionStatus.failureReason}</strong>
+            <span>{extensionStatus.failureReason === "PAGE_REFRESH_REQUIRED"
+              ? "加载或重新加载扩展后，已经打开的网页通常需要刷新一次，content script 才会注入。"
+              : "请按下方安装步骤确认扩展开关、版本和重新加载状态。"}</span>
+          </div>
+        )}
+        <div className="install-tabs">
+          <button className={selectedGuide === "chrome" ? "active" : ""} onClick={() => setSelectedGuide("chrome")}>我使用 Chrome</button>
+          <button className={selectedGuide === "edge" ? "active" : ""} onClick={() => setSelectedGuide("edge")}>我使用 Edge</button>
+        </div>
         <ol className="install-steps">
-          <li><strong>第一步：下载扩展 ZIP。</strong><span>点击上方“下载旧收藏扫描 Beta ZIP”，文件名是 {EXTENSION_ZIP_FILE_NAME}。</span></li>
-          <li><strong>第二步：解压 ZIP。</strong><span>把 ZIP 解压到一个固定文件夹，后续浏览器会加载这个解压后的文件夹。</span></li>
-          <li><strong>第三步：打开 Chrome / Edge 扩展管理页。</strong><span>可以复制下面的地址到浏览器地址栏。</span></li>
-          <li><strong>第四步：开启开发者模式。</strong><span>Chrome / Edge 扩展管理页右上角会有“开发者模式”开关。</span></li>
-          <li><strong>第五步：点击“加载已解压的扩展程序”。</strong><span>选择刚刚解压出来、里面能看到 manifest.json 的文件夹。</span></li>
-          <li><strong>第六步：回到这里检测扩展。</strong><span>显示“扩展已连接”后，再打开你本人的小红书网页版收藏页开始扫描。</span></li>
+          {guideSteps.map((step, index) => (
+            <li key={step}><strong>第{index + 1}步：</strong><span>{step}</span></li>
+          ))}
         </ol>
         <div className="old-import-actions">
           <button className="secondary-action" onClick={() => navigator.clipboard?.writeText("chrome://extensions/")}>复制 chrome://extensions</button>
           <button className="secondary-action" onClick={() => navigator.clipboard?.writeText("edge://extensions/")}>复制 edge://extensions</button>
           <button className="secondary-action" onClick={pingExtension} data-testid="detect-extension">我已安装，检测扩展</button>
+          <button className="secondary-action" onClick={refreshAndDetect}>刷新并重新检测</button>
           <a className="primary-button" href="https://www.xiaohongshu.com/explore" target="_blank" rel="noreferrer">打开小红书收藏页</a>
         </div>
       </section>
+
+      <details className="tool-panel single extension-diagnostics" data-testid="extension-diagnostics">
+        <summary>连接诊断</summary>
+        <div className="diagnostic-grid">
+          <Metric label="当前浏览器" value={extensionStatus.browser} />
+          <Metric label="Web 版本" value={EXTENSION_BETA_VERSION} />
+          <Metric label="Web 协议版本" value={EXTENSION_PROTOCOL_VERSION} />
+          <Metric label="READY" value={extensionStatus.readyReceived ? "已收到" : "未收到"} />
+          <Metric label="PING" value={extensionStatus.pingSent ? "已发出" : "未发出"} />
+          <Metric label="PONG" value={extensionStatus.pongReceived ? "已收到" : "未收到"} />
+          <Metric label="扩展版本" value={extensionStatus.version || "未检测到"} />
+          <Metric label="扩展协议" value={extensionStatus.protocolVersion || "未检测到"} />
+          <Metric label="requestId" value={extensionStatus.requestId || "无"} />
+          <Metric label="最后检测" value={extensionStatus.lastCheckedAt || "未检测"} />
+          <Metric label="可能需刷新" value={!extensionStatus.readyReceived ? "是" : "否"} />
+          <Metric label="失败原因" value={extensionStatus.failureReason || "无"} />
+          <Metric label="旧版扩展" value={extensionStatus.version && extensionStatus.version !== EXTENSION_BETA_VERSION ? "是" : "否"} />
+        </div>
+        <button className="secondary-action" onClick={copyDiagnostics}>复制诊断报告</button>
+      </details>
 
       <section className="tool-panel single">
         <div className="section-heading-soft">
@@ -3321,8 +3481,6 @@ function buildInsights(items: SavedItem[]) {
     categoryDistribution
   };
 }
-
-
 
 
 
