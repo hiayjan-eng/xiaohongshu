@@ -953,19 +953,19 @@ export function App() {
 
   function removeItemFromAlbum(albumId: string, itemId: string) {
     setState((current) => {
-      const smartAlbums = (current.smartAlbums ?? smartAlbums)
-        .map((album) =>
+      const nextSmartAlbums: SmartAlbum[] = (current.smartAlbums ?? smartAlbums)
+        .map((album: SmartAlbum) =>
           album.id === albumId
             ? {
                 ...album,
-                savedItemIds: album.savedItemIds.filter((id) => id !== itemId),
-                recommendedItemIds: album.recommendedItemIds.filter((id) => id !== itemId),
+                savedItemIds: album.savedItemIds.filter((id: string) => id !== itemId),
+                recommendedItemIds: album.recommendedItemIds.filter((id: string) => id !== itemId),
                 updatedAt: new Date().toISOString()
               }
             : album
         )
-        .filter((album) => album.status === "confirmed" || album.savedItemIds.length > 0);
-      return { ...current, smartAlbums };
+        .filter((album: SmartAlbum) => album.status === "confirmed" || album.savedItemIds.length > 0);
+      return { ...current, smartAlbums: nextSmartAlbums };
     });
     setToast("已从当前专辑移除，收藏本身仍在收藏池");
   }
