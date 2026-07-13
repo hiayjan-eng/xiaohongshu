@@ -175,6 +175,7 @@ export function App() {
   const [activeView, setActiveView] = useState<ViewKey>(() => getInitialView());
   const [importInput, setImportInput] = useState<ShareInput>(emptyImport);
   const [lastImportResult, setLastImportResult] = useState<ImportSuccessResult | null>(null);
+  const [importSessionCount, setImportSessionCount] = useState(0);
   const [isImporting, setIsImporting] = useState(false);
   const [selectedItemId, setSelectedItemId] = useState<string | undefined>(state.savedItems[0]?.id);
   const [globalQuery, setGlobalQuery] = useState("");
@@ -365,6 +366,7 @@ export function App() {
             const firstCard = result.actionCards.find((card) => card.savedItemId === firstItem.id);
             setSelectedItemId(firstItem.id);
             if (firstCard) setLastImportResult({ item: firstItem, card: firstCard });
+            setImportSessionCount((count) => count + result.batch.importedCount);
             setActiveView("import");
             window.setTimeout(() => document.getElementById("import-result-panel")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
           } else {
@@ -431,7 +433,10 @@ export function App() {
   function continueImport() {
     setImportInput(emptyImport);
     setActiveView("import");
-    window.setTimeout(() => document.getElementById("single-import-panel")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
+    window.setTimeout(() => {
+      document.getElementById("single-import-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      document.querySelector<HTMLInputElement>("[data-testid=\"import-source-url\"]")?.focus();
+    }, 0);
   }
   function unlockAchievements(ids: AchievementId[]) {
     const now = new Date().toISOString();
@@ -797,6 +802,7 @@ export function App() {
               importBatches={importBatches}
               setActiveView={setActiveView}
               lastImportResult={lastImportResult}
+              importSessionCount={importSessionCount}
               aiStatus={aiStatus}
               changeStatus={changeStatus}
               viewActionCard={viewActionCard}
@@ -1147,7 +1153,7 @@ function DashboardView(props: {
                 <button key={item.id} className="compact-row" onClick={() => props.viewActionCard(item.id)}>
                   <span>
                     <strong>{item.title}</strong>
-                    <small>{item.category} · {DISPLAY_STATUS_LABELS[item.status]}</small>
+                    <small>{item.category} / {item.subCategory} · {DISPLAY_STATUS_LABELS[item.status]}</small>
                   </span>
                   <span className="mini-time">{formatDate(item.createdAt)}</span>
                   {card && <small>{item.status === "completed" ? "这条收藏已经被你真正用过了。" : card.nextAction}</small>}
@@ -1200,6 +1206,7 @@ function ImportView(props: {
   importBatches: ImportBatch[];
   setActiveView: (view: ViewKey) => void;
   lastImportResult: ImportSuccessResult | null;
+  importSessionCount: number;
   aiStatus: AiRuntimeStatus;
   changeStatus: (itemId: string, status: ItemStatus) => void;
   viewActionCard: (itemId: string) => void;
@@ -1264,29 +1271,39 @@ function ImportView(props: {
       {props.lastImportResult && (
         <section id="import-result-panel" className="tool-panel single import-success-panel" data-testid="import-success-panel">
           <div className="section-heading-soft">
-            <span><CheckCircle2 size={18} /> 已复活一条收藏</span>
-            <small>{props.lastImportResult.item.category} · {props.lastImportResult.card.estimatedTime}</small>
+            <span><CheckCircle2 size={18} /> 整理完成</span>
+            <small>本次已导入 {props.importSessionCount} 条</small>
           </div>
           <div className="import-success-body">
+            <div className="row-meta">
+              <span>{props.lastImportResult.item.category}</span>
+              <span>{props.lastImportResult.item.subCategory}</span>
+              <span>信心：{confidenceLabel(props.lastImportResult.item.classificationConfidence)}</span>
+              <span>{props.lastImportResult.card.estimatedTime}</span>
+            </div>
             <strong>{props.lastImportResult.card.title}</strong>
             <p>{props.lastImportResult.card.nextAction}</p>
+            <div className="field-grid compact-fields">
+              <div className="field-card"><span>系统判断你可能是为了</span><strong>{props.lastImportResult.item.intent}</strong></div>
+              <div className="field-card"><span>为什么这样分</span><strong>{props.lastImportResult.item.whyThisCategory}</strong></div>
+              <div className="field-card"><span>打开原帖后重点看</span><strong>{props.lastImportResult.card.openOriginalFocus.join(" / ")}</strong></div>
+              <div className="field-card"><span>这一步的产出</span><strong>{props.lastImportResult.card.output}</strong></div>
+            </div>
             {props.lastImportResult.item.classificationConfidence === "low" && (
-              <p className="quiet-copy">这条收藏信息较少，分类可能不准，可以补充一句备注后重新生成。</p>
+              <p className="quiet-copy">这条收藏信息较少，分类可能不准。建议补充一句“我为什么收藏它”，然后重新生成行动卡。</p>
             )}
-            {usingMock && (
-              <p className="quiet-copy">当前使用：本地规则 / Mock AI。生成质量可能有限，配置真实 AI 后分类和行动卡会更具体。</p>
-            )}
+            {props.importSessionCount >= 3 && <p className="quiet-copy">你已经连续导入了 {props.importSessionCount} 条，可以去智能专辑看看系统整理出的主题。</p>}
+            {usingMock && <p className="quiet-copy">当前使用：本地规则 / Mock AI。生成质量可能有限，配置真实 AI 后分类和行动卡会更具体。</p>}
           </div>
           <div className="card-actions">
             <button className="primary-button" onClick={props.onContinueImport} data-testid="continue-import">继续导入一条</button>
-            <button className="secondary-action" onClick={() => props.setActiveView("import")}>回到导入中心</button>
-            <button className="secondary-action" onClick={() => props.setActiveView("albums")}>查看智能专辑</button>
             <button className="secondary-action" onClick={() => props.changeStatus(props.lastImportResult!.item.id, "today")}>加入今日复活</button>
-            <button className="ghost-action" onClick={() => props.viewActionCard(props.lastImportResult!.item.id)}>查看行动卡</button>
+            <button className="secondary-action" onClick={() => props.viewActionCard(props.lastImportResult!.item.id)}>查看行动卡</button>
+            <button className="secondary-action" onClick={() => props.setActiveView("albums")}>查看智能专辑</button>
+            <button className="ghost-action" onClick={() => props.setActiveView("search")}>搜索找回试试</button>
           </div>
         </section>
       )}
-
       <div className="import-method-grid">
         {methods.map((method) => (
           <article className="import-method-card" key={method.title}>
@@ -1310,6 +1327,7 @@ function ImportView(props: {
         </div>
         {usingMock && <p className="quiet-copy">当前使用：本地规则 / Mock AI。它能跑通流程，但真实 AI 会让分类和行动卡更贴近原帖主题。</p>}
         <QuickImportForm input={props.importInput} setInput={props.setImportInput} onSubmit={props.handleImport} isLoading={props.isImporting} />
+        <ImportSamplePreview onUseSample={props.setImportInput} />
       </section>
 
       <section className="tool-panel single import-batches-panel">
@@ -1330,7 +1348,7 @@ function ImportView(props: {
               <button onClick={() => props.setActiveView(batch.source === "extension_scan" ? "old-import" : "albums")}>查看详情</button>
             </article>
           ))}
-          {props.importBatches.length === 0 && <EmptyState title="还没有导入记录" text="先导入一条真实收藏；旧收藏扫描需要本地扩展 Beta，普通朋友测试可以先跳过。" />}
+          {props.importBatches.length === 0 && <EmptyState title="还没有导入记录" text="先导入一条真实收藏；旧收藏扫描需要本地浏览器扩展 Beta，普通朋友测试可以先跳过。" />}
         </div>
       </section>
     </>
@@ -1356,7 +1374,7 @@ function OldImportView(props: {
 
       <section className="extension-import-guide" data-testid="old-import-extension-warning">
         <div>
-          <span><Sparkles size={18} /> 需要本地扩展 Beta</span>
+          <span><Sparkles size={18} /> 需要本地浏览器扩展 Beta</span>
           <strong>这个页面只接收浏览器扩展传来的扫描结果，网页本身不会读取你的小红书收藏夹。</strong>
           <small>扩展只在你本人登录的小红书网页版、你主动点击扫描后，读取当前已加载 DOM 中的标题、链接、封面地址和可见短文本。不做云端爬虫，不模拟登录，不绕过验证码。</small>
         </div>
@@ -1597,14 +1615,22 @@ function DetailView(props: {
   setActiveView: (view: ViewKey) => void;
   onContinueImport: () => void;
 }) {
+  const [noteDraft, setNoteDraft] = useState(props.item.userNote);
+  const lowConfidence = props.item.classificationConfidence === "low";
+  function saveNoteAndRegenerate() {
+    props.updateSavedNote(props.item.id, noteDraft);
+    window.setTimeout(() => props.regenerateActionCard(props.item.id), 0);
+  }
+
   return (
     <>
       <div className="detail-hero">
         <div>
-          <p className="eyebrow">{props.item.category} · {DISPLAY_STATUS_LABELS[props.item.status]}</p>
+          <p className="eyebrow">{props.item.category} / {props.item.subCategory} · 信心：{confidenceLabel(props.item.classificationConfidence)} · {DISPLAY_STATUS_LABELS[props.item.status]}</p>
           <input className="detail-title-input" value={props.card.title} onChange={(event) => props.updateCardField(props.card.id, "title", event.target.value)} />
           <p>{props.item.summary}</p>
-          {props.item.classificationConfidence === "low" && <p className="quiet-copy">这条收藏信息较少，分类可能不准，可以补充一句备注后重新生成。</p>}
+          <p className="quiet-copy">{props.item.whyThisCategory}</p>
+          {lowConfidence && <p className="quiet-copy">这条收藏信息较少，分类可能不准，可以补充一句备注后重新生成。</p>}
         </div>
         <div className="detail-actions">
           <button className="primary-button" onClick={() => props.changeStatus(props.item.id, "today")} data-testid="add-to-today">
@@ -1633,6 +1659,15 @@ function DetailView(props: {
             <span>下一步行动</span>
             <textarea value={props.card.nextAction} onChange={(event) => props.updateCardField(props.card.id, "nextAction", event.target.value)} />
           </label>
+
+          <div className="field-grid compact-fields">
+            <div className="field-card"><span>为什么值得复活</span><strong>{props.card.whySaved}</strong></div>
+            <div className="field-card"><span>打开原帖后重点看</span><strong>{props.card.openOriginalFocus.join(" / ")}</strong></div>
+            <div className="field-card"><span>这一步的产出</span><strong>{props.card.output}</strong></div>
+            <div className="field-card"><span>完成标准</span><strong>{props.card.doneCriteria}</strong></div>
+            <div className="field-card"><span>避免</span><strong>{props.card.avoidDoing}</strong></div>
+            <div className="field-card"><span>后续</span><strong>{props.card.followUp}</strong></div>
+          </div>
 
           <div className="field-grid">
             {Object.entries(props.card.fields).map(([key, value]) => (
@@ -1666,6 +1701,16 @@ function DetailView(props: {
               <span>个人备注</span>
               <textarea value={props.item.userNote} onChange={(event) => props.updateSavedNote(props.item.id, event.target.value)} />
             </label>
+            {lowConfidence && (
+              <div className="low-info-box">
+                <label className="edit-field">
+                  <span>我收藏它是因为...</span>
+                  <textarea value={noteDraft} onChange={(event) => setNoteDraft(event.target.value)} placeholder="例如：下周末想去 / 想复现这个工具 / 想借鉴封面" />
+                </label>
+                <button className="secondary-action" onClick={saveNoteAndRegenerate}>补充备注并重新生成</button>
+                <p className="quiet-copy">{props.card.ifInfoMissing}</p>
+              </div>
+            )}
             <StatusButtons item={props.item} changeStatus={props.changeStatus} />
           </section>
         </aside>
@@ -1777,18 +1822,24 @@ function SmartAlbumsView(props: {
           const albumItems = album.savedItemIds
             .map((id) => props.savedItems.find((item) => item.id === id))
             .filter((item): item is SavedItem => Boolean(item));
-          const priorityItems = albumItems.slice(0, 3);
+          const priorityItems = (album.recommendedItemIds.length > 0 ? album.recommendedItemIds : album.savedItemIds)
+            .map((id) => props.savedItems.find((item) => item.id === id))
+            .filter((item): item is SavedItem => Boolean(item))
+            .slice(0, 3);
 
           return (
             <section className="smart-album-card" key={album.id} data-testid="smart-album-card">
               <div className="smart-album-head">
-                <span>{album.category} · {album.status === "confirmed" ? "已确认" : "候选"}</span>
+                <span>{album.category} · {album.albumType} · {album.priority === "high" ? "高优先级" : album.priority === "medium" ? "中优先级" : "低优先级"} · {album.status === "confirmed" ? "已确认" : "候选"}</span>
                 <strong>{album.title}</strong>
                 <small>{album.description}</small>
+                <small>{album.whyThisAlbum}</small>
+                <small>{album.whyStartHere}</small>
               </div>
               <div className="tag-list album-keywords">
                 {album.keywords.slice(0, 6).map((keyword) => <span key={keyword}>{keyword}</span>)}
               </div>
+              <p className="quiet-copy">第一步：{album.suggestedFirstAction}</p>
               <div className="album-priority-list">
                 {priorityItems.map((item, index) => {
                   const card = props.actionCards.find((entry) => entry.savedItemId === item.id);
@@ -1830,7 +1881,7 @@ function SmartAlbumsView(props: {
                 <article key={item.id} className="qa-result-row">
                   <div>
                     <strong>{index + 1}. {item.title}</strong>
-                    <small>{item.category} · {DISPLAY_STATUS_LABELS[item.status]}</small>
+                    <small>{item.category} / {item.subCategory} · {DISPLAY_STATUS_LABELS[item.status]}</small>
                     <span>{card?.nextAction ?? item.summary}</span>
                   </div>
                   <div className="qa-row-actions">
@@ -1890,7 +1941,7 @@ function InsightsView(props: { insights: ReturnType<typeof buildInsights>; saved
               <div key={item.id}>
                 <span>{formatDate(item.createdAt)}</span>
                 <strong>{item.title}</strong>
-                <small>{item.category} · {DISPLAY_STATUS_LABELS[item.status]}</small>
+                <small>{item.category} / {item.subCategory} · {DISPLAY_STATUS_LABELS[item.status]}</small>
               </div>
             ))}
           </div>
@@ -2299,6 +2350,45 @@ function QaView(props: {
         </section>
       </div>
     </>
+  );
+}
+function ImportSamplePreview(props: { onUseSample: (input: ShareInput) => void }) {
+  const samples: ShareInput[] = [
+    {
+      sourceUrl: "https://www.xiaohongshu.com/explore/sample-cover-design",
+      title: "小红书封面设计技巧",
+      rawShareText: "收藏一个小红书封面设计教程，适合做内容运营和图文排版参考",
+      userNote: "之后做图文时想借鉴标题结构和封面构图"
+    },
+    {
+      sourceUrl: "https://www.xiaohongshu.com/explore/sample-low-cal-dinner",
+      title: "低卡晚餐备餐",
+      rawShareText: "低卡晚餐和工作日备餐，包含食材、空气炸锅做法和购物清单",
+      userNote: "下班后想少点外卖，先试一周"
+    },
+    {
+      sourceUrl: "https://www.xiaohongshu.com/explore/sample-shenzhen-weekend",
+      title: "深圳周末展览路线",
+      rawShareText: "深圳周末展览、咖啡店和散步路线，适合半日出行",
+      userNote: "周末想找轻松一点的地方"
+    }
+  ];
+
+  return (
+    <div className="sample-preview-block">
+      <div className="section-heading-soft">
+        <span><Sparkles size={18} /> 不知道填什么？试试这 3 个样例</span>
+        <small>用它们可以快速看分类、行动卡和智能专辑的效果</small>
+      </div>
+      <div className="field-grid compact-fields">
+        {samples.map((sample) => (
+          <button className="field-card sample-fill-card" type="button" key={sample.title} onClick={() => props.onUseSample(sample)}>
+            <span>{sample.title}</span>
+            <strong>{sample.userNote}</strong>
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
 function QuickImportForm(props: {
@@ -2735,7 +2825,7 @@ function mergeSmartAlbums(existingAlbums: SmartAlbum[], generatedAlbums: SmartAl
     .filter((album) => album.status === "archived" && !generatedById.has(album.id))
     .forEach((album) => merged.push(album));
 
-  return merged.sort((a, b) => b.priority - a.priority || b.savedItemIds.length - a.savedItemIds.length);
+  return merged.sort((a, b) => b.priorityScore - a.priorityScore || b.savedItemIds.length - a.savedItemIds.length);
 }
 function mergeGeneratedSmartAlbums(existingAlbums: SmartAlbum[], savedItems: SavedItem[]): SmartAlbum[] {
   const existingById = new Map(existingAlbums.map((album) => [album.id, album]));
@@ -2757,7 +2847,7 @@ function mergeGeneratedSmartAlbums(existingAlbums: SmartAlbum[], savedItems: Sav
     .filter((album) => album.status === "archived" && !merged.some((entry) => entry.id === album.id))
     .forEach((album) => merged.push(album));
 
-  return merged.sort((a, b) => b.priority - a.priority || b.savedItemIds.length - a.savedItemIds.length);
+  return merged.sort((a, b) => b.priorityScore - a.priorityScore || b.savedItemIds.length - a.savedItemIds.length);
 }
 function getInitialView(): ViewKey {
   if (typeof window === "undefined") return "welcome";
@@ -2781,6 +2871,13 @@ function formatDate(value: string): string {
 
 function formatFieldValue(value: string | string[]): string {
   return Array.isArray(value) ? value.join(" / ") : value;
+}
+
+function confidenceLabel(value: SavedItem["classificationConfidence"]): string {
+  if (value === "high") return "高";
+  if (value === "medium") return "中";
+  if (value === "low") return "低";
+  return "未标注";
 }
 
 function entityLabel(type: string): string {

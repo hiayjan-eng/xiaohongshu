@@ -1,27 +1,19 @@
 export const CATEGORIES = [
-  "技能学习",
   "内容创作",
-  "小红书运营",
-  "AI工具",
-  "职场学习",
-  "旅行地点",
-  "美食探店",
-  "菜谱做饭",
-  "穿搭变美",
-  "购物参考",
-  "家居生活",
-  "生活方式",
-  "情绪成长",
-  "亲密关系",
-  "健身运动",
-  "读书学习",
-  "工作效率",
-  "灵感素材",
-  "其他"
+  "AI 与效率",
+  "技能学习",
+  "出行与探店",
+  "饮食与健康",
+  "生活与家居",
+  "穿搭与消费",
+  "情绪与关系",
+  "读书与思考",
+  "暂存"
 ] as const;
 
 export type Category = (typeof CATEGORIES)[number];
 export type ClassificationConfidence = "high" | "medium" | "low";
+export type SmartAlbumPriority = "high" | "medium" | "low";
 
 export const STATUSES = [
   "not_started",
@@ -82,8 +74,10 @@ export interface SavedItem {
   title: string;
   userNote: string;
   category: Category;
+  subCategory: string;
   classificationConfidence?: ClassificationConfidence;
   intent: string;
+  whyThisCategory: string;
   summary: string;
   keywords: string[];
   entities: EntityTag[];
@@ -98,11 +92,19 @@ export interface ActionCard {
   id: string;
   savedItemId: string;
   category: Category;
+  subCategory: string;
   title: string;
   goal: string;
+  whySaved: string;
   nextAction: string;
+  openOriginalFocus: string[];
+  output: string;
   estimatedTime: string;
   difficulty: "低" | "中" | "高";
+  doneCriteria: string;
+  avoidDoing: string;
+  ifInfoMissing: string;
+  followUp: string;
   fields: Record<string, string | string[]>;
   tasks: Task[];
   createdAt: string;
@@ -112,9 +114,16 @@ export interface ActionCard {
 export interface ActionCardDraft {
   title: string;
   goal: string;
+  whySaved: string;
   nextAction: string;
+  openOriginalFocus: string[];
+  output: string;
   estimatedTime: string;
   difficulty: "低" | "中" | "高";
+  doneCriteria: string;
+  avoidDoing: string;
+  ifInfoMissing: string;
+  followUp: string;
   tasks: TaskDraft[];
   structuredFields: Record<string, string | string[]>;
 }
@@ -221,8 +230,10 @@ export interface ShareInput {
 
 export interface AiClassificationResult {
   category: Category;
+  subCategory: string;
   confidence: ClassificationConfidence;
   intent: string;
+  whyThisCategory: string;
   summary: string;
   keywords: string[];
   entities: EntityTag[];
@@ -249,10 +260,16 @@ export interface SmartAlbum {
   title: string;
   description: string;
   category: Category;
+  albumType: string;
   keywords: string[];
   savedItemIds: string[];
+  recommendedItemIds: string[];
   coverItemId?: string;
-  priority: number;
+  whyThisAlbum: string;
+  whyStartHere: string;
+  suggestedFirstAction: string;
+  priority: SmartAlbumPriority;
+  priorityScore: number;
   status: "candidate" | "confirmed" | "archived";
   createdAt: string;
   updatedAt: string;
@@ -289,6 +306,7 @@ export interface RealUserTestRecord {
   rawShareText: string;
   userNote: string;
   category: Category;
+  subCategory: string;
   summary: string;
   keywords: string[];
   entities: EntityTag[];

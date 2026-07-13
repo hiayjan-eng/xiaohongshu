@@ -18,7 +18,6 @@ export function getDailyRevivalRecommendations(params: {
     .map((item) => {
       const actionCard = cardByItemId.get(item.id);
       if (!actionCard) return undefined;
-
       const scoreParts = scoreRecommendation(item, actionCard, today, categoryCounts, recentSearchCategories, isWeekend);
       return {
         item,
@@ -28,10 +27,7 @@ export function getDailyRevivalRecommendations(params: {
       };
     })
     .filter((item): item is RevivalRecommendation => Boolean(item))
-    .sort((a, b) => {
-      if (b.score !== a.score) return b.score - a.score;
-      return new Date(b.item.createdAt).getTime() - new Date(a.item.createdAt).getTime();
-    })
+    .sort((a, b) => (b.score !== a.score ? b.score - a.score : new Date(b.item.createdAt).getTime() - new Date(a.item.createdAt).getTime()))
     .slice(0, limit);
 }
 
@@ -75,9 +71,9 @@ function scoreRecommendation(
 
   const categoryPopularity = categoryCounts[item.category] ?? 0;
   score += Math.min(18, categoryPopularity * 4);
-  if (categoryPopularity >= 2) reasons.push(`你最近收藏较多${item.category}`);
+  if (categoryPopularity >= 2) reasons.push(`你最近收藏较多「${item.category}」`);
 
-  if (isWeekend && ["旅行地点", "美食探店", "家居生活"].includes(item.category)) {
+  if (isWeekend && ["出行与探店", "生活与家居", "饮食与健康"].includes(item.category)) {
     score += 18;
     reasons.push("周末更适合执行");
   }
@@ -85,6 +81,11 @@ function scoreRecommendation(
   if (recentSearchCategories.has(item.category)) {
     score += 14;
     reasons.push("和最近搜索方向相关");
+  }
+
+  if (item.classificationConfidence === "low") {
+    score -= 8;
+    reasons.push("先补一句备注会更准");
   }
 
   if (reasons.length === 0) reasons.push("适合今天推进一步");
@@ -102,15 +103,15 @@ function inferRecentSearchCategories(searchLogs: SearchLog[]): Set<Category> {
   const categories = new Set<Category>();
   searchLogs.slice(-5).forEach((log) => {
     const query = log.query.toLocaleLowerCase();
-    if (/(周末|旅行|地点|展览|路线|去哪|咖啡|餐厅|探店)/.test(query)) {
-      categories.add("旅行地点");
-      categories.add("美食探店");
-    }
+    if (/(周末|旅行|地点|展览|路线|去哪|咖啡|餐厅|探店|大理|深圳)/.test(query)) categories.add("出行与探店");
+    if (/(菜|做饭|备餐|减脂|食材|晚餐|早餐|健身|训练)/.test(query)) categories.add("饮食与健康");
+    if (/(效率|sop|流程|自动化|模板|表格|ai|prompt|提示词|工具)/i.test(query)) categories.add("AI 与效率");
     if (/(剪辑|摄影|英语|学习|教程|入门|编程|设计)/.test(query)) categories.add("技能学习");
-    if (/(菜|做饭|备餐|减脂|食材|晚餐)/.test(query)) categories.add("菜谱做饭");
-    if (/(效率|sop|流程|自动化|模板|表格)/i.test(query)) categories.add("工作效率");
-    if (/(选题|文案|封面|灵感|拍摄|账号)/.test(query)) categories.add("灵感素材");
-    if (/(收纳|家居|清洁|改造|租房)/.test(query)) categories.add("家居生活");
+    if (/(选题|文案|封面|灵感|拍摄|账号|小红书)/.test(query)) categories.add("内容创作");
+    if (/(收纳|家居|清洁|改造|租房|桌面|衣柜)/.test(query)) categories.add("生活与家居");
+    if (/(穿搭|购物|种草|平替|护肤|妆容|单品)/.test(query)) categories.add("穿搭与消费");
+    if (/(情绪|关系|表达|需求|边界|复盘|手帐)/.test(query)) categories.add("情绪与关系");
+    if (/(读书|书单|观点|笔记|阅读)/.test(query)) categories.add("读书与思考");
   });
   return categories;
 }

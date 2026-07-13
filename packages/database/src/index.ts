@@ -65,8 +65,10 @@ export function createImportedRecords(
     title: input.title || aiResult.actionCard.title,
     userNote: input.userNote,
     category: aiResult.category,
+    subCategory: aiResult.subCategory,
     classificationConfidence: aiResult.confidence,
     intent: aiResult.intent,
+    whyThisCategory: aiResult.whyThisCategory,
     summary: aiResult.summary,
     keywords: aiResult.keywords,
     entities: aiResult.entities,
@@ -80,11 +82,19 @@ export function createImportedRecords(
     id: actionCardId,
     savedItemId,
     category: aiResult.category,
+    subCategory: aiResult.subCategory,
     title: aiResult.actionCard.title,
     goal: aiResult.actionCard.goal,
+    whySaved: aiResult.actionCard.whySaved,
     nextAction: aiResult.actionCard.nextAction,
+    openOriginalFocus: aiResult.actionCard.openOriginalFocus,
+    output: aiResult.actionCard.output,
     estimatedTime: aiResult.actionCard.estimatedTime,
     difficulty: aiResult.actionCard.difficulty,
+    doneCriteria: aiResult.actionCard.doneCriteria,
+    avoidDoing: aiResult.actionCard.avoidDoing,
+    ifInfoMissing: aiResult.actionCard.ifInfoMissing,
+    followUp: aiResult.actionCard.followUp,
     fields: aiResult.actionCard.structuredFields,
     tasks,
     createdAt,
@@ -288,13 +298,59 @@ function createId(prefix: string): string {
 
 
 function normalizeAppState(state: AppState): AppState {
+  const savedItems = (state.savedItems ?? []).map(normalizeSavedItem);
+  const actionCards = (state.actionCards ?? []).map((card) => normalizeActionCard(card, savedItems.find((item) => item.id === card.savedItemId)));
   return {
     ...state,
-    savedItems: state.savedItems ?? [],
-    actionCards: state.actionCards ?? [],
+    savedItems,
+    actionCards,
     searchLogs: state.searchLogs ?? [],
-    smartAlbums: state.smartAlbums ?? [],
+    smartAlbums: (state.smartAlbums ?? []).map(normalizeSmartAlbum),
     importBatches: state.importBatches ?? [],
     importBatchItems: state.importBatchItems ?? []
   };
+}
+
+function normalizeSavedItem(item: SavedItem): SavedItem {
+  const raw = item as SavedItem & { subCategory?: string; whyThisCategory?: string };
+  return {
+    ...item,
+    subCategory: raw.subCategory || inferSubCategoryFromItem(item),
+    whyThisCategory: raw.whyThisCategory || "基于标题、分享文案和备注综合判断。",
+    classificationConfidence: item.classificationConfidence ?? "medium"
+  };
+}
+
+function normalizeActionCard(card: ActionCard, item?: SavedItem): ActionCard {
+  const raw = card as ActionCard & Partial<Pick<ActionCard, "whySaved" | "openOriginalFocus" | "output" | "doneCriteria" | "avoidDoing" | "ifInfoMissing" | "followUp" | "subCategory">>;
+  return {
+    ...card,
+    subCategory: raw.subCategory || item?.subCategory || "主题整理",
+    whySaved: raw.whySaved || item?.intent || "这条收藏可以转成一个小行动。",
+    openOriginalFocus: raw.openOriginalFocus && raw.openOriginalFocus.length > 0 ? raw.openOriginalFocus : ["原帖标题", "作者给的步骤", "评论区补充"],
+    output: raw.output || "一个可保存的小产出",
+    doneCriteria: raw.doneCriteria || "完成卡片里的第一个具体动作。",
+    avoidDoing: raw.avoidDoing || "不要一次整理太多收藏。",
+    ifInfoMissing: raw.ifInfoMissing || "如果信息不足，先补一句你为什么收藏它。",
+    followUp: raw.followUp || "完成后再决定是否加入计划或专辑。"
+  };
+}
+
+function normalizeSmartAlbum(album: NonNullable<AppState["smartAlbums"]>[number]): NonNullable<AppState["smartAlbums"]>[number] {
+  const raw = album as NonNullable<AppState["smartAlbums"]>[number] & { priority?: unknown; priorityScore?: number; recommendedItemIds?: string[] };
+  const priorityScore = raw.priorityScore ?? album.savedItemIds.length * 10 + album.keywords.length;
+  return {
+    ...album,
+    albumType: album.albumType || "theme",
+    recommendedItemIds: raw.recommendedItemIds ?? album.savedItemIds.slice(0, 3),
+    whyThisAlbum: album.whyThisAlbum || "这些收藏指向同一个使用场景，适合合并成一个行动主题。",
+    whyStartHere: album.whyStartHere || "先从最近保存、信息更完整的 3 条开始。",
+    suggestedFirstAction: album.suggestedFirstAction || "先打开推荐的第一条，完成一个 5-30 分钟的小动作。",
+    priority: raw.priority === "high" || raw.priority === "medium" || raw.priority === "low" ? raw.priority : priorityScore >= 36 ? "high" : priorityScore >= 18 ? "medium" : "low",
+    priorityScore
+  };
+}
+
+function inferSubCategoryFromItem(item: SavedItem): string {
+  return item.keywords[0] || item.category;
 }

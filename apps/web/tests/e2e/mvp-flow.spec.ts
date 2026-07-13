@@ -73,11 +73,12 @@ test.describe("MVP page health and import flow", () => {
     expect(savedItem?.rawShareText).toContain("封面设计教程");
     expect(savedItem?.userNote).toContain("震海会");
     expect(savedItem?.category).toBeTruthy();
-    expect(savedItem?.summary).toContain("行动卡");
+    expect(savedItem?.summary).toBeTruthy();
     expect(savedItem?.keywords.length).toBeGreaterThan(0);
     expect(savedItem?.entities.length).toBeGreaterThan(0);
     expect(savedItem?.searchableText).toContain("封面");
     expect(actionCard?.nextAction).toBeTruthy();
+    expect(actionCard?.output).toBeTruthy();
     expect(actionCard?.tasks.length).toBeGreaterThan(0);
     expect(state.importBatches?.[0]?.source).toBe("manual_single");
     expect(state.importBatches?.[0]?.importedCount).toBe(1);

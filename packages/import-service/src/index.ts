@@ -322,7 +322,7 @@ function mergeSmartAlbumCandidates(existingAlbums: SmartAlbum[], generatedAlbums
     });
   });
 
-  return [...byId.values()].sort((a, b) => b.priority - a.priority || b.savedItemIds.length - a.savedItemIds.length);
+  return [...byId.values()].sort((a, b) => b.priorityScore - a.priorityScore || b.savedItemIds.length - a.savedItemIds.length);
 }
 
 function pickBatchStatus(importedCount: number, duplicateCount: number, failedCount: number, rawCount: number): ImportBatch["status"] {
