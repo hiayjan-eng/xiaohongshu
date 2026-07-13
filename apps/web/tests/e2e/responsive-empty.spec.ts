@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { collectConsoleErrors, expectNoConsoleErrors, readAppState, seedEmptyState } from "./helpers";
+import { collectConsoleErrors, expectNoConsoleErrors, importTestNote, readAppState, resetDemoData, reviveImportedItem, seedEmptyState } from "./helpers";
 
 test.describe("MVP empty states and responsive basics", () => {
   test("handles empty local data and missing sourceUrl without crashing", async ({ page }) => {
@@ -36,6 +36,14 @@ test.describe("MVP empty states and responsive basics", () => {
     test(`keeps dashboard usable at ${viewport.name} viewport`, async ({ page }) => {
       const errors = collectConsoleErrors(page);
       await page.setViewportSize({ width: viewport.width, height: viewport.height });
+      await resetDemoData(page);
+      const imported = await importTestNote(page, {
+        sourceUrl: `https://www.xiaohongshu.com/explore/responsive-${viewport.name}`,
+        title: "响应式剪辑行动测试",
+        rawShareText: "剪辑教程和封面参考，用来确认桌面和手机宽度下行动卡按钮仍然可点击",
+        userNote: "响应式回归测试"
+      });
+      await reviveImportedItem(page, imported.id);
       await page.goto("/dashboard");
       await expect(page.getByRole("heading", { name: "先把旧收藏捡回来" })).toBeVisible();
       const globalSearch = page.getByRole("textbox", { name: "全局搜索" });
