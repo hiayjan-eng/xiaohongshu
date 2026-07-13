@@ -54,6 +54,12 @@ test.describe("Import Center architecture", () => {
           sourceUrl: "https://www.xiaohongshu.com/explore/old-import-ai-tools",
           visibleText: "AI 工具 提示词 自动化 工作效率",
           sourcePlatform: "xiaohongshu"
+        },
+        {
+          title: "AI 工具学习清单",
+          sourceUrl: "https://www.xiaohongshu.com/explore/old-import-ai-tools",
+          visibleText: "重复扫描项，用来确认导入批次会记录重复数量",
+          sourcePlatform: "xiaohongshu"
         }
       ]
     };
@@ -63,8 +69,10 @@ test.describe("Import Center architecture", () => {
     await expect.poll(async () => (await readAppState(page)).importBatches?.[0]?.source).toBe("extension_scan");
 
     const state = await readAppState(page);
-    expect(state.importBatches?.[0]?.rawCount).toBe(2);
+    expect(state.importBatches?.[0]?.rawCount).toBe(3);
     expect(state.importBatches?.[0]?.importedCount).toBe(2);
+    expect(state.importBatches?.[0]?.duplicateCount).toBeGreaterThanOrEqual(1);
+    expect(state.importBatches?.[0]?.createdActionCardCount).toBe(0);
     expect(state.importBatchItems?.filter((item) => item.status === "imported").length).toBeGreaterThanOrEqual(2);
     expect(state.smartAlbums?.length).toBeGreaterThan(0);
 
