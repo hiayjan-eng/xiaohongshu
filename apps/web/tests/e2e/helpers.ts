@@ -42,6 +42,17 @@ type AppState = {
     fields: Record<string, string | string[]>;
     tasks: unknown[];
   }>;
+  planCards?: Array<{
+    id: string;
+    savedItemId: string;
+    actionCardId: string;
+    title: string;
+    plannedDate: string;
+    estimatedMinutes: number;
+    oneNextStep: string;
+    status: string;
+  }>;
+  classificationCorrections?: Array<{ id: string; savedItemId: string; correctedDomain: string; correctedSubDomain: string }>;
   searchLogs: Array<{ query: string; resultCount: number; clickedSavedItemId?: string }>;
   importBatches?: Array<{ id: string; source: string; rawCount: number; importedCount: number; duplicateCount: number; failedCount: number; createdActionCardCount: number; createdAlbumCount: number; status: string }>;
   importBatchItems?: Array<{ id: string; batchId: string; status: string; sourceUrl: string; title: string }>;
