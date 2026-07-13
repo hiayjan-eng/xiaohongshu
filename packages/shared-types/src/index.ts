@@ -2,6 +2,8 @@ export const CATEGORIES = [
   "内容创作",
   "AI 与效率",
   "技能学习",
+  "工作与职业",
+  "商业与经营",
   "出行与探店",
   "饮食与健康",
   "生活与家居",
@@ -23,6 +25,10 @@ export const SAVED_INTENTS = [
   "想做",
   "内容创作参考",
   "工作决策参考",
+  "求职关注",
+  "创业团队参考",
+  "以后联系",
+  "商业案例参考",
   "情绪共鸣",
   "以后查阅",
   "暂时保存"
@@ -45,7 +51,7 @@ export type ReviveIntent = (typeof REVIVE_INTENTS)[number];
 export type ClassificationConfidence = "high" | "medium" | "low";
 export type SmartAlbumPriority = "high" | "medium" | "low";
 export type SmartAlbumView = "content_domain" | "saved_intent";
-export const APP_SCHEMA_VERSION = 2;
+export const APP_SCHEMA_VERSION = 3;
 
 export const STATUSES = [
   "not_started",
@@ -117,6 +123,14 @@ export interface SavedItem {
   classificationConfidence?: ClassificationConfidence;
   intent: string;
   whyThisCategory: string;
+  classificationReason?: string;
+  positiveEvidence?: string[];
+  negativeEvidence?: string[];
+  conflictingEvidence?: string[];
+  dominantIntent?: string;
+  classificationShadow?: ClassificationShadowResult;
+  rawTitle?: string;
+  cleanedTitle?: string;
   summary: string;
   keywords: string[];
   entities: EntityTag[];
@@ -125,6 +139,20 @@ export interface SavedItem {
   status: ItemStatus;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ClassificationCandidate {
+  contentDomain: ContentDomain;
+  contentSubDomain: string;
+  score: number;
+  reasons: string[];
+}
+
+export interface ClassificationShadowResult {
+  rule: ClassificationCandidate;
+  semanticCandidates: ClassificationCandidate[];
+  hybrid: ClassificationCandidate;
+  provider: string;
 }
 
 export interface ActionCard {
@@ -167,6 +195,23 @@ export interface ActionCardDraft {
   structuredFields: Record<string, string | string[]>;
 }
 
+export type PlanCardStatus = "planned" | "doing" | "done" | "cancelled";
+
+export interface PlanCard {
+  id: string;
+  savedItemId: string;
+  actionCardId: string;
+  title: string;
+  plannedDate: string;
+  estimatedMinutes: number;
+  oneNextStep: string;
+  doneCriteria: string;
+  status: PlanCardStatus;
+  reminderEnabled: boolean;
+  createdAt: string;
+  completedAt?: string;
+}
+
 export interface Plan {
   id: string;
   userId: string;
@@ -196,6 +241,20 @@ export interface SearchLog {
   query: string;
   resultCount: number;
   clickedSavedItemId?: string;
+  createdAt: string;
+}
+
+export interface ClassificationCorrection {
+  id: string;
+  savedItemId: string;
+  previousDomain: ContentDomain;
+  previousSubDomain: string;
+  previousIntent: SavedIntent;
+  correctedDomain: ContentDomain;
+  correctedSubDomain: string;
+  correctedIntent: SavedIntent;
+  tags: string[];
+  textSnapshot: string;
   createdAt: string;
 }
 
@@ -277,6 +336,12 @@ export interface AiClassificationResult {
   confidence: ClassificationConfidence;
   whyThisDomain: string;
   whyThisIntent: string;
+  classificationReason?: string;
+  positiveEvidence?: string[];
+  negativeEvidence?: string[];
+  conflictingEvidence?: string[];
+  dominantIntent?: string;
+  classificationShadow?: ClassificationShadowResult;
   category: Category;
   subCategory: string;
   intent: string;
@@ -331,6 +396,8 @@ export interface AppState {
   user: User;
   savedItems: SavedItem[];
   actionCards: ActionCard[];
+  planCards?: PlanCard[];
+  classificationCorrections?: ClassificationCorrection[];
   searchLogs: SearchLog[];
   smartAlbums?: SmartAlbum[];
   importBatches?: ImportBatch[];
