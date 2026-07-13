@@ -13,7 +13,8 @@ const state = {
   scanning: false,
   paused: false,
   noNewRounds: 0,
-  lastStatus: "idle"
+  lastStatus: "idle",
+  duplicateCount: 0
 };
 
 const elements = {
@@ -46,6 +47,7 @@ async function init() {
   if (checkpoint?.items?.length) {
     state.items = normalizeItems(checkpoint.items);
     state.selectedKeys = new Set(checkpoint.selectedKeys || state.items.map(itemKey));
+    state.duplicateCount = checkpoint.duplicateCount || 0;
     state.pageUrl = checkpoint.pageUrl || "";
     setStatus(`已恢复上次断点：${state.items.length} 条候选收藏`);
   }
@@ -177,6 +179,7 @@ function mergeItems(items) {
   normalizeItems(items).forEach((item) => {
     const key = itemKey(item);
     if (!byKey.has(key)) byKey.set(key, item);
+    else state.duplicateCount += 1;
   });
   state.items = [...byKey.values()];
   state.selectedKeys = new Set([...state.selectedKeys, ...state.items.map(itemKey)]);
@@ -269,24 +272,22 @@ function renderResults() {
 function renderStats(stats) {
   const cells = [
     [stats.total, "已发现"],
-    [stats.unique, "已去重"],
+    [stats.withLinks, "有链接"],
     [stats.missingTitles, "缺标题"],
-    [stats.missingLinks, "缺链接"]
+    [stats.duplicates, "重复"],
+    [stats.pendingImport, "待导入"]
   ];
   elements.statsGrid.innerHTML = cells.map(([value, label]) => `<span><strong>${value}</strong><small>${label}</small></span>`).join("");
 }
 
 function computeStats(items) {
-  const seen = new Set();
-  items.forEach((item) => {
-    const key = item.sourceUrl || item.title;
-    if (key) seen.add(key);
-  });
   return {
     total: items.length,
-    unique: seen.size,
+    withLinks: items.filter((item) => item.sourceUrl).length,
     missingTitles: items.filter((item) => !item.title).length,
-    missingLinks: items.filter((item) => !item.sourceUrl).length
+    missingLinks: items.filter((item) => !item.sourceUrl).length,
+    duplicates: state.duplicateCount,
+    pendingImport: getSelectedItems().length
   };
 }
 
@@ -343,13 +344,14 @@ function exportJson() {
 }
 
 async function saveCheckpoint() {
-  await chrome.storage.local.set({ [CHECKPOINT_KEY]: { items: state.items, selectedKeys: [...state.selectedKeys], pageUrl: state.pageUrl, savedAt: new Date().toISOString() } });
+  await chrome.storage.local.set({ [CHECKPOINT_KEY]: { items: state.items, selectedKeys: [...state.selectedKeys], duplicateCount: state.duplicateCount, pageUrl: state.pageUrl, savedAt: new Date().toISOString() } });
 }
 
 async function clearCheckpoint() {
   state.items = [];
   state.selectedKeys = new Set();
   state.pageUrl = "";
+  state.duplicateCount = 0;
   await chrome.storage.local.remove(CHECKPOINT_KEY);
   renderResults();
   setStatus("已清空本地扫描断点");
