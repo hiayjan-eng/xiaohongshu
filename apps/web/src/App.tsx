@@ -3379,6 +3379,20 @@ function getInitialView(): ViewKey {
   return supported.includes(view) ? view : "welcome";
 }
 
+function createHandshakeRequestId(): string {
+  const uuid = globalThis.crypto?.randomUUID?.();
+  return uuid ? `handshake_${uuid}` : `handshake_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function detectBrowserName(): string {
+  if (typeof navigator === "undefined") return "unknown";
+  const ua = navigator.userAgent || "";
+  if (/Edg\//.test(ua)) return "Edge";
+  if (/Chrome\//.test(ua)) return "Chrome";
+  if (/Safari\//.test(ua)) return "Safari";
+  return "Other";
+}
+
 function normalizeImportInput(input: ShareInput): ShareInput {
   return parseShareInput(input);
 }
@@ -3481,7 +3495,6 @@ function buildInsights(items: SavedItem[]) {
     categoryDistribution
   };
 }
-
 
 
 
