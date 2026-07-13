@@ -2,6 +2,14 @@
   if (window.__collectionRevivalScannerInstalled) return;
   window.__collectionRevivalScannerInstalled = true;
 
+  announceWebConnection();
+
+  window.addEventListener("message", (event) => {
+    if (event.source !== window) return;
+    if (event.data?.source !== "collection-revival-web") return;
+    if (event.data?.type !== "COLLECTION_REVIVAL_EXTENSION_PING") return;
+    announceWebConnection();
+  });
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.type === "REVIVAL_PING") {
       sendResponse({ ok: true });
@@ -36,6 +44,16 @@
     return true;
   });
 
+
+  function announceWebConnection() {
+    if (!/xiaohongshu-green\.vercel\.app|localhost|127\.0\.0\.1/i.test(location.host)) return;
+    window.postMessage({
+      source: "collection-revival-extension",
+      type: "COLLECTION_REVIVAL_EXTENSION_READY",
+      ok: true,
+      version: chrome.runtime.getManifest().version
+    }, "*");
+  }
   function getPageStatus() {
     const text = cleanText(document.body?.innerText || "").slice(0, 4000);
     const blocked = /验证码|验证|安全验证|登录后查看|请先登录|访问频繁|稍后再试/.test(text);
