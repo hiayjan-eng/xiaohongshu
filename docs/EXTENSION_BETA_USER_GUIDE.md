@@ -24,15 +24,15 @@ The build outputs are:
 
 ```text
 release-artifacts/extension-beta
-release-artifacts/collection-revival-extension-beta-v0.2.0.zip
-apps/web/public/downloads/collection-revival-extension-beta-v0.2.0.zip
+release-artifacts/collection-revival-extension-beta-v0.2.1.zip
+apps/web/public/downloads/collection-revival-extension-beta-v0.2.1.zip
 ```
 
 ## Install In Chrome
 
 1. Open `chrome://extensions`.
 2. Turn on Developer mode.
-3. Download `collection-revival-extension-beta-v0.2.0.zip` from the Web `/old-import` page, or use the local artifact in `release-artifacts`.
+3. Download `collection-revival-extension-beta-v0.2.1.zip` from the Web `/old-import` page, or use the local artifact in `release-artifacts`.
 4. Unzip it to a fixed folder.
 5. Click “Load unpacked”.
 6. Select the unzipped folder that contains `manifest.json`.
@@ -42,7 +42,7 @@ apps/web/public/downloads/collection-revival-extension-beta-v0.2.0.zip
 
 1. Open `edge://extensions`.
 2. Turn on Developer mode.
-3. Download `collection-revival-extension-beta-v0.2.0.zip` from the Web `/old-import` page, or use the local artifact in `release-artifacts`.
+3. Download `collection-revival-extension-beta-v0.2.1.zip` from the Web `/old-import` page, or use the local artifact in `release-artifacts`.
 4. Unzip it to a fixed folder.
 5. Click “Load unpacked”.
 6. Select the unzipped folder that contains `manifest.json`.
