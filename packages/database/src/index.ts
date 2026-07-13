@@ -1,9 +1,11 @@
 import { classifyAndGenerateActionCard } from "@revival/ai-service";
 import {
+  CATEGORIES,
   DEFAULT_USER,
   type ActionCard,
   type AiClassificationResult,
   type AppState,
+  type Category,
   type ItemStatus,
   type SavedItem,
   type SearchLog,
@@ -312,20 +314,30 @@ function normalizeAppState(state: AppState): AppState {
 }
 
 function normalizeSavedItem(item: SavedItem): SavedItem {
-  const raw = item as SavedItem & { subCategory?: string; whyThisCategory?: string };
+  const raw = item as SavedItem & { subCategory?: string; whyThisCategory?: string; category?: string };
+  const category = normalizeCategoryValue(raw.category);
+  const subCategory = category === "暂存" && (!raw.subCategory || raw.subCategory === "其他") ? "待补充备注" : raw.subCategory || inferSubCategoryFromItem({ ...item, category });
   return {
     ...item,
-    subCategory: raw.subCategory || inferSubCategoryFromItem(item),
+    sourcePlatform: detectPlatform(item.sourceUrl),
+    category,
+    subCategory,
+    title: normalizeStoredTitle(item.title, item.rawShareText),
+    summary: normalizeStoredSummary(item.summary, category),
     whyThisCategory: raw.whyThisCategory || "基于标题、分享文案和备注综合判断。",
-    classificationConfidence: item.classificationConfidence ?? "medium"
+    classificationConfidence: item.classificationConfidence ?? (category === "暂存" ? "low" : "medium")
   };
 }
 
 function normalizeActionCard(card: ActionCard, item?: SavedItem): ActionCard {
   const raw = card as ActionCard & Partial<Pick<ActionCard, "whySaved" | "openOriginalFocus" | "output" | "doneCriteria" | "avoidDoing" | "ifInfoMissing" | "followUp" | "subCategory">>;
+  const category = normalizeCategoryValue(card.category);
+  const subCategory = raw.subCategory && raw.subCategory !== "其他" ? raw.subCategory : item?.subCategory || (category === "暂存" ? "待补充备注" : "主题整理");
   return {
     ...card,
-    subCategory: raw.subCategory || item?.subCategory || "主题整理",
+    category,
+    subCategory,
+    title: normalizeStoredTitle(card.title, item?.title || item?.rawShareText),
     whySaved: raw.whySaved || item?.intent || "这条收藏可以转成一个小行动。",
     openOriginalFocus: raw.openOriginalFocus && raw.openOriginalFocus.length > 0 ? raw.openOriginalFocus : ["原帖标题", "作者给的步骤", "评论区补充"],
     output: raw.output || "一个可保存的小产出",
@@ -353,4 +365,28 @@ function normalizeSmartAlbum(album: NonNullable<AppState["smartAlbums"]>[number]
 
 function inferSubCategoryFromItem(item: SavedItem): string {
   return item.keywords[0] || item.category;
+}
+
+function normalizeCategoryValue(value: unknown): Category {
+  if (typeof value === "string" && value !== "其他" && (CATEGORIES as readonly string[]).includes(value)) return value as Category;
+  return "暂存";
+}
+
+function normalizeStoredTitle(title: string, fallback?: string): string {
+  const cleaned = cleanLegacyText(title).replace(/其他行动卡行动卡|行动卡行动卡|其他行动卡/g, "").trim();
+  if (cleaned) return cleaned;
+  const fallbackText = cleanLegacyText(fallback ?? "").replace(/https?:\/\/\S+/g, "").trim().slice(0, 20);
+  return fallbackText || "待整理收藏";
+}
+
+function normalizeStoredSummary(summary: string, category: Category): string {
+  const cleaned = cleanLegacyText(summary);
+  if (category === "暂存" || /可能和.*http|其他行动卡|行动卡行动卡/.test(cleaned)) {
+    return "信息还不够完整，补充一句收藏原因后可以重新整理。";
+  }
+  return cleaned || "信息还不够完整，补充一句收藏原因后可以重新整理。";
+}
+
+function cleanLegacyText(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
 }

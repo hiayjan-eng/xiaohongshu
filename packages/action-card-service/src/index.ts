@@ -24,7 +24,7 @@ const categoryPlanType: Record<Category, PlanType> = {
 };
 
 export function getPlanTypeForCategory(category: Category): PlanType {
-  return categoryPlanType[category];
+  return categoryPlanType[category] ?? "mixed";
 }
 
 export function findActionCardBySavedItem(actionCards: ActionCard[], savedItemId: string): ActionCard | undefined {
@@ -155,7 +155,7 @@ function buildAlbumClusters(items: SavedItem[]): AlbumCluster[] {
     const keywords = pickAlbumKeywords(group);
     return {
       key,
-      category: first.category,
+      category: normalizeRuntimeCategory(first.category),
       subCategory: first.subCategory || keywords[0] || "主题整理",
       items: [...group].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
       keywords
@@ -212,7 +212,7 @@ function pickAlbumTitle(cluster: AlbumCluster): string {
   if (primary && cluster.category === "饮食与健康") return `${primary}：先做一份清单`;
   if (primary && cluster.category === "内容创作") return `${primary}：变成一个可发布选题`;
   if (primary && cluster.category === "AI 与效率") return `${primary}：复现到日常工作里`;
-  return albumTitleByCategory[cluster.category][0];
+  return albumTitleByCategory[cluster.category]?.[0] ?? `${cluster.subCategory || "待补充备注"}：先复活 3 条`;
 }
 
 function inferAlbumType(category: Category, subCategory: string): string {
@@ -245,6 +245,10 @@ function dedupeItems(items: SavedItem[]): SavedItem[] {
     seen.add(key);
     return true;
   });
+}
+
+function normalizeRuntimeCategory(value: unknown): Category {
+  return typeof value === "string" && Object.prototype.hasOwnProperty.call(categoryPlanType, value) ? value as Category : "暂存";
 }
 
 function slugify(value: string): string {

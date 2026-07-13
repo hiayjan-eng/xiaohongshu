@@ -76,11 +76,11 @@ export function processImportBatch(input: ProcessImportBatchInput): ProcessImpor
       createdAt
     };
 
-    if (!normalized.sourceUrl) {
+    if (!hasImportableContent(normalized)) {
       const failed: ImportBatchItem = {
         ...baseItem,
         status: "failed",
-        errorMessage: "缺少 sourceUrl，第一版旧收藏扫描要求至少有原帖链接"
+        errorMessage: "这段内容信息太少，建议补充标题或备注后再生成。"
       };
       batchItems.push(failed);
       failedItems.push(failed);
@@ -196,11 +196,11 @@ export async function processImportBatchAsync(input: ProcessImportBatchInput): P
       createdAt
     };
 
-    if (!normalized.sourceUrl) {
+    if (!hasImportableContent(normalized)) {
       const failed: ImportBatchItem = {
         ...baseItem,
         status: "failed",
-        errorMessage: "缺少 sourceUrl；第一版旧收藏扫描要求至少有原帖链接。"
+        errorMessage: "这段内容信息太少，建议补充标题或备注后再生成。"
       };
       batchItems.push(failed);
       failedItems.push(failed);
@@ -287,20 +287,35 @@ export function extensionItemsToImportItems(items: ExtensionScannedItem[]): Impo
   }));
 }
 
-export function normalizeImportItem(item: ImportInputItem): ShareInput & Pick<ImportInputItem, "visibleText" | "coverUrl"> {
-  const sourceUrl = normalizeUrl(item.sourceUrl ?? "");
+export function parseShareInput(item: ImportInputItem): ShareInput & Pick<ImportInputItem, "visibleText" | "coverUrl"> {
+  const sourceField = cleanText(item.sourceUrl ?? "");
+  const titleField = cleanText(item.title ?? "");
+  const rawField = cleanText(item.rawShareText ?? "");
   const visibleText = cleanText(item.visibleText ?? "").slice(0, 320);
-  const rawShareText = cleanText(item.rawShareText ?? visibleText);
-  const fallbackTitle = rawShareText || visibleText || sourceUrl || "未命名收藏";
+  const userNote = cleanText(item.userNote ?? "");
+  const sourceParse = splitUrlFromText(sourceField);
+  const rawParse = splitUrlFromText(rawField);
+  const visibleParse = splitUrlFromText(visibleText);
+  const sourceUrl = normalizeUrl(sourceParse.url || rawParse.url || visibleParse.url || "");
+  const textParts = [sourceParse.text, rawParse.text, visibleParse.text]
+    .map(cleanText)
+    .filter(Boolean);
+  const rawShareText = uniqueTextParts(textParts).join(" ");
+  const fallbackText = rawShareText || userNote || sourceUrl;
+  const title = titleField || extractShareTitle(fallbackText) || (fallbackText ? fallbackText.slice(0, 40) : "待整理收藏");
 
   return {
     sourceUrl,
-    title: cleanText(item.title ?? "") || fallbackTitle.slice(0, 40),
+    title,
     rawShareText,
     visibleText: visibleText || undefined,
     coverUrl: normalizeUrl(item.coverUrl ?? "") || undefined,
-    userNote: cleanText(item.userNote ?? "")
+    userNote
   };
+}
+
+export function normalizeImportItem(item: ImportInputItem): ShareInput & Pick<ImportInputItem, "visibleText" | "coverUrl"> {
+  return parseShareInput(item);
 }
 
 function mergeSmartAlbumCandidates(existingAlbums: SmartAlbum[], generatedAlbums: SmartAlbum[]): SmartAlbum[] {
@@ -337,17 +352,50 @@ function normalizeUrl(value: string): string {
   if (!clean) return "";
   try {
     const url = new URL(clean);
+    if (!["http:", "https:"].includes(url.protocol)) return "";
     url.hash = "";
     return url.toString();
   } catch {
-    return clean;
+    return "";
   }
+}
+
+function splitUrlFromText(value: string): { url: string; text: string } {
+  const urlMatch = value.match(/https?:\/\/[^\s，。；;）)】]+/i);
+  if (!urlMatch) return { url: "", text: value };
+  const url = trimUrl(urlMatch[0]);
+  const text = cleanText(value.replace(urlMatch[0], " "));
+  return { url, text };
+}
+
+function extractShareTitle(value: string): string {
+  const clean = cleanText(value.replace(/复制打开小红书|小红书/g, " "));
+  const bracket = clean.match(/[【\[]([^】\]]+)[】\]]/);
+  const candidate = bracket?.[1] ?? clean;
+  return cleanText(candidate.replace(/^\d+\s*/, "").replace(/\s*[-｜|]\s*[^-｜|]+$/, "")).slice(0, 48);
+}
+
+function hasImportableContent(input: ShareInput): boolean {
+  return Boolean([input.sourceUrl, input.title, input.rawShareText, input.userNote].some((value) => value.trim()));
+}
+
+function uniqueTextParts(parts: string[]): string[] {
+  const seen = new Set<string>();
+  return parts.filter((part) => {
+    const key = part.toLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function trimUrl(value: string): string {
+  return value.replace(/[，。；;）)】]+$/g, "");
 }
 
 function cleanText(value: string): string {
   return value.replace(/\s+/g, " ").trim();
 }
-
 function getSavedItemDedupeKey(item: SavedItem): string {
   return item.sourceUrl.trim().toLowerCase() || item.title.trim().toLowerCase();
 }

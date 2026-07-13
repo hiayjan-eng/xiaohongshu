@@ -226,7 +226,7 @@ function buildMockClassification(input: ReturnType<typeof normalizeShareInput>) 
   const inferred = inferCategory(text);
   const keywords = buildKeywords(input, inferred.category, inferred.subCategory);
   const topic = cleanTitle(input.title || input.rawShareText || input.userNote || keywords[0] || "这条收藏");
-  const nextAction = buildNextAction(inferred.category, topic);
+  const nextAction = buildNextAction(inferred.category, topic, Boolean(input.sourceUrl.trim()));
   const focus = focusPointsForCategory(inferred.category);
   const output = outputForCategory(inferred.category);
   const low = text.replace(/https?:\/\/\S+/g, "").trim().length < 8 || inferred.category === "暂存";
@@ -308,7 +308,7 @@ function buildKeywords(input: ReturnType<typeof normalizeShareInput>, category =
 function inferCategory(text: string): { category: string; subCategory: string; intent: string; whyThisCategory: string } {
   const rules: Array<[string, string, string[], string]> = [
     ["内容创作", "小红书运营", ["小红书", "封面", "标题", "笔记", "账号运营", "图文排版", "涨粉", "选题", "文案", "拍摄", "脚本"], "用户可能想把这条收藏转成可发布的选题、封面结构或内容动作"],
-    ["AI 与效率", "AI 工具", ["AI工具", "AI 工具", "ChatGPT", "Claude", "prompt", "提示词", "工作流", "SOP", "自动化", "效率"], "用户可能想复现一个工具用法或工作流"],
+    ["AI 与效率", "AI 工具", ["AI工具", "AI 工具", "ChatGPT", "Claude", "Codex", "codex", "代码助手", "AI编程", "prompt", "提示词", "工作流", "SOP", "自动化", "效率"], "用户可能想复现一个工具用法或工作流"],
     ["出行与探店", "周末去处", ["旅行", "攻略", "路线", "大理", "深圳", "周末", "展览", "徒步", "城市", "探店", "咖啡", "餐厅", "甜品"], "用户可能想把地点或店铺变成一次出行候选"],
     ["饮食与健康", "低卡备餐", ["菜谱", "做饭", "低卡", "晚餐", "备餐", "早餐", "食材", "减脂餐", "健身", "运动"], "用户可能想把饮食或健康收藏转成今天能执行的一份清单"],
     ["情绪与关系", "亲密关系", ["情绪", "关系", "表达需求", "伴侣", "恋爱", "边界", "复盘", "手帐"], "用户可能想把触动自己的观点变成一次自我观察或关系表达"],
@@ -334,9 +334,9 @@ function inferCategory(text: string): { category: string; subCategory: string; i
   return { category: hit[0], subCategory: hit[1], intent: hit[3], whyThisCategory: `命中了「${hit[1]}」相关线索。` };
 }
 
-function buildNextAction(category: string, topic: string): string {
+function buildNextAction(category: string, topic: string, hasSourceUrl = true): string {
   if (category === "内容创作") return `打开原帖，只记录“${topic}”的标题结构、封面构图、开头钩子和评论区高频问题，然后改写成 1 个适合你账号方向的选题。`;
-  if (category === "AI 与效率" || category === "技能学习") return `打开原帖，找到第一个工具名或操作步骤；今天只复现第一步，并留下 1 张截图或 1 段可复用 prompt。`;
+  if (category === "AI 与效率" || category === "技能学习") return hasSourceUrl ? `打开原帖，找到第一个工具名或操作步骤；今天只复现第一步，并留下 1 张截图或 1 段可复用 prompt。` : `先补充原帖链接，或把“${topic}”里提到的方法粘到分享文案/备注；今天只选 1 个方法用到自己的项目里，产出 1 条 Codex 或 AI 工作流记录。`;
   if (category === "出行与探店") return `打开原帖，确认地点、时间、交通和预算，把它放进一个候选日期，产出 1 个周末计划草稿。`;
   if (category === "饮食与健康") return `打开原帖，抄下食材、动作或材料清单，标记已有和需要补齐的部分，产出 1 张清单。`;
   if (category === "情绪与关系") return `打开原帖，摘出 1 句最触动你的观点，再写 1 个自己的例子，产出 1 条自我观察记录。`;

@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { collectConsoleErrors, expectNoConsoleErrors, seedEmptyState } from "./helpers";
+import { collectConsoleErrors, expectNoConsoleErrors, readAppState, seedEmptyState } from "./helpers";
 
 test.describe("MVP empty states and responsive basics", () => {
   test("handles empty local data and missing sourceUrl without crashing", async ({ page }) => {
@@ -23,7 +23,9 @@ test.describe("MVP empty states and responsive basics", () => {
     await page.getByTestId("import-title").fill("没有链接的封面灵感收藏");
     await page.getByTestId("import-raw-share-text").fill("封面设计参考，没有 sourceUrl，用来测试导入管线兜底");
     await page.getByTestId("import-submit").click();
-    await expect(page.locator(".toast")).toContainText("缺少 sourceUrl");
+    await expect(page.getByTestId("import-success-panel")).toBeVisible();
+    await expect(page.locator("body")).not.toContainText("Cannot read properties of undefined");
+    await expect.poll(async () => (await readAppState(page)).savedItems.some((item) => item.sourceUrl === "" && (item.title.includes("没有链接") || item.rawShareText.includes("sourceUrl")))).toBe(true);
     await expectNoConsoleErrors(errors);
   });
 

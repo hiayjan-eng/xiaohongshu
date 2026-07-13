@@ -23,8 +23,9 @@ import {
 } from "lucide-react";
 import { cloneTasksForCard, createPlansFromActionCards, generateSmartAlbums, PLAN_TYPE_LABELS } from "@revival/action-card-service";
 import { createAiClient, type AiRuntimeStatus } from "@revival/ai-service";
-import { extensionItemsToImportItems, processImportBatchAsync, type ImportInputItem, type ProcessImportBatchResult } from "@revival/import-service";
+import { extensionItemsToImportItems, parseShareInput, processImportBatchAsync, type ImportInputItem, type ProcessImportBatchResult } from "@revival/import-service";
 import {
+  createImportedRecords,
   createInitialDemoData,
   createSearchLog,
   STORAGE_KEY,
@@ -375,8 +376,8 @@ export function App() {
           setImportInput(emptyImport);
           setToast(result.batch.importedCount > 0 ? "已复活一条收藏" : result.batch.errorMessage || "这条收藏已经在收藏池里了");
         })
-        .catch((error) => {
-          setToast(error instanceof Error ? error.message : "导入失败，已保留 mock fallback");
+        .catch(() => {
+          setToast("导入时遇到问题，表单内容已保留。建议补充标题或备注后再试。");
         })
         .finally(() => setIsImporting(false));
     }, 420);
@@ -400,7 +401,7 @@ export function App() {
           : "这些扫描结果已经在收藏池里了"
       );
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "旧收藏导入失败，已保留当前数据");
+      setToast("旧收藏导入时遇到问题，已保留当前数据。请检查扫描结果后再试。");
     }
   }
 
@@ -636,6 +637,74 @@ export function App() {
     setUnlockedAchievements({});
     setAchievementModal(null);
     setToast(`已恢复 ${demo.savedItems.length} 条演示数据`);
+  }
+
+  function clearLocalTestData() {
+    if (!window.confirm("这只会清空当前浏览器里的测试数据，不影响线上项目代码。确定清空吗？")) return;
+    setState({
+      user: state.user,
+      savedItems: [],
+      actionCards: [],
+      searchLogs: [],
+      smartAlbums: [],
+      importBatches: [],
+      importBatchItems: []
+    });
+    setSelectedItemId(undefined);
+    setLastImportResult(null);
+    setSubmittedSearch("");
+    setGlobalQuery("");
+    setPoolQuery("");
+    setUnlockedAchievements({});
+    setAchievementModal(null);
+    setToast("已清空当前浏览器里的本地测试数据");
+  }
+
+  function exportLocalData() {
+    const content = JSON.stringify(state, null, 2);
+    const blob = new Blob([content], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `collection-revival-local-data-${new Date().toISOString().slice(0, 10)}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+    setToast("本地数据已导出为 JSON");
+  }
+
+  async function reprocessLocalData() {
+    if (state.savedItems.length === 0) {
+      setToast("当前没有需要重新整理的本地收藏");
+      return;
+    }
+    setToast("正在用当前规则重新整理旧收藏...");
+    try {
+      const now = new Date().toISOString();
+      const rebuilt = await Promise.all(state.savedItems.map(async (item) => {
+        const existingCard = state.actionCards.find((card) => card.savedItemId === item.id);
+        const input = parseShareInput({ sourceUrl: item.sourceUrl, title: item.title, rawShareText: item.rawShareText, userNote: item.userNote });
+        const classification = await Promise.resolve(aiClient.classifyAndGenerateActionCard(input));
+        const records = createImportedRecords(state.user.id, input, classification, new Date(item.createdAt || now));
+        const cardId = existingCard?.id ?? records.actionCard.id;
+        return {
+          savedItem: { ...records.savedItem, id: item.id, status: item.status, createdAt: item.createdAt, updatedAt: now },
+          actionCard: { ...records.actionCard, id: cardId, savedItemId: item.id, createdAt: existingCard?.createdAt ?? records.actionCard.createdAt, updatedAt: now, tasks: cloneTasksForCard(cardId, records.actionCard.tasks) }
+        };
+      }));
+      const savedItems = rebuilt.map((entry) => entry.savedItem);
+      const actionCards = rebuilt.map((entry) => entry.actionCard);
+      setState((current) => ({
+        ...current,
+        savedItems,
+        actionCards,
+        smartAlbums: mergeGeneratedSmartAlbums([], savedItems)
+      }));
+      setSelectedItemId(savedItems[0]?.id);
+      setLastImportResult(null);
+      setToast(`已重新整理 ${savedItems.length} 条本地收藏`);
+    } catch {
+      setToast("重新整理时遇到问题，当前数据已保留。可以先导出数据或清空本地测试数据。");
+    }
   }
 
   function addRealTestImportedRecords(savedItem: SavedItem, actionCard: ActionCard) {
@@ -919,6 +988,9 @@ export function App() {
               recommendationLimit={recommendationLimit}
               setRecommendationLimit={setRecommendationLimit}
               resetDemoData={resetDemoData}
+              clearLocalTestData={clearLocalTestData}
+              exportLocalData={exportLocalData}
+              reprocessLocalData={reprocessLocalData}
               themeId={themeId}
               setThemeId={setThemeId}
               aiStatus={aiStatus}
@@ -1580,16 +1652,16 @@ function PoolView(props: {
               {props.items.map((item) => (
                 <tr key={item.id}>
                   <td>
-                    <strong>{item.title}</strong>
-                    <small>{item.summary}</small>
+                    <strong>{formatItemTitle(item)}</strong>
+                    <small>{formatItemSummary(item)}</small>
                   </td>
-                  <td>{item.category}</td>
+                  <td>{formatCategoryLabel(item)}</td>
                   <td>{DISPLAY_STATUS_LABELS[item.status]}</td>
                   <td>{formatDate(item.createdAt)}</td>
                   <td>
                     <div className="table-actions">
                       <button onClick={() => props.viewActionCard(item.id)}>行动卡</button>
-                      <button onClick={() => props.openSource(item)}>原帖</button>
+                      {hasSourceUrl(item) ? <button onClick={() => props.openSource(item)}>原帖</button> : <button disabled>暂无原帖</button>}
                     </div>
                   </td>
                 </tr>
@@ -1852,7 +1924,7 @@ function SmartAlbumsView(props: {
                       </span>
                       <div>
                         <button onClick={() => props.viewActionCard(item.id)}>查看卡片</button>
-                        <button onClick={() => props.openSource(item)}>原帖</button>
+                        {hasSourceUrl(item) ? <button onClick={() => props.openSource(item)}>原帖</button> : <button disabled>暂无原帖</button>}
                       </div>
                     </article>
                   );
@@ -1886,7 +1958,7 @@ function SmartAlbumsView(props: {
                   </div>
                   <div className="qa-row-actions">
                     <button onClick={() => props.viewActionCard(item.id)}>行动卡</button>
-                    <button onClick={() => props.openSource(item)}>原帖</button>
+                    {hasSourceUrl(item) ? <button onClick={() => props.openSource(item)}>原帖</button> : <button disabled>暂无原帖</button>}
                   </div>
                 </article>
               );
@@ -2054,7 +2126,7 @@ function MobilePrototype(props: {
                 <div className="phone-section-title">收藏池</div>
                 {props.savedItems.slice(0, 7).map((item) => (
                   <button className="phone-list-row" key={item.id} onClick={() => props.viewActionCard(item.id)}>
-                    <span>{item.category}</span>
+                    <span>{formatCategoryLabel(item)}</span>
                     <strong>{item.title}</strong>
                     <small>{DISPLAY_STATUS_LABELS[item.status]}</small>
                   </button>
@@ -2135,6 +2207,9 @@ function SettingsView(props: {
   recommendationLimit: number;
   setRecommendationLimit: (value: number) => void;
   resetDemoData: () => void;
+  clearLocalTestData: () => void;
+  exportLocalData: () => void;
+  reprocessLocalData: () => void;
   themeId: ThemePresetId;
   setThemeId: (themeId: ThemePresetId) => void;
   aiStatus: AiRuntimeStatus;
@@ -2151,6 +2226,19 @@ function SettingsView(props: {
       </div>
 
       <ThemePicker selectedThemeId={props.themeId} onThemeChange={props.setThemeId} />
+
+      <section className="tool-panel single settings-list" data-testid="local-data-tools">
+        <div className="settings-row">
+          <span>本地测试数据管理</span>
+          <strong>localStorage</strong>
+        </div>
+        <p className="quiet-copy">如果你之前测试过旧版本，建议先重新整理或清空本地测试数据，再验证新版分类和行动卡效果。</p>
+        <div className="qa-actions">
+          <button className="secondary-action" onClick={props.reprocessLocalData} data-testid="settings-reprocess-local">重新整理旧收藏</button>
+          <button className="secondary-action" onClick={props.exportLocalData} data-testid="settings-export-local">导出本地数据</button>
+          <button className="danger-button" onClick={props.clearLocalTestData} data-testid="settings-clear-local">清空本地测试数据</button>
+        </div>
+      </section>
 
       <section className="tool-panel single settings-list">
         <div className="settings-row">
@@ -2399,36 +2487,39 @@ function QuickImportForm(props: {
   isLoading?: boolean;
 }) {
   const update = (field: keyof ShareInput, value: string) => props.setInput({ ...props.input, [field]: value });
-  const onlyUrlProvided = Boolean(props.input.sourceUrl.trim()) && !props.input.title.trim() && !props.input.rawShareText.trim() && !props.input.userNote.trim();
+  const parsedInput = parseShareInput(props.input);
+  const hasOnlyFirstField = Boolean(props.input.sourceUrl.trim()) && !props.input.title.trim() && !props.input.rawShareText.trim() && !props.input.userNote.trim();
+  const onlyUrlProvided = hasOnlyFirstField && Boolean(parsedInput.sourceUrl);
+  const onlyShareTextProvided = hasOnlyFirstField && !parsedInput.sourceUrl;
 
   return (
     <form className={props.compact ? "quick-import compact" : "quick-import"} onSubmit={props.onSubmit} data-testid="quick-import-form">
       <label>
-        <span>分享链接</span>
-        <input data-testid="import-source-url" value={props.input.sourceUrl} onChange={(event) => update("sourceUrl", event.target.value)} placeholder="粘贴小红书分享链接，后续将支持系统分享入口" />
+        <span>粘贴链接或分享文本</span>
+        <input data-testid="import-source-url" value={props.input.sourceUrl} onChange={(event) => update("sourceUrl", event.target.value)} placeholder="可以粘贴小红书链接，也可以粘贴系统分享出来的一整段文字" />
       </label>
       <label>
         <span>标题，可选</span>
-        <input data-testid="import-title" value={props.input.title} onChange={(event) => update("title", event.target.value)} placeholder="例如：深圳周末展览路线" />
+        <input data-testid="import-title" value={props.input.title} onChange={(event) => update("title", event.target.value)} placeholder="可选：比如 小红书封面设计技巧" />
       </label>
       <label>
         <span>分享文案，可选</span>
-        <textarea data-testid="import-raw-share-text" value={props.input.rawShareText} onChange={(event) => update("rawShareText", event.target.value)} placeholder="系统分享面板带过来的可用文本" />
+        <textarea data-testid="import-raw-share-text" value={props.input.rawShareText} onChange={(event) => update("rawShareText", event.target.value)} placeholder="可选：系统分享面板带过来的可用文本" />
       </label>
       <label>
         <span>个人备注，可选</span>
-        <input data-testid="import-user-note" value={props.input.userNote} onChange={(event) => update("userNote", event.target.value)} placeholder="可选，比如：下周末想去 / 想学这个 / 适合拍视频" />
+        <input data-testid="import-user-note" value={props.input.userNote} onChange={(event) => update("userNote", event.target.value)} placeholder="可选：我收藏它是因为……" />
       </label>
       <button className="primary-button" type="submit" disabled={props.isLoading} data-testid="import-submit">
         {props.isLoading ? <span className="loading-dot" aria-hidden="true" /> : <Import size={17} />}
         {props.isLoading ? "正在把收藏变成行动卡..." : "生成行动卡"}
       </button>
       {onlyUrlProvided && <p className="import-hint">只有链接时系统理解会比较弱，建议补一句你为什么收藏它。</p>}
+      {onlyShareTextProvided && <p className="import-hint">已识别为分享文本，没有原帖链接也可以先整理；补一句收藏原因会更准。</p>}
       <p className="import-hint">第一版用模拟分享导入，后续会接入手机系统分享入口。</p>
     </form>
   );
-}
-function RecommendationRow(props: {
+}function RecommendationRow(props: {
   recommendation: RevivalRecommendation;
   openSource: (item: SavedItem, origin?: OpenSourceOrigin) => void;
   viewActionCard: (itemId: string) => void;
@@ -2440,7 +2531,7 @@ function RecommendationRow(props: {
     <article className={isCompleted ? "action-row completed-card" : "action-row"} data-testid="recommendation-card">
       <div className="action-main">
         <div className="row-meta">
-          <span>{item.category}</span>
+          <span>{formatCategoryLabel(item)}</span>
           <span>{actionCard.estimatedTime}</span>
           <span>{DISPLAY_STATUS_LABELS[item.status]}</span>
         </div>
@@ -2454,9 +2545,15 @@ function RecommendationRow(props: {
           {isCompleted ? "已复活" : "开始行动"}
         </button>
         <button className="secondary-action" onClick={() => props.viewActionCard(item.id)} data-testid="view-action-card">查看卡片</button>
-        <button className="ghost-action icon-only" onClick={() => props.openSource(item)} aria-label="打开原帖" data-testid="open-source">
-          <ExternalLink size={16} />
-        </button>
+        {hasSourceUrl(item) ? (
+          <button className="ghost-action icon-only" onClick={() => props.openSource(item)} aria-label="打开原帖" data-testid="open-source">
+            <ExternalLink size={16} />
+          </button>
+        ) : (
+          <button className="ghost-action icon-only" disabled aria-label="暂无原帖链接" data-testid="open-source-unavailable">
+            <ExternalLink size={16} />
+          </button>
+        )}
       </div>
     </article>
   );
@@ -2472,20 +2569,27 @@ function SavedItemCard(props: {
   return (
     <article className={isCompleted ? "saved-card completed-card" : "saved-card"} data-testid="saved-item-card">
       <div className="row-meta">
-        <span>{props.item.category}</span>
+        <span>{formatCategoryLabel(props.item)}</span>
         <span>{formatDate(props.item.createdAt)}</span>
       </div>
-      <h3>{props.item.title}</h3>
-      <p>{props.item.summary}</p>
+      <h3>{formatItemTitle(props.item)}</h3>
+      <p>{formatItemSummary(props.item)}</p>
       <div className="tag-list">
         {props.item.keywords.slice(0, 5).map((keyword) => <span key={keyword}>{keyword}</span>)}
       </div>
       <StatusButtons item={props.item} changeStatus={props.changeStatus} />
       <div className="card-actions">
-        <button onClick={() => props.openSource(props.item)} data-testid="open-source">
-          <ExternalLink size={16} />
-          打开原帖
-        </button>
+        {hasSourceUrl(props.item) ? (
+          <button onClick={() => props.openSource(props.item)} data-testid="open-source">
+            <ExternalLink size={16} />
+            打开原帖
+          </button>
+        ) : (
+          <button disabled data-testid="open-source-unavailable">
+            <ExternalLink size={16} />
+            暂无原帖链接
+          </button>
+        )}
         <button className="primary-button" onClick={() => props.viewActionCard(props.item.id)} data-testid="view-action-card">
           <Play size={16} />
           查看卡片
@@ -2508,22 +2612,29 @@ function SearchResultRow(props: {
     <article className={isCompleted ? "search-result-row completed-card" : "search-result-row"} data-testid="search-result-card">
       <div>
         <div className="row-meta">
-          <span>{item.category}</span>
+          <span>{formatCategoryLabel(item)}</span>
           <span>{formatDate(item.createdAt)}</span>
           <span>{DISPLAY_STATUS_LABELS[item.status]}</span>
         </div>
-        <h3>{item.title}</h3>
-        <p>{item.summary}</p>
+        <h3>{formatItemTitle(item)}</h3>
+        <p>{formatItemSummary(item)}</p>
         <div className="reason-list">
           {matchReasons.map((reason) => <span key={reason}>{reason}</span>)}
         </div>
         {actionCard && <small>{isCompleted ? "这条收藏已经被你真正用过了。" : actionCard.nextAction}</small>}
       </div>
       <div className="row-actions search-card-actions">
-        <button className="secondary-action" onClick={() => props.openSource(item, "search")} data-testid="open-source-search">
-          <ExternalLink size={16} />
-          打开原帖
-        </button>
+        {hasSourceUrl(item) ? (
+          <button className="secondary-action" onClick={() => props.openSource(item, "search")} data-testid="open-source-search">
+            <ExternalLink size={16} />
+            打开原帖
+          </button>
+        ) : (
+          <button className="secondary-action" disabled data-testid="open-source-unavailable">
+            <ExternalLink size={16} />
+            暂无原帖链接
+          </button>
+        )}
         <button className="primary-button" onClick={() => props.viewActionCard(item.id)} data-testid="view-action-card">
           <Play size={16} />
           查看行动卡
@@ -2857,12 +2968,37 @@ function getInitialView(): ViewKey {
 }
 
 function normalizeImportInput(input: ShareInput): ShareInput {
-  return {
-    sourceUrl: input.sourceUrl.trim(),
-    title: input.title.trim(),
-    rawShareText: input.rawShareText.trim(),
-    userNote: input.userNote.trim()
-  };
+  return parseShareInput(input);
+}
+
+function normalizeDisplayCategory(item: Pick<SavedItem, "category" | "subCategory" | "classificationConfidence">): { category: Category; subCategory: string } {
+  const category = (item.category as string) === "其他" ? "暂存" : item.category;
+  const safeCategory = (CATEGORIES as readonly string[]).includes(category) ? category as Category : "暂存";
+  const subCategory = item.subCategory && item.subCategory !== "其他" ? item.subCategory : safeCategory === "暂存" ? "待补充备注" : "主题整理";
+  return { category: safeCategory, subCategory };
+}
+
+function formatCategoryLabel(item: Pick<SavedItem, "category" | "subCategory" | "classificationConfidence">): string {
+  const { category, subCategory } = normalizeDisplayCategory(item);
+  return category + " / " + subCategory + (item.classificationConfidence === "low" ? " · 低置信" : "");
+}
+
+function formatItemTitle(item: Pick<SavedItem, "title" | "rawShareText">): string {
+  const title = item.title.replace(/其他行动卡行动卡|行动卡行动卡|其他行动卡/g, "").trim();
+  if (title) return title;
+  const fallback = item.rawShareText.replace(/https?:\/\/\S+/g, "").trim().slice(0, 20);
+  return fallback || "待整理收藏";
+}
+
+function formatItemSummary(item: Pick<SavedItem, "summary" | "category">): string {
+  if ((item.category as string) === "其他" || /可能和.*http|其他行动卡|行动卡行动卡/.test(item.summary)) {
+    return "信息还不够完整，补充一句收藏原因后可以重新整理。";
+  }
+  return item.summary || "信息还不够完整，补充一句收藏原因后可以重新整理。";
+}
+
+function hasSourceUrl(item: Pick<SavedItem, "sourceUrl">): boolean {
+  return Boolean(item.sourceUrl.trim());
 }
 
 function formatDate(value: string): string {
