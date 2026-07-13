@@ -2239,15 +2239,27 @@ function PoolView(props: {
   changeStatus: (itemId: string, status: ItemStatus) => void;
   bulkSetFilteredStatus: (status: ItemStatus) => void;
 }) {
+  const actionCardItemIds = new Set(props.actionCards.map((card) => card.savedItemId));
+  const statRows = [
+    { label: "全部收藏", value: props.allItems.length },
+    { label: "尚未复活", value: props.allItems.filter((item) => !actionCardItemIds.has(item.id)).length },
+    { label: "已有行动卡", value: actionCardItemIds.size },
+    { label: "已加入计划", value: props.allItems.filter((item) => item.status === "today").length },
+    { label: "已完成", value: props.allItems.filter((item) => item.status === "completed").length }
+  ];
   return (
     <>
       <div className="page-title-row">
         <div>
           <p className="eyebrow">收藏池</p>
-          <h1>所有已复活的收藏</h1>
+          <h1>收藏池</h1>
         </div>
-        <p className="page-lead">这里管理的是行动卡和索引，不复制原帖完整内容。</p>
+        <p className="page-lead">这里整理扫描和导入的收藏。需要时，再选择一条复活。</p>
       </div>
+
+      <section className="album-overview-grid">
+        {statRows.map((stat) => <Metric key={stat.label} label={stat.label} value={stat.value.toString()} />)}
+      </section>
 
       <div className="pool-toolbar">
         <label className="field search-field">
@@ -2606,13 +2618,20 @@ function SmartAlbumsView(props: {
   archiveAlbum: (albumId: string) => void;
   regenerateSmartAlbums: () => void;
   correctSavedItemClassification: (itemId: string, mode: "domain" | "intent") => void;
+  selectedAlbumId?: string;
+  onSelectAlbum: (albumId: string) => void;
+  removeItemFromAlbum: (albumId: string, itemId: string) => void;
+  moveItemToTheme: (itemId: string) => void;
+  addItemToIntentAlbum: (itemId: string) => void;
+  createManualAlbum: () => void;
+  undoLastClassificationChange: () => void;
+  canUndoClassificationChange: boolean;
 }) {
   const visibleAlbums = props.albums.filter((album) => album.status !== "archived");
   const candidateCount = props.albums.filter((album) => album.status === "candidate").length;
   const confirmedCount = props.albums.filter((album) => album.status === "confirmed").length;
   const confirmedItemIds = new Set(props.albums.filter((album) => album.status === "confirmed").flatMap((album) => album.savedItemIds));
-  const [selectedAlbumId, setSelectedAlbumId] = useState<string | undefined>(visibleAlbums[0]?.id);
-  const selectedAlbum = visibleAlbums.find((album) => album.id === selectedAlbumId) ?? visibleAlbums[0];
+  const selectedAlbum = visibleAlbums.find((album) => album.id === props.selectedAlbumId) ?? visibleAlbums[0];
   const selectedItems = selectedAlbum
     ? selectedAlbum.savedItemIds
         .map((id) => props.savedItems.find((item) => item.id === id))
@@ -2642,6 +2661,7 @@ function SmartAlbumsView(props: {
           <small>完整原帖内容仍然通过 sourceUrl 回到原平台查看，本产品只保存用户确认导入后的索引、摘要和行动卡。</small>
         </div>
         <button className="secondary-action" onClick={props.regenerateSmartAlbums}>重新整理专辑</button>
+        <button className="secondary-action" onClick={props.createManualAlbum}>新建专辑</button>
       </section>
 
       <div className="smart-album-grid">
@@ -2687,10 +2707,10 @@ function SmartAlbumsView(props: {
               </div>
               <div className="album-actions">
                 <button className="primary-button" onClick={() => props.confirmAlbum(album.id)} disabled={album.status === "confirmed"} data-testid="confirm-album">
-                  {album.status === "confirmed" ? "已确认" : "确认创建"}
+                  {album.status === "confirmed" ? "已确认" : "确认这个专辑"}
                 </button>
                 <button className="secondary-action" onClick={() => props.renameAlbum(album.id)}>改名</button>
-                <button className="secondary-action" onClick={() => setSelectedAlbumId(album.id)}>查看收藏</button>
+                <button className="secondary-action" onClick={() => props.onSelectAlbum(album.id)} data-testid="view-album-items">查看收藏</button>
                 <button className="ghost-action" onClick={() => props.archiveAlbum(album.id)} data-testid="archive-album">暂不需要</button>
               </div>
             </section>
@@ -2701,6 +2721,20 @@ function SmartAlbumsView(props: {
       {selectedAlbum && (
         <section className="tool-panel single album-detail-panel" data-testid="album-detail">
           <PanelHeader icon={<LayoutGrid size={18} />} title={`${selectedAlbum.title} · 全部收藏`} meta={`${selectedItems.length} 条`} />
+          <div className="field-grid compact-fields">
+            <div className="field-card"><span>专辑类型</span><strong>{selectedAlbum.albumView === "saved_intent" ? "用途专辑" : "主题专辑"}</strong></div>
+            <div className="field-card"><span>为什么在一起</span><strong>{selectedAlbum.whyThisAlbum}</strong></div>
+            <div className="field-card"><span>推荐先看</span><strong>{selectedAlbum.whyStartHere}</strong></div>
+            <div className="field-card"><span>第一步</span><strong>{selectedAlbum.suggestedFirstAction}</strong></div>
+          </div>
+          <div className="album-actions">
+            <button className="secondary-action" onClick={() => props.renameAlbum(selectedAlbum.id)}>改名</button>
+            <button className="secondary-action" onClick={() => props.confirmAlbum(selectedAlbum.id)} disabled={selectedAlbum.status === "confirmed"}>
+              {selectedAlbum.status === "confirmed" ? "已确认" : "确认这个专辑"}
+            </button>
+            <button className="ghost-action" onClick={() => props.archiveAlbum(selectedAlbum.id)}>暂不需要</button>
+            <button className="ghost-action" onClick={props.undoLastClassificationChange} disabled={!props.canUndoClassificationChange}>撤销上次分类修改</button>
+          </div>
           <div className="qa-result-list">
             {selectedItems.map((item, index) => {
               const card = props.actionCards.find((entry) => entry.savedItemId === item.id);
@@ -2715,6 +2749,9 @@ function SmartAlbumsView(props: {
                     <button onClick={() => props.viewActionCard(item.id)}>查看</button>
                     <button onClick={() => props.correctSavedItemClassification(item.id, "domain")}>改主题</button>
                     <button onClick={() => props.correctSavedItemClassification(item.id, "intent")}>改用途</button>
+                    <button onClick={() => props.moveItemToTheme(item.id)}>移动到其他主题</button>
+                    <button onClick={() => props.addItemToIntentAlbum(item.id)}>添加到用途专辑</button>
+                    <button onClick={() => props.removeItemFromAlbum(selectedAlbum.id, item.id)}>从当前专辑移除</button>
                     {hasSourceUrl(item) ? <button onClick={() => props.openSource(item)}>原帖</button> : <button disabled>暂无原帖</button>}
                   </div>
                 </article>
@@ -2971,7 +3008,15 @@ function SettingsView(props: {
   setThemeId: (themeId: ThemePresetId) => void;
   aiStatus: AiRuntimeStatus;
   syncStatus: SyncRuntimeStatus;
+  developerMode: boolean;
+  setDeveloperMode: (value: boolean) => void;
+  openInternalTool: (view: "qa" | "real-test") => void;
 }) {
+  const [devOpen, setDevOpen] = useState(false);
+  function toggleDeveloperMode(value: boolean) {
+    props.setDeveloperMode(value);
+    if (typeof window !== "undefined") window.localStorage.setItem("developerMode", value ? "true" : "false");
+  }
   return (
     <>
       <div className="page-title-row">
@@ -3041,6 +3086,26 @@ function SettingsView(props: {
           <strong>{props.syncStatus.migrationRequired ? "需要用户确认迁移" : "暂不需要迁移"}</strong>
         </div>
         <p className="quiet-copy">{props.syncStatus.message}</p>
+      </section>
+
+      <section className="tool-panel single settings-list" data-testid="developer-tools-panel">
+        <button className="settings-row" onClick={() => setDevOpen((value) => !value)} aria-expanded={devOpen}>
+          <span>开发与测试</span>
+          <strong>内部测试工具</strong>
+        </button>
+        {devOpen && (
+          <>
+            <p className="quiet-copy">这些入口用于 QA、真实试用记录和内部诊断。普通朋友测试可以忽略；需要时可用 URL 参数 ?dev=1 或开启下面的开发者模式。</p>
+            <label className="settings-row">
+              <span>开发者模式</span>
+              <input type="checkbox" checked={props.developerMode} onChange={(event) => toggleDeveloperMode(event.target.checked)} />
+            </label>
+            <div className="qa-actions">
+              <button className="secondary-action" onClick={() => props.openInternalTool("qa")}>打开 QA 面板</button>
+              <button className="secondary-action" onClick={() => props.openInternalTool("real-test")}>打开真实试用</button>
+            </div>
+          </>
+        )}
       </section>
 
       <section className="tool-panel single settings-list">
@@ -3733,9 +3798,26 @@ function mergeGeneratedSmartAlbums(existingAlbums: SmartAlbum[], savedItems: Sav
 }
 function getInitialView(): ViewKey {
   if (typeof window === "undefined") return "welcome";
-  const view = window.location.pathname.replace(/^\//, "") as ViewKey;
+  const firstSegment = window.location.pathname.replace(/^\//, "").split("/")[0];
+  const view = firstSegment as ViewKey;
   const supported: ViewKey[] = ["welcome", "dashboard", "import", "old-import", "search", "pool", "detail", "plans", "albums", "insights", "mobile", "settings", "real-test", "qa"];
   return supported.includes(view) ? view : "welcome";
+}
+
+function getInitialAlbumId(): string | undefined {
+  if (typeof window === "undefined") return undefined;
+  const match = window.location.pathname.match(/^\/albums\/([^/]+)/);
+  return match?.[1] ? decodeURIComponent(match[1]) : undefined;
+}
+
+function detectDeveloperMode(): boolean {
+  if (typeof window === "undefined") return false;
+  const query = new URLSearchParams(window.location.search);
+  if (query.get("dev") === "1") {
+    window.localStorage.setItem("developerMode", "true");
+    return true;
+  }
+  return import.meta.env.DEV || window.localStorage.getItem("developerMode") === "true";
 }
 
 function createHandshakeRequestId(): string {
@@ -3772,6 +3854,64 @@ function normalizeDisplayCategory(item: Pick<SavedItem, "category" | "subCategor
   const safeCategory = (CATEGORIES as readonly string[]).includes(category) ? category as Category : "暂存";
   const subCategory = item.contentSubDomain || (item.subCategory && item.subCategory !== "其他" ? item.subCategory : safeCategory === "暂存" ? "待补充备注" : "主题整理");
   return { category: safeCategory, subCategory, confidence: item.confidence ?? item.classificationConfidence };
+}
+
+function rebuildItemSearchableText(item: Partial<SavedItem> & Pick<SavedItem, "sourceUrl" | "rawShareText" | "title" | "userNote">): string {
+  return [
+    item.sourceUrl,
+    item.rawShareText,
+    item.title,
+    item.userNote,
+    item.contentDomain,
+    item.contentSubDomain,
+    item.savedIntent,
+    item.secondaryIntents?.join(" "),
+    item.summary,
+    item.keywords?.join(" "),
+    item.entities?.map((entity) => `${entity.type}:${entity.value}`).join(" "),
+    item.whyThisDomain,
+    item.whyThisIntent
+  ].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+}
+
+function createLocalId(prefix: string): string {
+  const uuid = globalThis.crypto?.randomUUID?.();
+  return uuid ? `${prefix}_${uuid}` : `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function parsePlanDate(value: string, now: Date): Date {
+  const text = value.trim();
+  const date = new Date(now);
+  date.setHours(9, 0, 0, 0);
+  if (/明天/.test(text)) {
+    date.setDate(date.getDate() + 1);
+    return date;
+  }
+  if (/本周/.test(text)) {
+    date.setDate(date.getDate() + Math.max(1, 5 - date.getDay()));
+    return date;
+  }
+  const parsed = new Date(text);
+  if (!Number.isNaN(parsed.getTime())) return parsed;
+  return date;
+}
+
+function parseEstimatedMinutes(value: string): number {
+  const match = value.match(/\d+/);
+  return clampEstimatedMinutes(match ? Number(match[0]) : 20);
+}
+
+function clampEstimatedMinutes(value: number): number {
+  if (!Number.isFinite(value)) return 20;
+  if (value <= 10) return 10;
+  if (value <= 20) return 20;
+  if (value <= 30) return 30;
+  return 60;
+}
+
+function isSameDate(value: string, date: Date): boolean {
+  const parsed = new Date(value);
+  return parsed.getFullYear() === date.getFullYear() && parsed.getMonth() === date.getMonth() && parsed.getDate() === date.getDate();
 }
 
 function formatCategoryLabel(item: Pick<SavedItem, "category" | "subCategory" | "classificationConfidence"> & Partial<Pick<SavedItem, "contentDomain" | "contentSubDomain" | "confidence">>): string {
