@@ -1726,7 +1726,7 @@ function OldImportView(props: {
     window.addEventListener("collection-revival-extension-bridge", handleBridgeEvent);
     window.addEventListener("message", handleExtensionMessage);
     applyDomSignal();
-    window.postMessage({ source: EXTENSION_WEB_SOURCE, type: "COLLECTION_REVIVAL_EXTENSION_PING", requestId: "initial-ready-check", protocolVersion: EXTENSION_PROTOCOL_VERSION }, window.location.origin);
+    pingExtension();
     requestScanStatus("initial-scan-status");
     const restoreOnFocus = () => scheduleReconnect("page-visible");
     const restoreOnVisibility = () => {
@@ -3664,7 +3664,6 @@ function buildInsights(items: SavedItem[]) {
     categoryDistribution
   };
 }
-
 
 
 
