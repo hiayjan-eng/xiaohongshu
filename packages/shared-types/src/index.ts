@@ -12,8 +12,40 @@ export const CATEGORIES = [
 ] as const;
 
 export type Category = (typeof CATEGORIES)[number];
+export const CONTENT_DOMAINS = CATEGORIES;
+export type ContentDomain = Category;
+
+export const SAVED_INTENTS = [
+  "想学习",
+  "想复现",
+  "想去",
+  "想买",
+  "想做",
+  "内容创作参考",
+  "工作决策参考",
+  "情绪共鸣",
+  "以后查阅",
+  "暂时保存"
+] as const;
+
+export type SavedIntent = (typeof SAVED_INTENTS)[number];
+
+export const REVIVE_INTENTS = [
+  "学会这个方法",
+  "照着做一次",
+  "用在工作里",
+  "变成自己的内容",
+  "安排一次出行",
+  "做购买决定",
+  "写一条观察或复盘",
+  "只是整理留存"
+] as const;
+
+export type ReviveIntent = (typeof REVIVE_INTENTS)[number];
 export type ClassificationConfidence = "high" | "medium" | "low";
 export type SmartAlbumPriority = "high" | "medium" | "low";
+export type SmartAlbumView = "content_domain" | "saved_intent";
+export const APP_SCHEMA_VERSION = 2;
 
 export const STATUSES = [
   "not_started",
@@ -73,6 +105,13 @@ export interface SavedItem {
   rawShareText: string;
   title: string;
   userNote: string;
+  contentDomain: ContentDomain;
+  contentSubDomain: string;
+  savedIntent: SavedIntent;
+  secondaryIntents: SavedIntent[];
+  confidence: ClassificationConfidence;
+  whyThisDomain: string;
+  whyThisIntent: string;
   category: Category;
   subCategory: string;
   classificationConfidence?: ClassificationConfidence;
@@ -165,11 +204,13 @@ export interface ExtensionScannedItem {
   sourceUrl: string;
   coverUrl?: string;
   visibleText?: string;
+  author?: string;
+  noteType?: "image" | "video" | "unknown";
   sourcePlatform: "xiaohongshu";
 }
 
 export interface ExtensionImportPayload {
-  source: "browser-extension-poc";
+  source: "browser-extension-poc" | "browser-extension-beta";
   sourcePlatform: "xiaohongshu";
   scannedAt: string;
   pageUrl?: string;
@@ -229,9 +270,15 @@ export interface ShareInput {
 }
 
 export interface AiClassificationResult {
+  contentDomain: ContentDomain;
+  contentSubDomain: string;
+  savedIntent: SavedIntent;
+  secondaryIntents: SavedIntent[];
+  confidence: ClassificationConfidence;
+  whyThisDomain: string;
+  whyThisIntent: string;
   category: Category;
   subCategory: string;
-  confidence: ClassificationConfidence;
   intent: string;
   whyThisCategory: string;
   summary: string;
@@ -259,6 +306,10 @@ export interface SmartAlbum {
   id: string;
   title: string;
   description: string;
+  albumView: SmartAlbumView;
+  contentDomain?: ContentDomain;
+  contentSubDomain?: string;
+  savedIntent?: SavedIntent;
   category: Category;
   albumType: string;
   keywords: string[];
@@ -276,6 +327,7 @@ export interface SmartAlbum {
 }
 
 export interface AppState {
+  schemaVersion?: number;
   user: User;
   savedItems: SavedItem[];
   actionCards: ActionCard[];
