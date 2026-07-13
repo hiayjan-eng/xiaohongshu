@@ -21,6 +21,9 @@
     "default_title": "收藏复活扫描",
     "default_popup": "src/popup.html"
   },
+  "background": {
+    "service_worker": "src/background.js"
+  },
   "content_scripts": [
     {
       "matches": [
