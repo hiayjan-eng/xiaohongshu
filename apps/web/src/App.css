@@ -5264,6 +5264,58 @@ select,
   background: color-mix(in srgb, var(--color-surface-soft) 76%, var(--color-surface));
 }
 
+.extension-connection-card.warning {
+  border-color: color-mix(in srgb, var(--color-warning) 42%, var(--color-border));
+  background: color-mix(in srgb, var(--color-accent-soft) 86%, var(--color-surface));
+}
+
+.extension-connection-hint {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px dashed color-mix(in srgb, var(--color-warning) 42%, var(--color-border));
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--color-accent-soft) 58%, transparent);
+}
+
+.extension-connection-hint span {
+  color: var(--color-muted);
+  line-height: 1.6;
+}
+
+.install-tabs {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.install-tabs button {
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-muted);
+  padding: 8px 14px;
+  font-weight: 750;
+}
+
+.install-tabs button.active {
+  border-color: color-mix(in srgb, var(--color-primary) 40%, var(--color-border));
+  background: var(--color-surface-soft);
+  color: var(--color-primary-dark);
+}
+
+.extension-diagnostics summary {
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.diagnostic-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+  margin: 14px 0;
+}
+
 .install-steps {
   display: grid;
   gap: 10px;
