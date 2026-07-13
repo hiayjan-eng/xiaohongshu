@@ -10,12 +10,14 @@ const srcOut = resolve(outDir, "src");
 const manifest = JSON.parse(readFileSync(resolve(root, "manifest.json"), "utf8"));
 const zipFileName = `collection-revival-extension-beta-v${manifest.version}.zip`;
 const zipPath = resolve(repoRoot, "release-artifacts", zipFileName);
+const legacyZipPath = resolve(repoRoot, "release-artifacts", "collection-revival-extension-beta.zip");
 const webDownloadDir = resolve(repoRoot, "apps", "web", "public", "downloads");
 const webZipPath = resolve(webDownloadDir, zipFileName);
 const legacyWebZipPath = resolve(webDownloadDir, "collection-revival-extension-beta.zip");
 
 rmSync(outDir, { recursive: true, force: true });
 rmSync(zipPath, { force: true });
+rmSync(legacyZipPath, { force: true });
 rmSync(legacyWebZipPath, { force: true });
 mkdirSync(srcOut, { recursive: true });
 mkdirSync(webDownloadDir, { recursive: true });
