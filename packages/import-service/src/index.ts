@@ -1,6 +1,6 @@
 import { generateSmartAlbums } from "@revival/action-card-service";
 import { createMockAiProvider, isAiProviderPromise, type AiProvider } from "@revival/ai-service";
-import { createImportedRecords } from "@revival/database";
+import { createSavedItemRecord } from "@revival/database";
 import type {
   ActionCard,
   ExtensionScannedItem,
@@ -106,15 +106,13 @@ export function processImportBatch(input: ProcessImportBatchInput): ProcessImpor
       if (isAiProviderPromise(classification)) {
         throw new Error("Async AI providers require an async import pipeline; mock fallback remains the default for the current Web MVP.");
       }
-      const records = createImportedRecords(input.userId, normalized, classification, itemDate);
-      existingKeys.set(key, records.savedItem);
-      importedSavedItems.push(records.savedItem);
-      actionCards.push(records.actionCard);
+      const savedItem = createSavedItemRecord(input.userId, normalized, classification, itemDate);
+      existingKeys.set(key, savedItem);
+      importedSavedItems.push(savedItem);
       batchItems.push({
         ...baseItem,
         status: "imported",
-        createdSavedItemId: records.savedItem.id,
-        createdActionCardId: records.actionCard.id
+        createdSavedItemId: savedItem.id
       });
     } catch (error) {
       const failed: ImportBatchItem = {
@@ -145,7 +143,7 @@ export function processImportBatch(input: ProcessImportBatchInput): ProcessImpor
     importedCount: importedSavedItems.length,
     duplicateCount: duplicates.length,
     failedCount: failedItems.length,
-    createdActionCardCount: actionCards.length,
+    createdActionCardCount: 0,
     createdAlbumCount,
     errorMessage: failedItems[0]?.errorMessage,
     createdAt,
@@ -223,15 +221,13 @@ export async function processImportBatchAsync(input: ProcessImportBatchInput): P
     try {
       const itemDate = new Date(now.getTime() + index);
       const classification = await Promise.resolve(aiProvider.classifyAndGenerateActionCard(normalized));
-      const records = createImportedRecords(input.userId, normalized, classification, itemDate);
-      existingKeys.set(key, records.savedItem);
-      importedSavedItems.push(records.savedItem);
-      actionCards.push(records.actionCard);
+      const savedItem = createSavedItemRecord(input.userId, normalized, classification, itemDate);
+      existingKeys.set(key, savedItem);
+      importedSavedItems.push(savedItem);
       batchItems.push({
         ...baseItem,
         status: "imported",
-        createdSavedItemId: records.savedItem.id,
-        createdActionCardId: records.actionCard.id
+        createdSavedItemId: savedItem.id
       });
     } catch (error) {
       const failed: ImportBatchItem = {
@@ -259,7 +255,7 @@ export async function processImportBatchAsync(input: ProcessImportBatchInput): P
     importedCount: importedSavedItems.length,
     duplicateCount: duplicates.length,
     failedCount: failedItems.length,
-    createdActionCardCount: actionCards.length,
+    createdActionCardCount: 0,
     createdAlbumCount,
     errorMessage: failedItems[0]?.errorMessage,
     createdAt,
@@ -283,7 +279,7 @@ export function extensionItemsToImportItems(items: ExtensionScannedItem[]): Impo
     rawShareText: item.visibleText || item.title,
     visibleText: item.visibleText,
     coverUrl: item.coverUrl,
-    userNote: "来自浏览器扩展旧收藏夹扫描，用户确认后导入。"
+    userNote: "来自浏览器扩展旧收藏夹扫描，用户确认后导入；先生成收藏索引，不自动生成行动卡。"
   }));
 }
 
