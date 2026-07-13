@@ -1,13 +1,17 @@
 import { classifyAndGenerateActionCard } from "@revival/ai-service";
 import {
+  APP_SCHEMA_VERSION,
   CATEGORIES,
   DEFAULT_USER,
   type ActionCard,
+  type ActionCardDraft,
   type AiClassificationResult,
   type AppState,
   type Category,
+  type ClassificationConfidence,
   type ItemStatus,
   type SavedItem,
+  type SavedIntent,
   type SearchLog,
   type ShareInput,
   type Task
@@ -38,16 +42,57 @@ export function persistAppState(state: AppState, storage?: Pick<Storage, "setIte
   storage?.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
-export function createImportedRecords(
+export function createSavedItemRecord(
   userId: string,
   input: ShareInput,
   aiResult: AiClassificationResult,
   now = new Date()
-): { savedItem: SavedItem; actionCard: ActionCard } {
-  const savedItemId = createId("item");
+): SavedItem {
+  const createdAt = now.toISOString();
+  const contentDomain = normalizeCategoryValue(aiResult.contentDomain ?? aiResult.category);
+  const contentSubDomain = cleanLegacyText(aiResult.contentSubDomain || aiResult.subCategory || inferSubCategoryFromInput(input, contentDomain));
+  const savedIntent = normalizeSavedIntent(aiResult.savedIntent ?? aiResult.intent);
+  const secondaryIntents = uniqueSavedIntents([...(aiResult.secondaryIntents ?? []), savedIntent]).filter((intent) => intent !== savedIntent);
+  const confidence = normalizeConfidence(aiResult.confidence, contentDomain);
+
+  return {
+    id: createId("item"),
+    userId,
+    sourcePlatform: detectPlatform(input.sourceUrl),
+    sourceUrl: input.sourceUrl,
+    rawShareText: input.rawShareText,
+    title: normalizeStoredTitle(input.title, input.rawShareText || aiResult.actionCard?.title),
+    userNote: input.userNote,
+    contentDomain,
+    contentSubDomain,
+    savedIntent,
+    secondaryIntents,
+    confidence,
+    whyThisDomain: aiResult.whyThisDomain || aiResult.whyThisCategory || "基于标题、分享文案和备注判断内容主题。",
+    whyThisIntent: aiResult.whyThisIntent || aiResult.intent || "基于用户备注和内容线索推断收藏用途。",
+    category: contentDomain,
+    subCategory: contentSubDomain,
+    classificationConfidence: confidence,
+    intent: savedIntent,
+    whyThisCategory: aiResult.whyThisDomain || aiResult.whyThisCategory || "基于标题、分享文案和备注判断内容主题。",
+    summary: normalizeStoredSummary(aiResult.summary, contentDomain),
+    keywords: aiResult.keywords ?? [],
+    entities: aiResult.entities ?? [],
+    searchableText: aiResult.searchableText || buildSearchableText(input, contentDomain, contentSubDomain, savedIntent, aiResult.keywords ?? [], aiResult.entities ?? []),
+    status: "not_started",
+    createdAt,
+    updatedAt: createdAt
+  };
+}
+
+export function createActionCardRecord(
+  savedItem: SavedItem,
+  draft: ActionCardDraft,
+  now = new Date()
+): ActionCard {
   const actionCardId = createId("card");
   const createdAt = now.toISOString();
-  const tasks = aiResult.actionCard.tasks.map<Task>((task, index) => ({
+  const tasks = (draft.tasks ?? []).map<Task>((task, index) => ({
     id: `task_${actionCardId}_${index + 1}`,
     actionCardId,
     title: task.title,
@@ -58,51 +103,38 @@ export function createImportedRecords(
     order: index + 1
   }));
 
-  const savedItem: SavedItem = {
-    id: savedItemId,
-    userId,
-    sourcePlatform: detectPlatform(input.sourceUrl),
-    sourceUrl: input.sourceUrl,
-    rawShareText: input.rawShareText,
-    title: input.title || aiResult.actionCard.title,
-    userNote: input.userNote,
-    category: aiResult.category,
-    subCategory: aiResult.subCategory,
-    classificationConfidence: aiResult.confidence,
-    intent: aiResult.intent,
-    whyThisCategory: aiResult.whyThisCategory,
-    summary: aiResult.summary,
-    keywords: aiResult.keywords,
-    entities: aiResult.entities,
-    searchableText: aiResult.searchableText,
-    status: "not_started",
-    createdAt,
-    updatedAt: createdAt
-  };
-
-  const actionCard: ActionCard = {
+  return {
     id: actionCardId,
-    savedItemId,
-    category: aiResult.category,
-    subCategory: aiResult.subCategory,
-    title: aiResult.actionCard.title,
-    goal: aiResult.actionCard.goal,
-    whySaved: aiResult.actionCard.whySaved,
-    nextAction: aiResult.actionCard.nextAction,
-    openOriginalFocus: aiResult.actionCard.openOriginalFocus,
-    output: aiResult.actionCard.output,
-    estimatedTime: aiResult.actionCard.estimatedTime,
-    difficulty: aiResult.actionCard.difficulty,
-    doneCriteria: aiResult.actionCard.doneCriteria,
-    avoidDoing: aiResult.actionCard.avoidDoing,
-    ifInfoMissing: aiResult.actionCard.ifInfoMissing,
-    followUp: aiResult.actionCard.followUp,
-    fields: aiResult.actionCard.structuredFields,
+    savedItemId: savedItem.id,
+    category: savedItem.contentDomain,
+    subCategory: savedItem.contentSubDomain,
+    title: normalizeStoredTitle(draft.title, savedItem.title),
+    goal: draft.goal,
+    whySaved: draft.whySaved,
+    nextAction: draft.nextAction,
+    openOriginalFocus: draft.openOriginalFocus ?? [],
+    output: draft.output,
+    estimatedTime: draft.estimatedTime,
+    difficulty: draft.difficulty,
+    doneCriteria: draft.doneCriteria,
+    avoidDoing: draft.avoidDoing,
+    ifInfoMissing: draft.ifInfoMissing,
+    followUp: draft.followUp,
+    fields: draft.structuredFields ?? {},
     tasks,
     createdAt,
     updatedAt: createdAt
   };
+}
 
+export function createImportedRecords(
+  userId: string,
+  input: ShareInput,
+  aiResult: AiClassificationResult,
+  now = new Date()
+): { savedItem: SavedItem; actionCard: ActionCard } {
+  const savedItem = createSavedItemRecord(userId, input, aiResult, now);
+  const actionCard = createActionCardRecord(savedItem, aiResult.actionCard, now);
   return { savedItem, actionCard };
 }
 
@@ -130,14 +162,18 @@ export function createInitialDemoData(): AppState {
     return createImportedRecords(DEFAULT_USER.id, input, classifyAndGenerateActionCard(input), date);
   });
 
-  return {
+return {
+    schemaVersion: APP_SCHEMA_VERSION,
     user: DEFAULT_USER,
     savedItems: records.map((record, index) => ({
       ...record.savedItem,
       status: DEMO_STATUSES[index] ?? "not_started"
     })),
-    actionCards: records.map((record) => record.actionCard),
-    searchLogs: []
+    actionCards: [],
+    searchLogs: [],
+    smartAlbums: [],
+    importBatches: [],
+    importBatchItems: []
   };
 }
 
@@ -304,6 +340,7 @@ function normalizeAppState(state: AppState): AppState {
   const actionCards = (state.actionCards ?? []).map((card) => normalizeActionCard(card, savedItems.find((item) => item.id === card.savedItemId)));
   return {
     ...state,
+    schemaVersion: APP_SCHEMA_VERSION,
     savedItems,
     actionCards,
     searchLogs: state.searchLogs ?? [],
