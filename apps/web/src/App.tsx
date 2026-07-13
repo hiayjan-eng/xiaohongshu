@@ -2374,6 +2374,7 @@ function DetailView(props: {
   updateCardField: (cardId: string, field: "title" | "goal" | "nextAction", value: string) => void;
   updateTaskStatus: (cardId: string, taskId: string, status: ItemStatus) => void;
   regenerateActionCard: (itemId: string) => void;
+  addActionCardToPlan: (cardId: string) => void;
   setActiveView: (view: ViewKey) => void;
   onContinueImport: () => void;
 }) {
@@ -2400,6 +2401,7 @@ function DetailView(props: {
             加入今日
           </button>
           <button className="secondary-action" onClick={props.onContinueImport} data-testid="detail-continue-import">继续导入一条</button>
+          <button className="secondary-action" onClick={() => props.addActionCardToPlan(props.card.id)} data-testid="add-to-plan-card">加入计划</button>
           <button className="secondary-action" onClick={() => props.setActiveView("import")}>回到导入中心</button>
           <button className="secondary-action" onClick={() => props.setActiveView("albums")}>查看智能专辑</button>
           <button className="secondary-action" onClick={() => props.regenerateActionCard(props.item.id)}>Regenerate</button>
