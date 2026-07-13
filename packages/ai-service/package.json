@@ -9,6 +9,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@revival/classification-service": "workspace:*",
     "@revival/shared-types": "workspace:*"
   }
 }
