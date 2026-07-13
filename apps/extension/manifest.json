@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "收藏复活旧收藏扫描 Beta",
-  "version": "0.2.1",
-  "description": "在用户主动点击后，扫描本人小红书网页版当前已加载收藏卡片，支持暂停继续和导入前确认。",
+  "version": "0.2.2",
+  "description": "在用户主动点击后，扫描本人小红书网页版当前已加载收藏卡片，支持进度反馈、暂停继续、断点恢复和导入前确认。",
   "permissions": [
     "activeTab",
     "scripting",
