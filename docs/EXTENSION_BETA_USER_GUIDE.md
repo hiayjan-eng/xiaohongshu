@@ -20,26 +20,32 @@ It does not log in for the user, bypass verification, crawl cloud data, or read 
 pnpm --filter @revival/extension build
 ```
 
-The build output is:
+The build outputs are:
 
 ```text
 release-artifacts/extension-beta
+release-artifacts/collection-revival-extension-beta-v0.2.0.zip
+apps/web/public/downloads/collection-revival-extension-beta-v0.2.0.zip
 ```
 
 ## Install In Chrome
 
 1. Open `chrome://extensions`.
 2. Turn on Developer mode.
-3. Click “Load unpacked”.
-4. Select `release-artifacts/extension-beta`.
+3. Download `collection-revival-extension-beta-v0.2.0.zip` from the Web `/old-import` page, or use the local artifact in `release-artifacts`.
+4. Unzip it to a fixed folder.
+5. Click “Load unpacked”.
+6. Select the unzipped folder that contains `manifest.json`.
 5. Pin the extension if you want easier access.
 
 ## Install In Edge
 
 1. Open `edge://extensions`.
 2. Turn on Developer mode.
-3. Click “Load unpacked”.
-4. Select `release-artifacts/extension-beta`.
+3. Download `collection-revival-extension-beta-v0.2.0.zip` from the Web `/old-import` page, or use the local artifact in `release-artifacts`.
+4. Unzip it to a fixed folder.
+5. Click “Load unpacked”.
+6. Select the unzipped folder that contains `manifest.json`.
 
 ## Test Flow
 
