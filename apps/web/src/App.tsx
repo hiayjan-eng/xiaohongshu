@@ -26,6 +26,7 @@ import { createAiClient, type AiRuntimeStatus } from "@revival/ai-service";
 import { extensionItemsToImportItems, parseShareInput, processImportBatchAsync, type ImportInputItem, type ProcessImportBatchResult } from "@revival/import-service";
 import {
   createActionCardRecord,
+  createSavedItemRecord,
   createInitialDemoData,
   createSearchLog,
   STORAGE_KEY,
@@ -694,19 +695,17 @@ export function App() {
     setToast("正在用当前规则重新整理旧收藏...");
     try {
       const now = new Date().toISOString();
-      const rebuilt = await Promise.all(state.savedItems.map(async (item) => {
-        const existingCard = state.actionCards.find((card) => card.savedItemId === item.id);
+      const savedItems = await Promise.all(state.savedItems.map(async (item) => {
         const input = parseShareInput({ sourceUrl: item.sourceUrl, title: item.title, rawShareText: item.rawShareText, userNote: item.userNote });
         const classification = await Promise.resolve(aiClient.classifyAndGenerateActionCard(input));
-        const records = createImportedRecords(state.user.id, input, classification, new Date(item.createdAt || now));
-        const cardId = existingCard?.id ?? records.actionCard.id;
-        return {
-          savedItem: { ...records.savedItem, id: item.id, status: item.status, createdAt: item.createdAt, updatedAt: now },
-          actionCard: { ...records.actionCard, id: cardId, savedItemId: item.id, createdAt: existingCard?.createdAt ?? records.actionCard.createdAt, updatedAt: now, tasks: cloneTasksForCard(cardId, records.actionCard.tasks) }
-        };
+        const savedItem = createSavedItemRecord(state.user.id, input, classification, new Date(item.createdAt || now));
+        return { ...savedItem, id: item.id, status: item.status, createdAt: item.createdAt, updatedAt: now };
       }));
-      const savedItems = rebuilt.map((entry) => entry.savedItem);
-      const actionCards = rebuilt.map((entry) => entry.actionCard);
+      const savedItemById = new Map(savedItems.map((item) => [item.id, item]));
+      const actionCards = state.actionCards.map((card) => {
+        const item = savedItemById.get(card.savedItemId);
+        return item ? { ...card, category: item.contentDomain, subCategory: item.contentSubDomain, updatedAt: now } : card;
+      });
       setState((current) => ({
         ...current,
         savedItems,
@@ -1705,6 +1704,89 @@ function PoolView(props: {
   );
 }
 
+
+function SavedIndexDetailView(props: {
+  item: SavedItem;
+  openSource: (item: SavedItem, origin?: OpenSourceOrigin) => void;
+  updateSavedNote: (itemId: string, userNote: string) => void;
+  reviveSavedItem: (itemId: string, reviveIntent?: ReviveIntent) => void;
+  setActiveView: (view: ViewKey) => void;
+  onContinueImport: () => void;
+}) {
+  const [noteDraft, setNoteDraft] = useState(props.item.userNote);
+  const lowConfidence = props.item.confidence === "low";
+
+  function saveNote() {
+    props.updateSavedNote(props.item.id, noteDraft);
+  }
+
+  return (
+    <>
+      <div className="detail-hero">
+        <div>
+          <p className="eyebrow">{props.item.contentDomain} / {props.item.contentSubDomain} · 用途：{props.item.savedIntent} · {lowConfidence ? "低置信" : "尚未复活"}</p>
+          <h1>{formatItemTitle(props.item)}</h1>
+          <p>{formatItemSummary(props.item)}</p>
+          <p className="quiet-copy">{props.item.whyThisDomain}</p>
+          <p className="quiet-copy">{props.item.whyThisIntent}</p>
+          {lowConfidence && <p className="quiet-copy">这条收藏信息较少。补一句你为什么收藏它，再选择一个复活用途，行动卡会更具体。</p>}
+        </div>
+        <div className="detail-actions">
+          <button className="secondary-action" onClick={props.onContinueImport} data-testid="detail-continue-import">继续导入一条</button>
+          <button className="secondary-action" onClick={() => props.setActiveView("import")}>回到导入中心</button>
+          <button className="secondary-action" onClick={() => props.setActiveView("albums")}>查看智能专辑</button>
+          {hasSourceUrl(props.item) ? (
+            <button className="icon-text-button" onClick={() => props.openSource(props.item)} data-testid="detail-open-source">
+              <ExternalLink size={17} />
+              打开原帖
+            </button>
+          ) : (
+            <button className="icon-text-button" disabled data-testid="detail-open-source-unavailable">
+              <ExternalLink size={17} />
+              暂无原帖链接
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="detail-layout">
+        <section className="tool-panel single">
+          <PanelHeader icon={<Sparkles size={18} />} title="你准备拿它做什么？" meta="选择后再生成行动卡" />
+          <p className="quiet-copy">导入后这里只先保存收藏索引，不自动制造任务。等你真的想动它时，选择一个用途，系统再生成一张更贴近场景的行动卡。</p>
+          <div className="status-buttons revive-intent-buttons">
+            {REVIVE_INTENTS.map((intent) => (
+              <button key={intent} onClick={() => props.reviveSavedItem(props.item.id, intent)} data-testid="revive-intent-option">
+                {intent}
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <aside className="detail-side">
+          <section className="tool-panel">
+            <PanelHeader icon={<Archive size={18} />} title="收藏索引" meta={formatDate(props.item.createdAt)} />
+            <div className="field-grid compact-fields">
+              <div className="field-card"><span>内容主题</span><strong>{props.item.contentDomain} / {props.item.contentSubDomain}</strong></div>
+              <div className="field-card"><span>收藏用途</span><strong>{props.item.savedIntent}</strong></div>
+              <div className="field-card"><span>置信度</span><strong>{confidenceLabel(props.item.confidence)}</strong></div>
+            </div>
+            <div className="tag-list">
+              {props.item.keywords.map((keyword) => <span key={keyword}>{keyword}</span>)}
+            </div>
+            <div className="entity-list">
+              {props.item.entities.map((entity) => <span key={`${entity.type}-${entity.value}`}>{entityLabel(entity.type)}：{entity.value}</span>)}
+            </div>
+            <label className="edit-field">
+              <span>我收藏它是因为...</span>
+              <textarea value={noteDraft} onChange={(event) => setNoteDraft(event.target.value)} placeholder="例如：想复现这个方法 / 想写成内容 / 想周末去" />
+            </label>
+            <button className="secondary-action" onClick={saveNote}>保存备注</button>
+          </section>
+        </aside>
+      </div>
+    </>
+  );
+}
 function DetailView(props: {
   item: SavedItem;
   card: ActionCard;
