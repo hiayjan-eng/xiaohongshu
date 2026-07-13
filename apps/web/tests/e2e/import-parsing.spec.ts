@@ -90,9 +90,12 @@ test.describe("real share text import parsing", () => {
     expect(imported?.sourceUrl).toBe("");
     expect(imported?.sourcePlatform).toBe("manual");
     expect(imported?.category).toBe("AI 与效率");
-    expect(imported?.subCategory).toMatch(/AI 工具|效率工作流|自动化工作流|软件教程/);
+    expect(imported?.subCategory).toMatch(/AI 工具|效率工作流|自动化工作流|软件教程|Prompt 工程|决策辅助/);
 
-    const importedCard = state.actionCards.find((card) => card.savedItemId === imported?.id);
+    expect(state.actionCards.some((card) => card.savedItemId === imported?.id)).toBe(false);
+    await page.getByTestId("revive-imported-item").click();
+    await expect.poll(async () => (await readAppState(page)).actionCards.some((card) => card.savedItemId === imported?.id)).toBe(true);
+    const importedCard = (await readAppState(page)).actionCards.find((card) => card.savedItemId === imported?.id);
     expect(importedCard?.title).not.toMatch(/其他行动卡|行动卡行动卡/);
     expect(importedCard?.nextAction).not.toMatch(/拆解一个参考案例|记录\s*3\s*个可模仿|Cannot read properties/);
 
@@ -133,7 +136,7 @@ test.describe("real share text import parsing", () => {
     expect(imported?.rawShareText).toContain("3个方法，让codex帮你猛猛干活");
     expect(imported?.rawShareText).not.toContain("https://www.xiaohongshu.com/discovery/item");
     expect(imported?.category).toBe("AI 与效率");
-    expect(imported?.subCategory).toMatch(/AI 工具|效率工作流|自动化工作流|软件教程/);
+    expect(imported?.subCategory).toMatch(/AI 工具|效率工作流|自动化工作流|软件教程|Prompt 工程|决策辅助/);
 
     await page.goto("/pool");
     const importedPoolCard = page.getByTestId("saved-item-card").filter({ hasText: "3个方法，让codex帮你猛猛干活" }).first();
