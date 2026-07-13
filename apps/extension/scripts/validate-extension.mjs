@@ -166,6 +166,8 @@ function assertScannerBehavior() {
   const accepted = trimmed.filter((item) => !item.isDuplicate).length;
   if (accepted !== 2) throw new Error(`trimToLimit should keep only 2 accepted items, got ${accepted}`);
 
+  assertScannerRangeWithMockDom();
+
   const scannerRequirements = [
     "findCollectionRoot",
     "findActiveCollectionTabElement",
@@ -177,14 +179,36 @@ function assertScannerBehavior() {
     "isLikelyOwnPost",
     "containerType",
     "activeTab",
-    "selectorVersion"
+    "selectorVersion",
+    "scoreCollectionCandidate"
   ];
   for (const requirement of scannerRequirements) {
     if (!scanner.includes(requirement)) throw new Error(`Missing scanner range/text requirement: ${requirement}`);
   }
 }
 
-function loadScannerTestExports() {
+function assertScannerRangeWithMockDom() {
+  const mockDocument = createScannerMockDocument();
+  const exports = loadScannerTestExports(mockDocument);
+  const rootInfo = exports.findCollectionRoot();
+  if (!rootInfo?.element?.className?.includes("collection")) {
+    throw new Error(`Scanner should prefer the active collection container, got ${rootInfo?.containerType || "none"}`);
+  }
+
+  const result = exports.scanVisibleXhsCards();
+  const titles = result.items.map((item) => item.title);
+  if (!titles.includes("收藏里的路线 😆")) throw new Error("Visible favorite card should be scanned");
+  if (!titles.includes("我自己也收藏的灵感")) throw new Error("Own authored but favorited card should not be removed");
+  if (titles.includes("我发布但没收藏")) throw new Error("Hidden published note should not enter scan results");
+  if (titles.includes("主页可见发布笔记")) throw new Error("Visible non-favorite profile note should not enter scan results");
+  const ownFavorite = result.items.find((item) => item.title === "我自己也收藏的灵感");
+  if (!ownFavorite?.isLikelyOwnPost) throw new Error("Own authored favorite should be marked, not deleted");
+  if (result.items.some((item) => item.isVisible !== true || item.selectorVersion !== "xhs-fav-container-v2")) {
+    throw new Error("Scanned items should include visibility and selector diagnostics");
+  }
+}
+
+function loadScannerTestExports(documentOverride = createBasicScannerDocument()) {
   const context = {
     console,
     setTimeout,
@@ -205,30 +229,7 @@ function loadScannerTestExports() {
         }
       }
     },
-    document: {
-      body: { innerText: "" },
-      documentElement: { scrollHeight: 2000 },
-      createElement(tag) {
-        if (tag !== "textarea") return {};
-        return {
-          _html: "",
-          set innerHTML(value) {
-            this._html = String(value)
-              .replace(/&nbsp;/g, " ")
-              .replace(/&amp;/g, "&")
-              .replace(/&lt;/g, "<")
-              .replace(/&gt;/g, ">")
-              .replace(/&quot;/g, '"');
-          },
-          get value() {
-            return this._html;
-          }
-        };
-      },
-      querySelectorAll() {
-        return [];
-      }
-    }
+    document: documentOverride
   };
   context.window = {
     __collectionRevivalScannerInstalled: false,
@@ -236,10 +237,12 @@ function loadScannerTestExports() {
     scrollY: 0,
     innerHeight: 900,
     scrollBy() {},
-    getComputedStyle() {
-      return { display: "block", visibility: "visible", opacity: "1" };
+    getComputedStyle(element) {
+      const hidden = !isFakeElementVisible(element);
+      return { display: hidden ? "none" : "block", visibility: hidden ? "hidden" : "visible", opacity: hidden ? "0" : "1" };
     }
   };
+  context.document.defaultView = context.window;
 
   const instrumented = scanner.replace(/\}\)\(\);\s*$/, `
     globalThis.__scannerTestExports = {
@@ -247,12 +250,202 @@ function loadScannerTestExports() {
       sanitizeTitle,
       isLikelyXhsNoteUrl,
       updateMilestones,
-      trimToLimit
+      trimToLimit,
+      findCollectionRoot,
+      scanVisibleXhsCards,
+      getPageStatus
     };
   })();
   `);
   vm.runInNewContext(instrumented, context, { filename: "xhs-scanner.js" });
   return context.__scannerTestExports;
+}
+
+function createBasicScannerDocument() {
+  const body = new FakeElement("body", { text: "" });
+  return createFakeDocument(body);
+}
+
+function createScannerMockDocument() {
+  const profileName = new FakeElement("div", { className: "user-name", text: "我自己" });
+  const activeFavoriteTab = new FakeElement("span", { className: "active selected", text: "收藏", attrs: { "aria-selected": "true" } });
+  const noteTab = new FakeElement("span", { text: "笔记", attrs: { "aria-selected": "false" } });
+  const tabs = new FakeElement("div", { className: "tabs" }, [noteTab, activeFavoriteTab]);
+
+  const favoriteList = new FakeElement("section", { className: "collection fav-note-list feeds" }, [
+    createNoteCard({ title: "收藏里的路线 😆", author: "路人", href: "https://www.xiaohongshu.com/explore/fav-route" }),
+    createNoteCard({ title: "我自己也收藏的灵感", author: "我自己", href: "https://www.xiaohongshu.com/explore/own-favorited" })
+  ]);
+
+  const hiddenPublishedList = new FakeElement("section", { className: "publish-note-list feeds", visible: false }, [
+    createNoteCard({ title: "我发布但没收藏", author: "我自己", href: "https://www.xiaohongshu.com/explore/hidden-published" })
+  ]);
+
+  const visiblePublishedList = new FakeElement("section", { className: "publish-note-list feeds" }, [
+    createNoteCard({ title: "主页可见发布笔记", author: "我自己", href: "https://www.xiaohongshu.com/explore/visible-published" })
+  ]);
+
+  const main = new FakeElement("main", { className: "user-page" }, [tabs, favoriteList, hiddenPublishedList, visiblePublishedList]);
+  const body = new FakeElement("body", { text: "我的 收藏 笔记" }, [profileName, main]);
+  return createFakeDocument(body);
+}
+
+function createNoteCard({ title, author, href }) {
+  const titleElement = new FakeElement("div", { className: "title", text: title });
+  const authorElement = new FakeElement("div", { className: "author", text: author });
+  const image = new FakeElement("img", { attrs: { src: `https://img.example/${encodeURIComponent(title)}.jpg`, alt: title }, rect: { width: 160, height: 200 } });
+  const anchor = new FakeElement("a", { attrs: { href }, href, text: "", rect: { width: 180, height: 240 } }, [image, titleElement, authorElement]);
+  return new FakeElement("article", { className: "note-card", rect: { width: 180, height: 260 } }, [anchor]);
+}
+
+function createFakeDocument(body) {
+  return {
+    body,
+    documentElement: { scrollHeight: 2000 },
+    createElement(tag) {
+      if (tag !== "textarea") return new FakeElement(tag);
+      return {
+        _html: "",
+        set innerHTML(value) {
+          this._html = String(value)
+            .replace(/&nbsp;/g, " ")
+            .replace(/&amp;/g, "&")
+            .replace(/&lt;/g, "<")
+            .replace(/&gt;/g, ">")
+            .replace(/&quot;/g, '"');
+        },
+        get value() {
+          return this._html;
+        }
+      };
+    },
+    querySelectorAll(selector) {
+      return body.querySelectorAll(selector);
+    }
+  };
+}
+
+class FakeElement {
+  constructor(tagName, options = {}, children = []) {
+    this.tagName = tagName.toUpperCase();
+    this.id = options.id || "";
+    this.className = options.className || "";
+    this.attrs = options.attrs || {};
+    this.href = options.href || this.attrs.href || "";
+    this.ownText = options.text || "";
+    this.visible = options.visible !== false;
+    this.rect = options.rect || { width: 240, height: 120 };
+    this.children = [];
+    this.parentElement = null;
+    this.isConnected = true;
+    children.forEach((child) => this.appendChild(child));
+  }
+
+  appendChild(child) {
+    child.parentElement = this;
+    this.children.push(child);
+  }
+
+  get textContent() {
+    return [this.ownText, ...this.children.map((child) => child.textContent)].filter(Boolean).join(" ");
+  }
+
+  get innerText() {
+    return this.textContent;
+  }
+
+  get innerHTML() {
+    return this.textContent;
+  }
+
+  getAttribute(name) {
+    if (name === "class") return this.className;
+    if (name === "id") return this.id;
+    if (name === "href") return this.href;
+    return this.attrs[name] ?? null;
+  }
+
+  querySelector(selector) {
+    return this.querySelectorAll(selector)[0] || null;
+  }
+
+  querySelectorAll(selector) {
+    const selectors = selector.split(",").map((part) => part.trim()).filter(Boolean);
+    const descendants = [];
+    walkFakeTree(this, (node) => {
+      if (node !== this && selectors.some((part) => matchesFakeSelector(node, part))) descendants.push(node);
+    });
+    return descendants;
+  }
+
+  closest(selector) {
+    const selectors = selector.split(",").map((part) => part.trim()).filter(Boolean);
+    let node = this;
+    while (node) {
+      if (selectors.some((part) => matchesFakeSelector(node, part))) return node;
+      node = node.parentElement;
+    }
+    return null;
+  }
+
+  contains(other) {
+    let node = other;
+    while (node) {
+      if (node === this) return true;
+      node = node.parentElement;
+    }
+    return false;
+  }
+
+  getBoundingClientRect() {
+    if (!isFakeElementVisible(this)) return { width: 0, height: 0, top: 0, left: 0, right: 0, bottom: 0 };
+    return { ...this.rect, top: 0, left: 0, right: this.rect.width, bottom: this.rect.height };
+  }
+}
+
+function walkFakeTree(root, visit) {
+  visit(root);
+  root.children.forEach((child) => walkFakeTree(child, visit));
+}
+
+function isFakeElementVisible(element) {
+  let node = element;
+  while (node) {
+    if (!node.visible || node.attrs.hidden || node.attrs["aria-hidden"] === "true") return false;
+    node = node.parentElement;
+  }
+  return true;
+}
+
+function matchesFakeSelector(element, selector) {
+  if (!selector) return false;
+  if (selector === "*") return true;
+  if (/^[a-z]+$/i.test(selector)) return element.tagName.toLowerCase() === selector.toLowerCase();
+  if (selector === "a[href]") return element.tagName === "A" && Boolean(element.href);
+  if (selector === "img[src]" || selector === "img[data-src]" || selector === "picture img") return element.tagName === "IMG";
+  if (selector === "a[href*='/user/profile']") return element.tagName === "A" && String(element.href).includes("/user/profile");
+  if (selector.startsWith(".")) return classList(element).includes(selector.slice(1));
+  const classContains = selector.match(/^\[class\*=['"]([^'"]+)['"]\]$/);
+  if (classContains) return String(element.className).includes(classContains[1]);
+  const attrEquals = selector.match(/^\[([^=\]]+)=['"]([^'"]+)['"]\]$/);
+  if (attrEquals) return String(element.getAttribute(attrEquals[1]) || "") === attrEquals[2];
+  const attrOnly = selector.match(/^\[([^\]]+)\]$/);
+  if (attrOnly) return element.getAttribute(attrOnly[1]) != null;
+  if (selector === "[class*='user-page'] main") return element.tagName === "MAIN" && hasAncestorClassContaining(element, "user-page");
+  return false;
+}
+
+function classList(element) {
+  return String(element.className || "").split(/\s+/).filter(Boolean);
+}
+
+function hasAncestorClassContaining(element, value) {
+  let node = element.parentElement;
+  while (node) {
+    if (String(node.className || "").includes(value)) return true;
+    node = node.parentElement;
+  }
+  return false;
 }
 
 function assertOrdered(source, needles, label) {
