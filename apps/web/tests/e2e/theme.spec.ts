@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { collectConsoleErrors, expectNoConsoleErrors, importTestNote, resetDemoData } from "./helpers";
+import { collectConsoleErrors, expectNoConsoleErrors, importTestNote, resetDemoData, reviveImportedItem } from "./helpers";
 
 const themes = [
   { id: "sprout", primary: "#4f8a75" },
@@ -51,13 +51,13 @@ test.describe("MVP theme switching", () => {
     await expect.poll(async () => (await readThemeSnapshot(page)).theme).toBe("lavender-mint");
     await expect(page.getByTestId("theme-lavender-mint")).toHaveAttribute("aria-pressed", "true");
 
-    await importTestNote(page, {
+    const imported = await importTestNote(page, {
       sourceUrl: "https://www.xiaohongshu.com/explore/theme-regression-note",
       title: "主题切换后剪辑测试",
       rawShareText: "剪辑教程和封面设计参考，用来确认主题切换后导入、搜索、完成仍然可用",
       userNote: "主题回归测试"
     });
-    await page.getByTestId("import-success-panel").getByRole("button", { name: "查看行动卡" }).click();
+    await reviveImportedItem(page, imported.id);
     await page.getByTestId("status-completed").click();
     await expect(page.locator(".toast")).toBeVisible();
 
