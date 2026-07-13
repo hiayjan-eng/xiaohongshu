@@ -46,6 +46,7 @@ import { getStoredThemeId, getThemePreset, THEME_STORAGE_KEY, type ThemePresetId
 import {
   CATEGORIES,
   REVIVE_INTENTS,
+  SAVED_INTENTS,
   STATUS_LABELS,
   type ActionCard,
   type AppState,
@@ -786,6 +787,51 @@ export function App() {
     }));
     setToast("已归档这个专辑候选，收藏本身不会被删除");
   }
+
+  function correctSavedItemClassification(itemId: string, mode: "domain" | "intent") {
+    const currentItem = state.savedItems.find((item) => item.id === itemId);
+    if (!currentItem) return;
+
+    let patch: Partial<SavedItem> | undefined;
+    if (mode === "domain") {
+      const domainInput = window.prompt(`修改内容主题（可选：${CATEGORIES.join(" / ")}）`, currentItem.contentDomain)?.trim();
+      if (!domainInput) return;
+      const safeDomain = (CATEGORIES as readonly string[]).includes(domainInput) ? domainInput as Category : "暂存";
+      const subDomainInput = window.prompt("修改二级主题，例如 AI工具 / 展览活动 / 封面设计", currentItem.contentSubDomain)?.trim();
+      patch = {
+        contentDomain: safeDomain,
+        category: safeDomain,
+        contentSubDomain: subDomainInput || (safeDomain === "暂存" ? "待补充备注" : currentItem.contentSubDomain),
+        subCategory: subDomainInput || (safeDomain === "暂存" ? "待补充备注" : currentItem.contentSubDomain),
+        confidence: "medium",
+        classificationConfidence: "medium",
+        whyThisDomain: "用户在智能专辑中手动纠正过内容主题。",
+        whyThisCategory: "用户在智能专辑中手动纠正过内容主题。"
+      };
+    } else {
+      const intentInput = window.prompt(`修改收藏用途（可选：${SAVED_INTENTS.join(" / ")}）`, currentItem.savedIntent)?.trim();
+      if (!intentInput) return;
+      const safeIntent = (SAVED_INTENTS as readonly string[]).includes(intentInput) ? intentInput as SavedIntent : "暂时保存";
+      patch = {
+        savedIntent: safeIntent,
+        intent: safeIntent,
+        whyThisIntent: "用户在智能专辑中手动纠正过收藏用途。"
+      };
+    }
+
+    const now = new Date().toISOString();
+    setState((current) => {
+      const savedItems = current.savedItems.map((item) =>
+        item.id === itemId ? { ...item, ...patch, updatedAt: now } : item
+      );
+      return {
+        ...current,
+        savedItems,
+        smartAlbums: mergeGeneratedSmartAlbums(current.smartAlbums ?? smartAlbums, savedItems)
+      };
+    });
+    setToast(mode === "domain" ? "已按新的内容主题重新整理专辑" : "已按新的收藏用途重新整理专辑");
+  }
   if (activeView === "welcome") {
     return (
       <ThemeProvider themeId={themeId}>
@@ -980,6 +1026,7 @@ export function App() {
               confirmAlbum={confirmSmartAlbum}
               archiveAlbum={archiveSmartAlbum}
               regenerateSmartAlbums={regenerateSmartAlbums}
+              correctSavedItemClassification={correctSavedItemClassification}
             />
           )}
 
@@ -1251,7 +1298,7 @@ function DashboardView(props: {
                 <button key={item.id} className="compact-row" onClick={() => props.viewActionCard(item.id)}>
                   <span>
                     <strong>{item.title}</strong>
-                    <small>{item.category} / {item.subCategory} · {DISPLAY_STATUS_LABELS[item.status]}</small>
+                    <small>{item.contentDomain} / {item.contentSubDomain} · 用途：{item.savedIntent} · {DISPLAY_STATUS_LABELS[item.status]}</small>
                   </span>
                   <span className="mini-time">{formatDate(item.createdAt)}</span>
                   {card && <small>{item.status === "completed" ? "这条收藏已经被你真正用过了。" : card.nextAction}</small>}
@@ -1475,35 +1522,63 @@ function OldImportView(props: {
 
       <section className="extension-import-guide" data-testid="old-import-extension-warning">
         <div>
-          <span><Sparkles size={18} /> 需要本地浏览器扩展 Beta</span>
-          <strong>这个页面只接收浏览器扩展传来的扫描结果，网页本身不会读取你的小红书收藏夹。</strong>
-          <small>扩展只在你本人登录的小红书网页版、你主动点击扫描后，读取当前已加载 DOM 中的标题、链接、封面地址和可见短文本。不做云端爬虫，不模拟登录，不绕过验证码。</small>
+          <span><Sparkles size={18} /> 桌面浏览器扩展 Beta</span>
+          <strong>旧收藏扫描是主入口，但当前仍需要先安装本地 Beta 扩展。网页本身不会读取你的小红书收藏夹。</strong>
+          <small>扩展只在你本人登录的小红书网页版、你主动点击扫描后，读取当前已加载 DOM 中的标题、链接、封面、作者和可见短文本。不做云端爬虫，不模拟登录，不绕过验证码。</small>
         </div>
-        <code>apps/extension</code>
+        <a className="primary-button" href="/downloads/collection-revival-extension-beta.zip" download>下载旧收藏扫描 Beta</a>
       </section>
 
       <section className="tool-panel single">
         <div className="section-heading-soft">
-          <span><ClipboardList size={18} /> 扩展 Beta 安装步骤</span>
-          <small>只适合愿意安装本地 unpacked 扩展的高级测试者</small>
+          <span><ClipboardList size={18} /> 安装助手</span>
+          <small>当前是 unpacked Beta，正式商店版以后会更简单</small>
+        </div>
+        <div className="qa-grid">
+          <Metric label="1" value="下载并解压" />
+          <Metric label="2" value="打开扩展管理" />
+          <Metric label="3" value="开启开发者模式" />
+          <Metric label="4" value="加载已解压扩展" />
         </div>
         <details className="quiet-copy" open>
-          <summary>查看安装说明</summary>
+          <summary>查看安装步骤</summary>
           <ol>
-            <li>下载或找到项目里的 apps/extension 构建包。</li>
-            <li>打开 Chrome / Edge 扩展管理页。</li>
+            <li>下载“旧收藏扫描 Beta”压缩包并解压到一个固定文件夹。</li>
+            <li>打开 Chrome 或 Edge 的扩展管理页。</li>
             <li>开启开发者模式。</li>
-            <li>选择“加载已解压扩展”，加载扩展目录。</li>
-            <li>打开本人小红书网页版收藏夹。</li>
-            <li>点击扩展扫描，确认待导入清单后再导入收藏复活。</li>
+            <li>点击“加载已解压的扩展程序”，选择刚刚解压出来的文件夹。</li>
+            <li>打开你本人登录的小红书网页版收藏页。</li>
+            <li>点击扩展里的“开始扫描旧收藏”，扫描结果会先展示待导入清单，确认后再导入收藏复活。</li>
           </ol>
         </details>
+        <div className="old-import-actions">
+          <button className="secondary-action" onClick={() => navigator.clipboard?.writeText("chrome://extensions/")}>复制 Chrome 扩展管理页地址</button>
+          <button className="secondary-action" onClick={() => navigator.clipboard?.writeText("edge://extensions/")}>复制 Edge 扩展管理页地址</button>
+          <button className="secondary-action" onClick={() => window.alert("下载后请在浏览器下载记录里选择“在文件夹中显示”，解压后加载该文件夹。")}>打开下载文件夹说明</button>
+          <button className="primary-button" onClick={() => window.alert("安装后请去小红书网页版收藏页打开扩展，扫描完成后会自动回到这个页面。")}>我已经安装，开始扫描</button>
+        </div>
+      </section>
+
+      <section className="tool-panel single">
+        <div className="section-heading-soft">
+          <span><Sparkles size={18} /> 扫描控制台状态</span>
+          <small>这些状态会在扩展 popup 和导入批次里体现</small>
+        </div>
+        <div className="qa-grid">
+          <Metric label="未安装" value="下载 Beta" />
+          <Metric label="未打开收藏页" value="先打开小红书" />
+          <Metric label="可以扫描" value="开始扫描" />
+          <Metric label="扫描中" value="可暂停" />
+          <Metric label="暂停" value="可继续" />
+          <Metric label="完成" value="确认导入" />
+          <Metric label="已导入" value="生成索引" />
+          <Metric label="部分失败" value="可重试" />
+        </div>
       </section>
 
       <div className="old-import-actions">
         <button className="primary-button" onClick={() => props.setActiveView("import")}>没有扩展？先用新收藏导入测试</button>
         <button className="secondary-action" onClick={() => props.setActiveView("albums")}>查看智能专辑</button>
-        <button className="secondary-action" onClick={() => props.recommendations.slice(0, 3).forEach((entry) => props.changeStatus(entry.item.id, "today"))}>今日先复活 3 条</button>
       </div>
 
       <section className="qa-grid">
@@ -1917,10 +1992,11 @@ function PlansView(props: {
           <p className="eyebrow">计划库</p>
           <h1>把同类收藏排成节奏</h1>
         </div>
-        <p className="page-lead">第一版自动生成 3 天、7 天或 30 天计划，后续可以接拖拽排序和导出模板。</p>
+        <p className="page-lead">计划库已从主流程降级：先整理旧收藏和复活单条行动，只有用户主动把行动卡加入计划时，这里才承接 3 天、7 天或 30 天节奏。</p>
       </div>
 
       <div className="plans-grid">
+        {props.plans.length === 0 && <EmptyState title="计划库暂时收起" text="当前阶段不再自动把每条收藏排成计划，先从智能专辑里挑 1 条复活会更轻。后续需要 3 天/7 天计划时，再从行动卡主动加入。" />}
         {props.plans.map((plan) => (
           <section className="plan-panel" key={plan.id}>
             <div className="plan-panel-head">
@@ -1963,6 +2039,7 @@ function SmartAlbumsView(props: {
   confirmAlbum: (albumId: string) => void;
   archiveAlbum: (albumId: string) => void;
   regenerateSmartAlbums: () => void;
+  correctSavedItemClassification: (itemId: string, mode: "domain" | "intent") => void;
 }) {
   const visibleAlbums = props.albums.filter((album) => album.status !== "archived");
   const candidateCount = props.albums.filter((album) => album.status === "candidate").length;
@@ -1998,7 +2075,7 @@ function SmartAlbumsView(props: {
           <strong>旧收藏扫描或手动导入后，都会先进入统一导入管线，再生成专辑候选。</strong>
           <small>完整原帖内容仍然通过 sourceUrl 回到原平台查看，本产品只保存用户确认导入后的索引、摘要和行动卡。</small>
         </div>
-        <button className="secondary-action" onClick={props.regenerateSmartAlbums}>Regenerate albums</button>
+        <button className="secondary-action" onClick={props.regenerateSmartAlbums}>重新整理专辑</button>
       </section>
 
       <div className="smart-album-grid">
@@ -2014,7 +2091,7 @@ function SmartAlbumsView(props: {
           return (
             <section className="smart-album-card" key={album.id} data-testid="smart-album-card">
               <div className="smart-album-head">
-                <span>{album.category} · {album.albumType} · {album.priority === "high" ? "高优先级" : album.priority === "medium" ? "中优先级" : "低优先级"} · {album.status === "confirmed" ? "已确认" : "候选"}</span>
+                <span>{album.albumView === "saved_intent" ? "用途专辑" : "主题专辑"} · {album.albumView === "saved_intent" ? album.savedIntent ?? album.albumType : `${album.contentDomain ?? album.category} / ${album.contentSubDomain ?? album.albumType}`} · {album.priority === "high" ? "高优先级" : album.priority === "medium" ? "中优先级" : "低优先级"} · {album.status === "confirmed" ? "已确认" : "候选"}</span>
                 <strong>{album.title}</strong>
                 <small>{album.description}</small>
                 <small>{album.whyThisAlbum}</small>
@@ -2065,11 +2142,13 @@ function SmartAlbumsView(props: {
                 <article key={item.id} className="qa-result-row">
                   <div>
                     <strong>{index + 1}. {item.title}</strong>
-                    <small>{item.category} / {item.subCategory} · {DISPLAY_STATUS_LABELS[item.status]}</small>
+                    <small>{item.contentDomain} / {item.contentSubDomain} · 用途：{item.savedIntent} · {DISPLAY_STATUS_LABELS[item.status]}</small>
                     <span>{card?.nextAction ?? item.summary}</span>
                   </div>
                   <div className="qa-row-actions">
                     <button onClick={() => props.viewActionCard(item.id)}>查看</button>
+                    <button onClick={() => props.correctSavedItemClassification(item.id, "domain")}>改主题</button>
+                    <button onClick={() => props.correctSavedItemClassification(item.id, "intent")}>改用途</button>
                     {hasSourceUrl(item) ? <button onClick={() => props.openSource(item)}>原帖</button> : <button disabled>暂无原帖</button>}
                   </div>
                 </article>
