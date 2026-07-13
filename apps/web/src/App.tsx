@@ -70,6 +70,9 @@ import {
 } from "@revival/shared-types";
 
 type ViewKey = "welcome" | "dashboard" | "import" | "old-import" | "search" | "pool" | "detail" | "plans" | "albums" | "insights" | "mobile" | "settings" | "real-test" | "qa";
+
+const EXTENSION_BETA_VERSION = "0.2.0";
+const EXTENSION_ZIP_FILE_NAME = `collection-revival-extension-beta-v${EXTENSION_BETA_VERSION}.zip`;
 type PoolViewMode = "cards" | "table";
 type ImportSuccessResult = { item: SavedItem; card?: ActionCard };
 
@@ -1510,6 +1513,50 @@ function OldImportView(props: {
   changeStatus: (itemId: string, status: ItemStatus) => void;
 }) {
   const items = props.latestBatch ? props.batchItems.filter((item) => item.batchId === props.latestBatch?.id) : [];
+  const [extensionStatus, setExtensionStatus] = useState<{ connected: boolean; checked: boolean; version?: string; message: string }>({
+    connected: false,
+    checked: false,
+    message: "还没有检测扩展。安装后点击“检测扩展连接”，或刷新这个页面。"
+  });
+
+  function pingExtension() {
+    window.postMessage({ source: "collection-revival-web", type: "COLLECTION_REVIVAL_EXTENSION_PING" }, "*");
+    setExtensionStatus((current) => ({
+      ...current,
+      checked: true,
+      message: current.connected ? current.message : "正在检测扩展连接。如果已经安装，请刷新页面或确认扩展已加载。"
+    }));
+    window.setTimeout(() => {
+      setExtensionStatus((current) => current.connected
+        ? current
+        : { connected: false, checked: true, message: "未检测到扩展。请先下载 ZIP、解压，并在 Chrome / Edge 开发者模式里加载已解压文件夹。" }
+      );
+    }, 900);
+  }
+
+  useEffect(() => {
+    function handleExtensionMessage(event: MessageEvent) {
+      if (event.source !== window) return;
+      if (event.data?.source !== "collection-revival-extension") return;
+      if (event.data?.type !== "COLLECTION_REVIVAL_EXTENSION_READY") return;
+      setExtensionStatus({
+        connected: true,
+        checked: true,
+        version: event.data.version,
+        message: `扩展已连接${event.data.version ? ` · v${event.data.version}` : ""}。现在可以打开小红书收藏页，在扩展里开始扫描。`
+      });
+    }
+    window.addEventListener("message", handleExtensionMessage);
+    window.postMessage({ source: "collection-revival-web", type: "COLLECTION_REVIVAL_EXTENSION_PING" }, "*");
+    const timer = window.setTimeout(() => {
+      setExtensionStatus((current) => current.connected ? current : { ...current, checked: true });
+    }, 1000);
+    return () => {
+      window.removeEventListener("message", handleExtensionMessage);
+      window.clearTimeout(timer);
+    };
+  }, []);
+
   return (
     <>
       <div className="page-title-row airy-title">
@@ -1526,36 +1573,31 @@ function OldImportView(props: {
           <strong>旧收藏扫描是主入口，但当前仍需要先安装本地 Beta 扩展。网页本身不会读取你的小红书收藏夹。</strong>
           <small>扩展只在你本人登录的小红书网页版、你主动点击扫描后，读取当前已加载 DOM 中的标题、链接、封面、作者和可见短文本。不做云端爬虫，不模拟登录，不绕过验证码。</small>
         </div>
-        <a className="primary-button" href="/downloads/collection-revival-extension-beta.zip" download>下载旧收藏扫描 Beta</a>
+        <a className="primary-button" href={`/downloads/${EXTENSION_ZIP_FILE_NAME}`} download={EXTENSION_ZIP_FILE_NAME}>下载旧收藏扫描 Beta ZIP</a>
       </section>
 
       <section className="tool-panel single">
         <div className="section-heading-soft">
           <span><ClipboardList size={18} /> 安装助手</span>
-          <small>当前是 unpacked Beta，正式商店版以后会更简单</small>
+          <small>当前是本地 Beta，普通用户只需要下载 ZIP、解压、加载文件夹，不需要接触源码目录。</small>
         </div>
-        <div className="qa-grid">
-          <Metric label="1" value="下载并解压" />
-          <Metric label="2" value="打开扩展管理" />
-          <Metric label="3" value="开启开发者模式" />
-          <Metric label="4" value="加载已解压扩展" />
+        <div className={extensionStatus.connected ? "extension-connection-card connected" : "extension-connection-card"} data-testid="extension-connection-status">
+          <strong>{extensionStatus.connected ? "扩展已连接" : "扩展未连接"}</strong>
+          <span>{extensionStatus.message}</span>
         </div>
-        <details className="quiet-copy" open>
-          <summary>查看安装步骤</summary>
-          <ol>
-            <li>下载“旧收藏扫描 Beta”压缩包并解压到一个固定文件夹。</li>
-            <li>打开 Chrome 或 Edge 的扩展管理页。</li>
-            <li>开启开发者模式。</li>
-            <li>点击“加载已解压的扩展程序”，选择刚刚解压出来的文件夹。</li>
-            <li>打开你本人登录的小红书网页版收藏页。</li>
-            <li>点击扩展里的“开始扫描旧收藏”，扫描结果会先展示待导入清单，确认后再导入收藏复活。</li>
-          </ol>
-        </details>
+        <ol className="install-steps">
+          <li><strong>第一步：下载扩展 ZIP。</strong><span>点击上方“下载旧收藏扫描 Beta ZIP”，文件名是 {EXTENSION_ZIP_FILE_NAME}。</span></li>
+          <li><strong>第二步：解压 ZIP。</strong><span>把 ZIP 解压到一个固定文件夹，后续浏览器会加载这个解压后的文件夹。</span></li>
+          <li><strong>第三步：打开 Chrome / Edge 扩展管理页。</strong><span>可以复制下面的地址到浏览器地址栏。</span></li>
+          <li><strong>第四步：开启开发者模式。</strong><span>Chrome / Edge 扩展管理页右上角会有“开发者模式”开关。</span></li>
+          <li><strong>第五步：点击“加载已解压的扩展程序”。</strong><span>选择刚刚解压出来、里面能看到 manifest.json 的文件夹。</span></li>
+          <li><strong>第六步：回到这里检测扩展。</strong><span>显示“扩展已连接”后，再打开你本人的小红书网页版收藏页开始扫描。</span></li>
+        </ol>
         <div className="old-import-actions">
-          <button className="secondary-action" onClick={() => navigator.clipboard?.writeText("chrome://extensions/")}>复制 Chrome 扩展管理页地址</button>
-          <button className="secondary-action" onClick={() => navigator.clipboard?.writeText("edge://extensions/")}>复制 Edge 扩展管理页地址</button>
-          <button className="secondary-action" onClick={() => window.alert("下载后请在浏览器下载记录里选择“在文件夹中显示”，解压后加载该文件夹。")}>打开下载文件夹说明</button>
-          <button className="primary-button" onClick={() => window.alert("安装后请去小红书网页版收藏页打开扩展，扫描完成后会自动回到这个页面。")}>我已经安装，开始扫描</button>
+          <button className="secondary-action" onClick={() => navigator.clipboard?.writeText("chrome://extensions/")}>复制 chrome://extensions</button>
+          <button className="secondary-action" onClick={() => navigator.clipboard?.writeText("edge://extensions/")}>复制 edge://extensions</button>
+          <button className="secondary-action" onClick={pingExtension} data-testid="detect-extension">我已安装，检测扩展</button>
+          <a className="primary-button" href="https://www.xiaohongshu.com/explore" target="_blank" rel="noreferrer">打开小红书收藏页</a>
         </div>
       </section>
 
