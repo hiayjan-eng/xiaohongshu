@@ -1,5 +1,5 @@
 import { CATEGORIES } from "@revival/shared-types";
-import type { ActionCardDraft, AiClassificationResult, Category, EntityTag, SavedItem, ShareInput, SmartAlbum, SmartAlbumPriority, TaskDraft } from "@revival/shared-types";
+import type { ActionCardDraft, AiClassificationResult, Category, EntityTag, SavedIntent, SavedItem, ShareInput, SmartAlbum, SmartAlbumPriority, TaskDraft } from "@revival/shared-types";
 
 export type AiTask = "classify_action_card" | "generate_smart_albums" | "regenerate_action_card" | "summarize_import_batch" | "generate_search_keywords";
 export type AiFallbackReason = "AI_KEY_MISSING" | "AI_TIMEOUT" | "AI_BAD_JSON" | "AI_API_ERROR" | "AI_PROXY_UNAVAILABLE" | "AI_UNSUPPORTED_TASK" | "AI_PAYLOAD_TOO_LARGE";
@@ -63,26 +63,35 @@ export function extractJsonFromText(value: unknown): unknown {
 export function normalizeClassificationResult(value: unknown, input: ShareInput, fallback: AiClassificationResult): AiClassificationResult {
   const raw = unwrapData(value);
   if (!isRecord(raw)) return fallback;
-  const alias = normalizeCategory(raw.category, fallback.category, fallback.subCategory);
+  const alias = normalizeCategory(raw.contentDomain ?? raw.category, fallback.contentDomain ?? fallback.category, fallback.contentSubDomain ?? fallback.subCategory);
+  const contentSubDomain = readString(raw.contentSubDomain ?? raw.subCategory, alias.subCategory);
   const rawActionCard = isRecord(raw.actionCard) ? raw.actionCard : raw;
   const actionCard = normalizeActionCardDraft(rawActionCard, fallback.actionCard);
   const confidence = readConfidence(raw.confidence, fallback.confidence);
-  const intent = readString(raw.intent, fallback.intent);
-  const whyThisCategory = readString(raw.whyThisCategory, fallback.whyThisCategory);
+  const savedIntent = readSavedIntent(raw.savedIntent ?? raw.intent, fallback.savedIntent ?? fallback.intent);
+  const secondaryIntents = readSavedIntentArray(raw.secondaryIntents, fallback.secondaryIntents ?? [], 5).filter((intent) => intent !== savedIntent);
+  const whyThisDomain = readString(raw.whyThisDomain ?? raw.whyThisCategory, fallback.whyThisDomain ?? fallback.whyThisCategory);
+  const whyThisIntent = readString(raw.whyThisIntent ?? raw.intent, fallback.whyThisIntent ?? fallback.intent);
   const summary = readString(raw.summary, fallback.summary);
   const keywords = readStringArray(raw.keywords, fallback.keywords, 12);
   const entities = readEntities(raw.entities, fallback.entities);
   const searchableText = readString(raw.searchableText, fallback.searchableText);
   return {
-    category: alias.category,
-    subCategory: readString(raw.subCategory, alias.subCategory),
+    contentDomain: alias.category,
+    contentSubDomain,
+    savedIntent,
+    secondaryIntents,
     confidence,
-    intent,
-    whyThisCategory,
+    whyThisDomain,
+    whyThisIntent,
+    category: alias.category,
+    subCategory: contentSubDomain,
+    intent: savedIntent,
+    whyThisCategory: whyThisDomain,
     summary,
     keywords,
     entities,
-    searchableText: searchableText || buildSearchableText(input, alias.category, alias.subCategory, intent, whyThisCategory, summary, keywords, entities, actionCard),
+    searchableText: searchableText || buildSearchableText(input, alias.category, contentSubDomain, savedIntent, whyThisDomain, whyThisIntent, summary, keywords, entities, actionCard),
     actionCard
   };
 }
@@ -133,8 +142,12 @@ export function normalizeSmartAlbumsResult(value: unknown, savedItems: SavedItem
       id: readString(album.id, `album_ai_${index + 1}_${slugify(title)}`),
       title,
       description: readString(album.description, `从 ${safeIds.length} 条收藏里整理出的行动主题。`),
+      albumView: album.albumView === "saved_intent" ? "saved_intent" : "content_domain",
+      contentDomain: alias.category,
+      contentSubDomain: readString(album.contentSubDomain, alias.subCategory),
+      savedIntent: album.albumView === "saved_intent" ? readSavedIntent(album.savedIntent, "以后查阅") : undefined,
       category: alias.category,
-      albumType: readString(album.albumType, "theme"),
+      albumType: readString(album.albumType, album.albumView === "saved_intent" ? "intent_album" : "domain_album"),
       keywords,
       savedItemIds: safeIds,
       recommendedItemIds: readStringArray(album.recommendedItemIds, safeIds.slice(0, 3), 3).filter((id) => validIds.has(id)),
@@ -207,6 +220,24 @@ function readStructuredFields(value: unknown, fallback: Record<string, string | 
   return Object.keys(fields).length > 0 ? fields : fallback;
 }
 
+function readSavedIntent(value: unknown, fallback: unknown): SavedIntent {
+  if (value === "想学习" || value === "想复现" || value === "想去" || value === "想买" || value === "想做" || value === "内容创作参考" || value === "工作决策参考" || value === "情绪共鸣" || value === "以后查阅" || value === "暂时保存") return value;
+  const text = String(value ?? fallback ?? "");
+  if (/创作|选题|封面|内容/.test(text)) return "内容创作参考";
+  if (/工作|决策|效率|SOP|流程|自动化/.test(text)) return "工作决策参考";
+  if (/复现|照着|模仿/.test(text)) return "想复现";
+  if (/学习|教程|练习/.test(text)) return "想学习";
+  if (/旅行|路线|探店|展览|去/.test(text)) return "想去";
+  if (/买|购物|种草|消费/.test(text)) return "想买";
+  if (/情绪|关系|共鸣/.test(text)) return "情绪共鸣";
+  return "以后查阅";
+}
+
+function readSavedIntentArray(value: unknown, fallback: SavedIntent[], limit: number): SavedIntent[] {
+  if (!Array.isArray(value)) return fallback;
+  return unique(value.map((item) => readSavedIntent(item, "以后查阅"))).slice(0, limit) as SavedIntent[];
+}
+
 function readConfidence(value: unknown, fallback: AiClassificationResult["confidence"]): AiClassificationResult["confidence"] {
   return value === "high" || value === "medium" || value === "low" ? value : fallback;
 }
@@ -255,11 +286,11 @@ function collectKeywords(ids: string[], items: Map<string, SavedItem>): string[]
   }).filter(Boolean)).slice(0, 8);
 }
 
-function buildSearchableText(input: ShareInput, category: Category, subCategory: string, intent: string, whyThisCategory: string, summary: string, keywords: string[], entities: EntityTag[], actionCard: ActionCardDraft): string {
+function buildSearchableText(input: ShareInput, category: Category, subCategory: string, intent: string, whyThisCategory: string, whyThisIntent: string, summary: string, keywords: string[], entities: EntityTag[], actionCard: ActionCardDraft): string {
   const fieldText = Object.entries(actionCard.structuredFields).flatMap(([key, value]) => [key, Array.isArray(value) ? value.join(" ") : value]).join(" ");
   const taskText = actionCard.tasks.map((task) => `${task.title} ${task.description}`).join(" ");
   const entityText = entities.map((entity) => `${entity.type}:${entity.value}`).join(" ");
-  return [input.sourceUrl, input.rawShareText, input.title, input.userNote, category, subCategory, intent, whyThisCategory, summary, keywords.join(" "), entityText, actionCard.title, actionCard.goal, actionCard.whySaved, actionCard.nextAction, actionCard.openOriginalFocus.join(" "), actionCard.output, actionCard.doneCriteria, actionCard.avoidDoing, actionCard.ifInfoMissing, actionCard.followUp, fieldText, taskText].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+  return [input.sourceUrl, input.rawShareText, input.title, input.userNote, category, subCategory, intent, whyThisCategory, whyThisIntent, summary, keywords.join(" "), entityText, actionCard.title, actionCard.goal, actionCard.whySaved, actionCard.nextAction, actionCard.openOriginalFocus.join(" "), actionCard.output, actionCard.doneCriteria, actionCard.avoidDoing, actionCard.ifInfoMissing, actionCard.followUp, fieldText, taskText].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
 }
 
 function slugify(value: string): string {
