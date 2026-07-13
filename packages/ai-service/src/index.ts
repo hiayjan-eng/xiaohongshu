@@ -1,4 +1,5 @@
 import { CATEGORIES } from "@revival/shared-types";
+import { classifyCollectionInput } from "@revival/classification-service";
 import type {
   ActionCardDraft,
   AiClassificationResult,
@@ -421,11 +422,21 @@ const entityDictionary: Record<string, string[]> = {
 };
 
 export function classifyAndGenerateActionCard(input: ShareInput): AiClassificationResult {
-  const text = combineInput(input);
-  const inference = inferCategoryWithConfidence(text, input);
-  const savedIntent = inferSavedIntent(text, input, inference);
-  const entities = extractEntities(text, inference.category);
-  const keywords = extractKeywords(text, inference.category, inference.subCategory, entities);
+  const classification = classifyCollectionInput(input);
+  const inference: CategoryInference = {
+    category: classification.contentDomain,
+    subCategory: classification.contentSubDomain,
+    confidence: classification.confidence,
+    intent: classification.dominantIntent,
+    whyThisCategory: classification.classificationReason
+  };
+  const savedIntent: SavedIntentInference = {
+    savedIntent: classification.savedIntent,
+    secondaryIntents: classification.secondaryIntents,
+    whyThisIntent: classification.whyThisIntent
+  };
+  const keywords = classification.keywords;
+  const entities = classification.entities;
   const summary = buildSummary(input, inference.category, inference.subCategory, keywords, inference.confidence);
   const actionCard = generateActionCard(inference.category, inference.subCategory, input, keywords, entities, inference.confidence, savedIntent.savedIntent);
   const searchableText = buildSearchableText(input, inference, summary, keywords, entities, actionCard, savedIntent);
@@ -437,6 +448,12 @@ export function classifyAndGenerateActionCard(input: ShareInput): AiClassificati
     confidence: inference.confidence,
     whyThisDomain: inference.whyThisCategory,
     whyThisIntent: savedIntent.whyThisIntent,
+    classificationReason: classification.classificationReason,
+    positiveEvidence: classification.positiveEvidence,
+    negativeEvidence: classification.negativeEvidence,
+    conflictingEvidence: classification.conflictingEvidence,
+    dominantIntent: classification.dominantIntent,
+    classificationShadow: classification.shadow,
     category: inference.category,
     subCategory: inference.subCategory,
     intent: savedIntent.savedIntent,
@@ -646,6 +663,15 @@ function generateActionCard(category: Category, subCategory: string, input: Shar
         ? ["工具名", "第一个操作步骤", "示例输入", "示例产出"]
         : ["练习步骤", "示例作品", "注意事项", "完成标准"];
     return card(common, isAi ? "复现卡" : "练习卡", isAi ? `把“${topic}”里的一个工具步骤复现出来。` : `用“${topic}”完成一次最小练习。`, isAi ? "你可能想把这个工具或工作流真正用到自己的任务里。" : "你可能想学习这个技能，但需要先做一次小练习确认入口。", nextAction, focus, isAi ? "1 张截图、1 段 prompt 或 1 个小自动化步骤" : "1 个小作品、练习截图或 3 行练习记录", "20分钟", "中", isAi ? "复现出第一个可见结果，并保存截图、prompt 或工作流记录。" : "完成第一个练习动作，并记录哪里卡住。", "不要一口气学完整教程，也不要先收藏更多同类内容。", "如果不知道工具名或练习步骤，先补充原帖链接，或把关键步骤粘到分享文案/备注再重新生成。", "如果第一个步骤可用，再把它整理成自己的 SOP 或 3 天练习。", [task("定位第一步", isAi ? "找出工具名、入口和第一个操作步骤。" : "找出作者建议的第一个练习动作。", "6分钟"), task("只复现一次", isAi ? "按原帖或备注做出第一个示例结果。" : "完成一个最小练习，不追求完美。", "10分钟"), task("保存证据", isAi ? "保存截图、prompt 或工作流记录，方便下次继续。" : "写下 1 句卡点和 1 句下次要练什么。", "4分钟")], { 学习目标: isAi ? "复现一个可用工具步骤" : "完成一次最小技能练习" });
+  }
+
+  if (category === "工作与职业") {
+    const isHiring = /招聘|招人|岗位|简历|面试|加入|合伙人|团队/.test(`${topic} ${keywords.join(" ")}`);
+    return card(common, isHiring ? "机会判断卡" : "职场行动卡", isHiring ? `判断“${topic}”是不是值得后续联系的机会。` : `把“${topic}”转成一个可执行的工作改进动作。`, isHiring ? "你收藏它可能是因为这里有岗位、团队或合作机会，需要先判断匹配度。" : "你收藏它可能是为了改进工作方法或职业选择，先从一个小判断开始。", isHiring ? "打开原帖，确认岗位/团队、城市、要求、联系入口和时间；写下 1 句“我是否匹配，以及下一步要不要联系”。" : "打开原帖，找出 1 个你当前工作能立刻试的小方法；今天只应用到一个任务里，记录结果。", isHiring ? ["岗位/团队", "城市和办公方式", "能力要求", "联系入口", "发布时间"] : ["方法步骤", "适用场景", "作者例子", "注意事项"], isHiring ? "1 条机会匹配判断 + 下一步联系动作" : "1 条工作方法试用记录", "20分钟", "中", isHiring ? "写清楚匹配点、不匹配点和是否联系。" : "把方法用在一个具体工作任务上，并写下是否有效。", isHiring ? "不要只因为城市或公司名字心动就马上投递，先确认要求和自己的匹配度。" : "不要一次重做整套工作系统，先改一个环节。", "如果缺岗位、团队或联系入口，先补充原帖链接或把关键信息粘到备注。", isHiring ? "如果匹配度高，再准备一段简短自我介绍。" : "如果有效，再沉淀成自己的小 SOP。", [task("确认机会信息", "记录岗位/团队、城市、要求和联系入口。", "8分钟"), task("判断匹配度", "写下 2 个匹配点和 1 个不确定点。", "8分钟"), task("决定下一步", "选择联系、暂存或放弃，并写一句理由。", "4分钟")], { 机会类型: subCategory, 判断维度: ["岗位/团队", "城市", "要求", "联系入口"] });
+  }
+
+  if (category === "商业与经营") {
+    return card(common, "商业拆解卡", `把“${topic}”拆成一个可借鉴的商业判断。`, "你收藏它大概率是想理解一个产品、案例或经营方法背后的可复用逻辑。", "打开原帖，只记录 4 件事：产品是什么、卖给谁、怎么定价/获客、为什么有人愿意买；最后写 1 条你能借鉴或不能借鉴的判断。", ["产品/服务", "目标用户", "价格/毛利/客单价", "获客渠道", "评论区真实反馈"], "1 条商业案例拆解记录", "25分钟", "中", "写出产品、用户、定价/获客和一条可借鉴判断。", "不要把它直接当成万能赚钱模板，也不要只记录情绪化结论。", "如果缺价格、产品或渠道信息，先打开原帖补齐关键字段。", "如果这个案例有启发，再把它加入商业参考或工作决策清单。", [task("记录四要素", "写下产品、用户、定价/获客和反馈。", "12分钟"), task("判断可借鉴点", "写一句它为什么成立，以及你这里能不能用。", "8分钟"), task("保存反例", "写一个不适用的条件，避免误用。", "5分钟")], { 商业要素: ["产品", "用户", "定价/获客", "反馈"], 可借鉴方向: "用一条判断总结，而不是复制做法" });
   }
 
   if (category === "出行与探店") return card(common, /探店|咖啡|餐厅|甜品|brunch|夜市|人均/.test(`${topic} ${keywords.join(" ")}`) ? "探店候选卡" : "周末计划卡", `把“${topic}”变成一个可决定去不去的候选安排。`, "你可能是被地点、路线或店铺吸引了，但需要先确认时间、交通和预算。", "打开原帖，确认地点、营业时间或开放时间、交通方式和预算；给它加 1 个候选日期，产出一个周末计划草稿。", ["地点/店名", "时间", "交通方式", "预算/人均", "评论区补充"], "1 个周末计划草稿", "15分钟", "低", "写下候选日期、到达方式、预算和是否需要预约。", "不要直接把很多地点塞进行程，先判断这一条值不值得去。", "如果缺地点或时间，先打开原帖补齐，再决定是否加入计划。", "如果确认值得去，把它加入计划库或今日行动。", [task("确认基础信息", "记录地点/店名、时间、交通和预算。", "7分钟"), task("加一个候选日期", "选一个真实可能去的日期，不用马上约人。", "4分钟"), task("判断优先级", "写下为什么值得去，以及一个避坑点。", "4分钟")], { 地点名称: topic, 交通建议: "打开原帖确认最近地铁/停车/步行距离", 预算区间: "打开原帖确认人均或门票" });
