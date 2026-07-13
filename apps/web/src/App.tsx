@@ -1874,7 +1874,7 @@ function OldImportView(props: {
           <button className="secondary-action" onClick={() => navigator.clipboard?.writeText("edge://extensions/")}>复制 edge://extensions</button>
           <button className="secondary-action" onClick={pingExtension} data-testid="detect-extension">我已安装，检测扩展</button>
           <button className="secondary-action" onClick={refreshAndDetect}>刷新并重新检测</button>
-          <a className="primary-button" href="https://www.xiaohongshu.com/user/profile" target="_blank" rel="noreferrer">打开小红书，去我的收藏页</a>
+          <a className="primary-button" href="https://www.xiaohongshu.com/user/profile" target="_blank" rel="noreferrer">打开小红书收藏页</a>
         </div>
       </section>
 
@@ -3666,7 +3666,6 @@ function buildInsights(items: SavedItem[]) {
     categoryDistribution
   };
 }
-
 
 
 
