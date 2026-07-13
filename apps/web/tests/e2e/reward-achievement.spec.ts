@@ -1,17 +1,19 @@
-﻿import { expect, test } from "@playwright/test";
-import { collectConsoleErrors, expectNoConsoleErrors, readAchievements, resetDemoData } from "./helpers";
+import { expect, test } from "@playwright/test";
+import { collectConsoleErrors, expectNoConsoleErrors, importTestNote, readAchievements, resetDemoData, reviveImportedItem } from "./helpers";
 
 test.describe("MVP completion reward and achievements", () => {
-  test("marks an action card as revived, updates stats, and unlocks first achievement once", async ({ page }) => {
+  test("marks an on-demand action card as revived, updates stats, and unlocks first achievement once", async ({ page }) => {
     const errors = collectConsoleErrors(page);
     await resetDemoData(page);
+    const item = await importTestNote(page, {
+      sourceUrl: "https://www.xiaohongshu.com/explore/reward-on-demand",
+      title: "AI工具日常工作流入门",
+      rawShareText: "ChatGPT 提示词和自动化工作流教程，适合提升办公效率",
+      userNote: "想先复现第一个案例"
+    });
+    await reviveImportedItem(page, item.id);
 
-    await page.goto("/pool");
-    const card = page.getByTestId("saved-item-card").filter({ hasText: "剪映新手" });
-    await expect(card).toBeVisible();
-    await card.getByTestId("status-completed").click();
-
-    await expect(card).toContainText("已复活");
+    await page.getByTestId("status-completed").click();
     await expect(page.locator(".toast")).toBeVisible();
     await expect(page.getByRole("dialog")).toContainText("第一次复活");
 
@@ -25,9 +27,8 @@ test.describe("MVP completion reward and achievements", () => {
     await expect(page.getByTestId("stat-复活值")).toContainText("+1");
     await expect(page.getByText("第一次复活")).toBeVisible();
 
-    await page.goto("/pool");
-    const completedCard = page.getByTestId("saved-item-card").filter({ hasText: "剪映新手" });
-    await completedCard.getByTestId("status-completed").click();
+    await page.goto("/detail");
+    await page.getByTestId("status-completed").click();
     await page.goto("/dashboard");
     await expect(page.getByTestId("stat-已复活总数")).toContainText("1 条");
     await expect(page.getByTestId("stat-复活值")).toContainText("+1");
