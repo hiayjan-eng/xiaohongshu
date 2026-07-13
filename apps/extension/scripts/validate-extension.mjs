@@ -8,7 +8,8 @@ const requiredFiles = [
   "src/popup.js",
   "src/popup.css",
   "src/web-bridge.js",
-  "src/xhs-scanner.js"
+  "src/xhs-scanner.js",
+  "src/background.js"
 ];
 
 for (const file of requiredFiles) {
@@ -19,7 +20,7 @@ for (const file of requiredFiles) {
 
 const manifest = JSON.parse(readFileSync(new URL("../manifest.json", import.meta.url), "utf8"));
 if (manifest.manifest_version !== 3) throw new Error("Extension must use Manifest V3");
-if (manifest.version !== "0.2.1") throw new Error("Extension version must be 0.2.1");
+if (manifest.version !== "0.2.2") throw new Error("Extension version must be 0.2.2");
 if (!manifest.permissions.includes("activeTab")) throw new Error("activeTab permission is required for user-triggered scanning");
 if (!manifest.permissions.includes("scripting")) throw new Error("scripting permission is required for programmatic content script injection");
 if (!manifest.permissions.includes("storage")) throw new Error("storage permission is required for checkpoint restore");
@@ -36,8 +37,9 @@ const webBridgeEntry = contentScripts.find((entry) => (entry.js || []).includes(
 const scannerEntry = contentScripts.find((entry) => (entry.js || []).includes("src/xhs-scanner.js"));
 if (!webBridgeEntry) throw new Error("Missing Web Bridge content script entry");
 if (!scannerEntry) throw new Error("Missing Xiaohongshu scanner content script entry");
+if (manifest.background?.service_worker !== "src/background.js") throw new Error("Missing background service worker");
 
-for (const script of ["popup.js", "web-bridge.js", "xhs-scanner.js"]) {
+for (const script of ["popup.js", "web-bridge.js", "xhs-scanner.js", "background.js"]) {
   execFileSync(process.execPath, ["--check", fileURLToPath(new URL(`../src/${script}`, import.meta.url))], { stdio: "inherit" });
 }
 
@@ -45,10 +47,12 @@ const popupJs = readFileSync(new URL("../src/popup.js", import.meta.url), "utf8"
 const webBridge = readFileSync(new URL("../src/web-bridge.js", import.meta.url), "utf8");
 const scanner = readFileSync(new URL("../src/xhs-scanner.js", import.meta.url), "utf8");
 const popupHtml = readFileSync(new URL("../src/popup.html", import.meta.url), "utf8");
+const background = readFileSync(new URL("../src/background.js", import.meta.url), "utf8");
 
-const popupMarkers = ["CHECKPOINT_KEY", "pauseScan", "resumeScan", "browser-extension-beta", "autoScrollToggle", "clearCheckpoint", "openOrRefreshWebApp", "ensureWebBridgeScript", "bridgeStatus", "scannerStatus"];
-const bridgeMarkers = ["COLLECTION_REVIVAL_EXTENSION_READY", "COLLECTION_REVIVAL_EXTENSION_PING", "COLLECTION_REVIVAL_EXTENSION_PONG", "requestId", "protocolVersion", "collection-revival-web-bridge-v1", "collectionRevivalExtensionVersion", "collection-revival-extension-bridge"];
-const scannerMarkers = ["REVIVAL_GET_PAGE_STATUS", "REVIVAL_SCAN_STEP", "scrollOneStep", "blocked", "验证码"];
+const popupMarkers = ["CHECKPOINT_KEY", "SCAN_STATE_KEY", "pauseScan", "resumeScan", "retryScan", "browser-extension-beta", "autoScrollToggle", "clearCheckpoint", "openOrRefreshWebApp", "ensureWebBridgeScript", "bridgeStatus", "scannerStatus", "progressTrack", "filterSelect"];
+const bridgeMarkers = ["COLLECTION_REVIVAL_EXTENSION_READY", "COLLECTION_REVIVAL_EXTENSION_PING", "COLLECTION_REVIVAL_EXTENSION_PONG", "COLLECTION_REVIVAL_EXTENSION_SCAN_STATUS_REQUEST", "COLLECTION_REVIVAL_EXTENSION_SCAN_STATUS", "requestId", "protocolVersion", "collection-revival-web-bridge-v1", "collectionRevivalExtensionVersion", "collection-revival-extension-bridge", "scan-progress-sync"];
+const scannerMarkers = ["REVIVAL_GET_PAGE_STATUS", "REVIVAL_START_SCAN", "REVIVAL_PAUSE_SCAN", "REVIVAL_RESUME_SCAN", "REVIVAL_GET_SCAN_STATE", "scrollOneStep", "findCollectionRoot", "isElementVisible", "normalizeScannedText", "blocked", "验证码", "xhs-fav-container-v2"];
+const backgroundMarkers = ["onInstalled", "onStartup", "executeScript", "web-bridge.js"];
 for (const marker of popupMarkers) {
   if (!popupJs.includes(marker) && !popupHtml.includes(marker)) throw new Error(`Missing popup beta capability marker: ${marker}`);
 }
@@ -57,6 +61,9 @@ for (const marker of bridgeMarkers) {
 }
 for (const marker of scannerMarkers) {
   if (!scanner.includes(marker)) throw new Error(`Missing scanner beta capability marker: ${marker}`);
+}
+for (const marker of backgroundMarkers) {
+  if (!background.includes(marker)) throw new Error(`Missing background recovery marker: ${marker}`);
 }
 
 console.log("extension beta manifest and scripts ok");
