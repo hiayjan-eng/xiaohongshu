@@ -63,10 +63,19 @@ export default async function handler(req: ApiRequest, res: ApiResponse): Promis
   const baseMeta = metaFromConfig(config, wantsRealProvider);
 
   if (wantsRealProvider && !config.apiKey) {
-    return send(res, 503, {
-      ok: false,
-      error: { code: "AI_KEY_MISSING", message: "AI API Key is not configured." },
-      meta: { ...baseMeta, fallback: true, reason: "AI_KEY_MISSING" }
+    const provider = createMockAiProvider({ generateSmartAlbums });
+    const data = await executeTask(provider, body.task, body.payload);
+    return send(res, 200, {
+      ok: true,
+      data,
+      meta: {
+        provider: "mock",
+        providerName: "MockAIProvider",
+        model: "local-rules",
+        fallback: true,
+        reason: "AI_KEY_MISSING",
+        apiKeyConfigured: false
+      }
     });
   }
 

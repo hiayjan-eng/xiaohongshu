@@ -59,7 +59,7 @@ Schema 归一化位于 `packages/ai-service/src/schemas.ts`。真实模型可以
 - `summarize_import_batch`
 - `generate_search_keywords`
 
-如果 `AI_PROVIDER=openai-compatible` 但没有配置 `AI_API_KEY`，接口返回结构化错误：`AI_KEY_MISSING`。前端收到后会 fallback 到 mock。
+如果 `AI_PROVIDER=openai-compatible` 但没有配置 `AI_API_KEY`，接口返回 `200` 的结构化 fallback 响应：`ok: true`、`meta.provider: "mock"`、`meta.fallback: true`、`meta.reason: "AI_KEY_MISSING"`。前端继续使用 mock 结果，不会因为缺 Key 在控制台出现明显 500。
 
 ## 当前 BLOCKED
 
