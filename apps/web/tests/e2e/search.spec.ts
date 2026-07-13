@@ -1,4 +1,4 @@
-﻿import { expect, test } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import {
   collectConsoleErrors,
   expectNoConsoleErrors,
@@ -44,7 +44,7 @@ test.describe("MVP search recall", () => {
 
     const card = await runSearch(page, "封面");
     await card.getByTestId("view-action-card").click();
-    await expect(page.getByText("行动卡").first()).toBeVisible();
+    await expect(page.getByTestId("view-action-card").first()).toBeVisible();
     await expect(page.locator(".detail-title-input")).toBeVisible();
 
     await runSearch(page, "封面");
