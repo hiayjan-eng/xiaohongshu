@@ -102,28 +102,40 @@ test.describe("classification, saved intent, and on-demand action cards", () => 
     await expectNoConsoleErrors(errors);
   });
 
-  test("old import explains the extension beta requirement and download path", async ({ page, request }) => {
+  test("old import explains the extension beta requirement and download path with simulated handshake", async ({ page, request }) => {
     const errors = collectConsoleErrors(page);
     await page.goto("/old-import");
 
     await expect(page.getByTestId("old-import-extension-warning")).toContainText("桌面浏览器扩展 Beta");
     const download = page.getByRole("link", { name: "下载旧收藏扫描 Beta ZIP" });
     await expect(download).toBeVisible();
-    await expect(download).toHaveAttribute("href", /collection-revival-extension-beta-v0\.2\.0\.zip/);
-    const zipResponse = await request.get("/downloads/collection-revival-extension-beta-v0.2.0.zip");
+    await expect(download).toHaveAttribute("href", /collection-revival-extension-beta-v0\.2\.1\.zip/);
+    const zipResponse = await request.get("/downloads/collection-revival-extension-beta-v0.2.1.zip");
     expect(zipResponse.ok()).toBeTruthy();
     expect((await zipResponse.body()).length).toBeGreaterThan(1000);
 
     await expect(page.getByTestId("extension-connection-status")).toContainText("扩展未连接");
     await page.evaluate(() => {
-      window.postMessage({
-        source: "collection-revival-extension",
-        type: "COLLECTION_REVIVAL_EXTENSION_READY",
-        version: "0.2.0"
-      }, "*");
+      window.addEventListener("message", (event) => {
+        if (event.source !== window) return;
+        if (event.data?.source !== "collection-revival-web") return;
+        if (event.data?.type !== "COLLECTION_REVIVAL_EXTENSION_PING") return;
+        window.postMessage({
+          source: "collection-revival-extension",
+          type: "COLLECTION_REVIVAL_EXTENSION_PONG",
+          requestId: event.data.requestId,
+          extensionVersion: "0.2.1",
+          protocolVersion: "collection-revival-web-bridge-v1",
+          browser: "Chrome",
+          capabilities: ["web-bridge", "xhs-visible-dom-scan"],
+          timestamp: new Date().toISOString()
+        }, window.location.origin);
+      });
     });
+    await page.getByTestId("detect-extension").click();
     await expect(page.getByTestId("extension-connection-status")).toContainText("扩展已连接");
-    await expect(page.getByTestId("extension-connection-status")).toContainText("v0.2.0");
+    await expect(page.getByTestId("extension-connection-status")).toContainText("v0.2.1");
+    await expect(page.getByTestId("extension-diagnostics")).toContainText("PONG");
     await expect(page.getByRole("button", { name: "我已安装，检测扩展" })).toBeVisible();
     await expect(page.getByRole("link", { name: "打开小红书收藏页" })).toBeVisible();
     await expect(page.getByRole("button", { name: "没有扩展？先用新收藏导入测试" })).toBeVisible();
