@@ -1878,6 +1878,31 @@ function OldImportView(props: {
         </div>
       </section>
 
+      <section className="tool-panel single extension-progress-mirror" data-testid="extension-scan-progress">
+        <div className="section-heading-soft">
+          <span><Sparkles size={18} /> 扫描进度同步</span>
+          <small>{syncText}</small>
+        </div>
+        <div className={`extension-progress-track ${scanState?.mode === "all" && scanState?.status === "scanning" ? "indeterminate" : ""}`}>
+          <span style={{ width: `${scanPercent ?? (scanState?.status === "completed" ? 100 : 35)}%` }} />
+        </div>
+        <div className="qa-grid">
+          <Metric label="扫描状态" value={scanState?.status === "scanning" ? "正在扫描" : scanState?.status === "paused" ? "已暂停" : scanState?.status === "completed" ? "已完成" : scanState?.status === "error" ? "异常" : "未开始"} />
+          <Metric label="当前阶段" value={scanStageText} />
+          <Metric label="已发现" value={scanTotal.toString()} />
+          <Metric label="本轮新增" value={(scanState?.lastAdded ?? 0).toString()} />
+          <Metric label="扫描批次" value={(scanState?.batch ?? 0).toString()} />
+          <Metric label="待导入" value={(scanState?.selectedCount ?? 0).toString()} />
+          <Metric label="重复" value={(scanState?.duplicateCount ?? 0).toString()} />
+          <Metric label="缺链接" value={(scanState?.missingLinkCount ?? 0).toString()} />
+          <Metric label="最近更新" value={scanState?.updatedAt ? new Date(scanState.updatedAt).toLocaleTimeString() : "未同步"} />
+        </div>
+        <div className="old-import-actions">
+          <button className="secondary-action" onClick={() => scheduleReconnect("manual-sync")}>重新连接并同步</button>
+          <button className="secondary-action" onClick={() => requestScanStatus()}>只同步扫描状态</button>
+        </div>
+      </section>
+
       <details className="tool-panel single extension-diagnostics" data-testid="extension-diagnostics">
         <summary>连接诊断</summary>
         <div className="diagnostic-grid">
@@ -3639,7 +3664,6 @@ function buildInsights(items: SavedItem[]) {
     categoryDistribution
   };
 }
-
 
 
 
