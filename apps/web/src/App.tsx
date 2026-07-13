@@ -31,6 +31,7 @@ import {
   createSearchLog,
   STORAGE_KEY,
   loadAppState,
+  migrateScannedTextV2,
   persistAppState,
   updateItemStatus
 } from "@revival/database";
@@ -58,6 +59,9 @@ import {
   type ImportSource,
   type ItemStatus,
   type Plan,
+  type PlanCard,
+  type PlanCardStatus,
+  type ClassificationCorrection,
   type RevivalRecommendation,
   type ReviveIntent,
   type SavedIntent,
@@ -196,9 +200,12 @@ export function App() {
   const [statusFilter, setStatusFilter] = useState<ItemStatus | "all">("all");
   const [poolViewMode, setPoolViewMode] = useState<PoolViewMode>("cards");
   const [toast, setToast] = useState("");
+  const [lastCorrectionUndoState, setLastCorrectionUndoState] = useState<AppState | null>(null);
   const [recommendationLimit, setRecommendationLimit] = useState(3);
   const [mobileTab, setMobileTab] = useState<"today" | "search" | "import" | "pool" | "plans" | "settings">("today");
   const [mobileQuery, setMobileQuery] = useState("");
+  const [selectedAlbumId, setSelectedAlbumId] = useState<string | undefined>(() => getInitialAlbumId());
+  const [developerMode, setDeveloperMode] = useState(() => detectDeveloperMode());
   const [themeId, setThemeId] = useState<ThemePresetId>(() => getStoredThemeId(typeof window === "undefined" ? undefined : window.localStorage));
   const [unlockedAchievements, setUnlockedAchievements] = useState<UnlockedAchievementMap>(() =>
     loadUnlockedAchievements(typeof window === "undefined" ? undefined : window.localStorage)
@@ -218,6 +225,14 @@ export function App() {
     []
   );
   const syncStatus = useMemo(() => getSyncRuntimeStatus(import.meta.env as Record<string, unknown>), []);
+  const visibleNavItems = useMemo(
+    () => navItems.filter((item) => developerMode || (item.key !== "qa" && item.key !== "real-test")),
+    [developerMode]
+  );
+  const todaysPlanCards = useMemo(
+    () => (state.planCards ?? []).filter((planCard) => isSameDate(planCard.plannedDate, new Date()) && planCard.status !== "cancelled"),
+    [state.planCards]
+  );
 
   useEffect(() => {
     persistAppState(state, typeof window === "undefined" ? undefined : window.localStorage);
@@ -669,9 +684,12 @@ export function App() {
   function clearLocalTestData() {
     if (!window.confirm("这只会清空当前浏览器里的测试数据，不影响线上项目代码。确定清空吗？")) return;
     setState({
+      schemaVersion: state.schemaVersion,
       user: state.user,
       savedItems: [],
       actionCards: [],
+      planCards: [],
+      classificationCorrections: [],
       searchLogs: [],
       smartAlbums: [],
       importBatches: [],
@@ -706,12 +724,21 @@ export function App() {
     }
     setToast("正在用当前规则重新整理旧收藏...");
     try {
+      const migration = migrateScannedTextV2(state);
       const now = new Date().toISOString();
-      const savedItems = await Promise.all(state.savedItems.map(async (item) => {
+      const savedItems = await Promise.all(migration.state.savedItems.map(async (item) => {
         const input = parseShareInput({ sourceUrl: item.sourceUrl, title: item.title, rawShareText: item.rawShareText, userNote: item.userNote });
         const classification = await Promise.resolve(aiClient.classifyAndGenerateActionCard(input));
         const savedItem = createSavedItemRecord(state.user.id, input, classification, new Date(item.createdAt || now));
-        return { ...savedItem, id: item.id, status: item.status, createdAt: item.createdAt, updatedAt: now };
+        return {
+          ...savedItem,
+          id: item.id,
+          status: item.status,
+          createdAt: item.createdAt,
+          updatedAt: now,
+          rawTitle: item.rawTitle || item.title,
+          cleanedTitle: savedItem.title
+        };
       }));
       const savedItemById = new Map(savedItems.map((item) => [item.id, item]));
       const actionCards = state.actionCards.map((card) => {
@@ -726,7 +753,7 @@ export function App() {
       }));
       setSelectedItemId(savedItems[0]?.id);
       setLastImportResult(null);
-      setToast(`已重新整理 ${savedItems.length} 条本地收藏`);
+      setToast(`已重新整理 ${savedItems.length} 条本地收藏，修复标题 ${migration.repairedTitleCount} 条`);
     } catch {
       setToast("重新整理时遇到问题，当前数据已保留。可以先导出数据或清空本地测试数据。");
     }
@@ -786,7 +813,7 @@ export function App() {
         entry.id === albumId ? { ...entry, status: "confirmed", updatedAt: new Date().toISOString() } : entry
       )
     }));
-    setToast("已确认创建智能专辑");
+    setToast("已确认这个专辑");
   }
 
   function archiveSmartAlbum(albumId: string) {
@@ -804,16 +831,21 @@ export function App() {
     if (!currentItem) return;
 
     let patch: Partial<SavedItem> | undefined;
+    let correctedDomain = currentItem.contentDomain;
+    let correctedSubDomain = currentItem.contentSubDomain;
+    let correctedIntent = currentItem.savedIntent;
     if (mode === "domain") {
       const domainInput = window.prompt(`修改内容主题（可选：${CATEGORIES.join(" / ")}）`, currentItem.contentDomain)?.trim();
       if (!domainInput) return;
       const safeDomain = (CATEGORIES as readonly string[]).includes(domainInput) ? domainInput as Category : "暂存";
       const subDomainInput = window.prompt("修改二级主题，例如 AI工具 / 展览活动 / 封面设计", currentItem.contentSubDomain)?.trim();
+      correctedDomain = safeDomain;
+      correctedSubDomain = subDomainInput || (safeDomain === "暂存" ? "待补充备注" : currentItem.contentSubDomain);
       patch = {
         contentDomain: safeDomain,
         category: safeDomain,
-        contentSubDomain: subDomainInput || (safeDomain === "暂存" ? "待补充备注" : currentItem.contentSubDomain),
-        subCategory: subDomainInput || (safeDomain === "暂存" ? "待补充备注" : currentItem.contentSubDomain),
+        contentSubDomain: correctedSubDomain,
+        subCategory: correctedSubDomain,
         confidence: "medium",
         classificationConfidence: "medium",
         whyThisDomain: "用户在智能专辑中手动纠正过内容主题。",
@@ -823,6 +855,7 @@ export function App() {
       const intentInput = window.prompt(`修改收藏用途（可选：${SAVED_INTENTS.join(" / ")}）`, currentItem.savedIntent)?.trim();
       if (!intentInput) return;
       const safeIntent = (SAVED_INTENTS as readonly string[]).includes(intentInput) ? intentInput as SavedIntent : "暂时保存";
+      correctedIntent = safeIntent;
       patch = {
         savedIntent: safeIntent,
         intent: safeIntent,
@@ -831,17 +864,91 @@ export function App() {
     }
 
     const now = new Date().toISOString();
+    const correction: ClassificationCorrection = {
+      id: createLocalId("correction"),
+      savedItemId: itemId,
+      previousDomain: currentItem.contentDomain,
+      previousSubDomain: currentItem.contentSubDomain,
+      previousIntent: currentItem.savedIntent,
+      correctedDomain,
+      correctedSubDomain,
+      correctedIntent,
+      tags: currentItem.keywords.slice(0, 8),
+      textSnapshot: [currentItem.title, currentItem.rawShareText, currentItem.userNote].filter(Boolean).join(" "),
+      createdAt: now
+    };
+    const previousSnapshot = state;
     setState((current) => {
       const savedItems = current.savedItems.map((item) =>
-        item.id === itemId ? { ...item, ...patch, updatedAt: now } : item
+        item.id === itemId ? { ...item, ...patch, searchableText: rebuildItemSearchableText({ ...item, ...patch }), updatedAt: now } : item
       );
       return {
         ...current,
         savedItems,
+        classificationCorrections: [correction, ...(current.classificationCorrections ?? [])],
         smartAlbums: mergeGeneratedSmartAlbums(current.smartAlbums ?? smartAlbums, savedItems)
       };
     });
-    setToast(mode === "domain" ? "已按新的内容主题重新整理专辑" : "已按新的收藏用途重新整理专辑");
+    setLastCorrectionUndoState(previousSnapshot);
+    setToast(mode === "domain" ? "已按新的内容主题重新整理专辑，可在专辑详情撤销" : "已按新的收藏用途重新整理专辑，可在专辑详情撤销");
+  }
+
+  function undoLastClassificationChange() {
+    if (!lastCorrectionUndoState) {
+      setToast("暂无可撤销的分类修改");
+      return;
+    }
+    setState(lastCorrectionUndoState);
+    setLastCorrectionUndoState(null);
+    setToast("已撤销上次分类修改");
+  }
+
+  function addActionCardToPlan(cardId: string) {
+    const card = state.actionCards.find((entry) => entry.id === cardId);
+    const item = state.savedItems.find((entry) => entry.id === card?.savedItemId);
+    if (!card || !item) return;
+    const dateInput = window.prompt("准备哪天做？可填：今天 / 明天 / 本周 / 2026-07-20", "今天")?.trim() || "今天";
+    const estimatedInput = window.prompt("预计用时（分钟）：10 / 20 / 30 / 60", parseEstimatedMinutes(card.estimatedTime).toString())?.trim() || "20";
+    const nextAction = window.prompt("下一步行动，可以微调", card.nextAction)?.trim() || card.nextAction;
+    const now = new Date();
+    const planCard: PlanCard = {
+      id: createLocalId("plan_card"),
+      savedItemId: item.id,
+      actionCardId: card.id,
+      title: card.title,
+      plannedDate: parsePlanDate(dateInput, now).toISOString(),
+      estimatedMinutes: clampEstimatedMinutes(Number(estimatedInput)),
+      oneNextStep: nextAction,
+      doneCriteria: card.doneCriteria,
+      status: "planned",
+      reminderEnabled: false,
+      createdAt: now.toISOString()
+    };
+    setState((current) => ({
+      ...current,
+      planCards: [planCard, ...(current.planCards ?? [])],
+      savedItems: current.savedItems.map((entry) =>
+        entry.id === item.id ? { ...entry, status: entry.status === "not_started" ? "today" : entry.status, updatedAt: now.toISOString() } : entry
+      )
+    }));
+    setToast(isSameDate(planCard.plannedDate, new Date()) ? "已加入今天的计划卡" : "已加入轻量计划卡");
+  }
+
+  function updatePlanCardStatus(planCardId: string, status: PlanCardStatus) {
+    const now = new Date().toISOString();
+    setState((current) => ({
+      ...current,
+      planCards: (current.planCards ?? []).map((planCard) =>
+        planCard.id === planCardId ? { ...planCard, status, completedAt: status === "done" ? now : planCard.completedAt } : planCard
+      )
+    }));
+    if (status === "done") unlockAchievements(["plan_finished"]);
+  }
+
+  function selectAlbum(albumId: string) {
+    setSelectedAlbumId(albumId);
+    setActiveView("albums");
+    window.history.pushState(null, "", `/albums/${encodeURIComponent(albumId)}`);
   }
   if (activeView === "welcome") {
     return (
@@ -871,7 +978,7 @@ export function App() {
         </button>
 
         <nav className="nav-list" aria-label="主导航">
-          {navItems.map((item) => {
+          {visibleNavItems.map((item) => {
             const Icon = item.icon;
             return (
               <button key={item.key} className={activeView === item.key ? "nav-item active" : "nav-item"} onClick={() => setActiveView(item.key)}>
@@ -919,6 +1026,8 @@ export function App() {
               recentSearches={[...state.searchLogs].slice(-4).reverse()}
               actionCards={state.actionCards}
               plans={plans}
+              planCards={todaysPlanCards}
+              updatePlanCardStatus={updatePlanCardStatus}
               insights={insights}
               revivalStats={revivalStats}
               achievements={unlockedAchievementDisplays}
@@ -1002,6 +1111,7 @@ export function App() {
               updateCardField={updateCardField}
               updateTaskStatus={updateTaskStatus}
               regenerateActionCard={regenerateActionCard}
+              addActionCardToPlan={addActionCardToPlan}
               setActiveView={setActiveView}
               onContinueImport={continueImport}
             />
@@ -1038,6 +1148,10 @@ export function App() {
               archiveAlbum={archiveSmartAlbum}
               regenerateSmartAlbums={regenerateSmartAlbums}
               correctSavedItemClassification={correctSavedItemClassification}
+              selectedAlbumId={selectedAlbumId}
+              onSelectAlbum={selectAlbum}
+              undoLastClassificationChange={undoLastClassificationChange}
+              canUndoClassificationChange={Boolean(lastCorrectionUndoState)}
             />
           )}
 
@@ -1079,6 +1193,9 @@ export function App() {
               setThemeId={setThemeId}
               aiStatus={aiStatus}
               syncStatus={syncStatus}
+              developerMode={developerMode}
+              setDeveloperMode={setDeveloperMode}
+              openInternalTool={(view) => setActiveView(view)}
             />
           )}
 
@@ -1232,6 +1349,8 @@ function DashboardView(props: {
   recentSearches: SearchLog[];
   actionCards: ActionCard[];
   plans: Plan[];
+  planCards: PlanCard[];
+  updatePlanCardStatus: (planCardId: string, status: PlanCardStatus) => void;
   insights: ReturnType<typeof buildInsights>;
   revivalStats: ReturnType<typeof buildRevivalStats>;
   achievements: AchievementDisplay[];
@@ -1287,6 +1406,23 @@ function DashboardView(props: {
               <EmptyState title="今天没有待复活收藏" text="导入一条新收藏，系统会帮你生成今天可以做的一步。" />
             )}
           </div>
+          {props.planCards.length > 0 && (
+            <div className="plan-card-stack" data-testid="today-plan-cards">
+              <div className="section-heading-soft">
+                <span><CalendarCheck size={18} /> 今天的计划卡</span>
+                <small>{props.planCards.length} 张主动加入</small>
+              </div>
+              {props.planCards.map((planCard) => (
+                <article className="plan-mini-row" key={planCard.id}>
+                  <strong>{planCard.title}</strong>
+                  <span>{planCard.estimatedMinutes} 分钟 · {planCard.oneNextStep}</span>
+                  <button onClick={() => props.updatePlanCardStatus(planCard.id, planCard.status === "done" ? "planned" : "done")}>
+                    {planCard.status === "done" ? "已完成" : "完成"}
+                  </button>
+                </article>
+              ))}
+            </div>
+          )}
         </section>
 
         <section className="quick-revive-board reveal-up delay-2">
@@ -3666,9 +3802,3 @@ function buildInsights(items: SavedItem[]) {
     categoryDistribution
   };
 }
-
-
-
-
-
-
