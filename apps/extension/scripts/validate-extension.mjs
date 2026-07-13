@@ -27,7 +27,7 @@ execFileSync(process.execPath, ["--check", fileURLToPath(new URL("../src/content
 const popupJs = readFileSync(new URL("../src/popup.js", import.meta.url), "utf8");
 const contentScript = readFileSync(new URL("../src/content-script.js", import.meta.url), "utf8");
 const popupMarkers = ["CHECKPOINT_KEY", "pauseScan", "resumeScan", "browser-extension-beta", "autoScrollToggle", "clearCheckpoint"];
-const contentMarkers = ["REVIVAL_GET_PAGE_STATUS", "REVIVAL_SCAN_STEP", "scrollOneStep", "blocked", "captcha"];
+const contentMarkers = ["REVIVAL_GET_PAGE_STATUS", "REVIVAL_SCAN_STEP", "scrollOneStep", "blocked", "验证码"];
 for (const marker of popupMarkers) {
   if (!popupJs.includes(marker)) throw new Error(`Missing popup beta capability marker: ${marker}`);
 }
