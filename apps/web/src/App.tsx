@@ -1770,7 +1770,13 @@ function OldImportView(props: {
       `最后一次 requestId：${extensionStatus.requestId || "无"}`,
       `最后一次检测时间：${extensionStatus.lastCheckedAt || "未检测"}`,
       `当前失败原因：${extensionStatus.failureReason || "无"}`,
-      `扩展能力：${extensionStatus.capabilities.join(", ") || "未检测到"}`
+      `扩展能力：${extensionStatus.capabilities.join(", ") || "未检测到"}`,
+      `扫描同步状态：${syncState}`,
+      `扫描状态：${scanState?.status || "未同步"}`,
+      `扫描阶段：${scanState?.stage || "未同步"}`,
+      `已发现数量：${scanState?.totalFound ?? scanState?.items?.length ?? 0}`,
+      `待导入数量：${scanState?.selectedCount ?? 0}`,
+      `最近更新时间：${scanState?.updatedAt || "无"}`
     ].join("\n");
     void navigator.clipboard?.writeText(report);
   }
@@ -1797,6 +1803,26 @@ function OldImportView(props: {
         "点击“检测扩展”。"
       ];
   const statusClass = extensionStatus.connected ? "extension-connection-card connected" : extensionStatus.failureReason ? "extension-connection-card warning" : "extension-connection-card";
+  const scanTotal = scanState?.totalFound ?? scanState?.items?.length ?? 0;
+  const scanLimit = scanState?.limit || undefined;
+  const scanPercent = scanState?.mode === "all" || !scanLimit ? undefined : Math.min(100, Math.round((scanTotal / Math.max(1, scanLimit)) * 100));
+  const scanStageText = ({
+    recognizing: "识别页面",
+    loading: "加载收藏",
+    extracting: "提取卡片",
+    deduping: "清理去重",
+    complete: "扫描完成",
+    error: "扫描异常"
+  } as Record<string, string>)[scanState?.stage || ""] || "等待同步";
+  const syncText = syncState === "restoring"
+    ? "正在恢复连接..."
+    : syncState === "syncing"
+      ? "正在同步刚才的扫描结果..."
+      : syncState === "synced"
+        ? "扫描结果已同步"
+        : syncState === "failed"
+          ? "暂时没有同步成功，可点击重新连接。"
+          : "等待扩展同步";
 
   return (
     <>
@@ -3613,7 +3639,6 @@ function buildInsights(items: SavedItem[]) {
     categoryDistribution
   };
 }
-
 
 
 
