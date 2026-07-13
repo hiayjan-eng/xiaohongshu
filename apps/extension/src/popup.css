@@ -284,3 +284,43 @@ button:disabled {
 .scan-choice span {
   min-width: 0;
 }
+.actions.triple {
+  grid-template-columns: 1fr 1fr 0.75fr;
+}
+
+.actions.double {
+  grid-template-columns: 1fr 1fr;
+}
+
+.secondary.wide {
+  width: 100%;
+}
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.toggle-row input {
+  width: 16px;
+  min-height: 16px;
+  accent-color: var(--primary);
+}
+
+.select-actions {
+  align-items: center;
+}
+
+.select-actions input {
+  min-height: 30px;
+  flex: 1;
+  font-size: 12px;
+}
