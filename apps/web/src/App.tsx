@@ -392,13 +392,18 @@ export function App() {
 
   async function importExtensionPayload(payload: ExtensionImportPayload) {
     const scannedItems = normalizeExtensionItems(payload.items);
+    const scanDuplicateCount = Math.max(0, payload.items.filter((item) => item.sourceUrl || item.title || item.visibleText).length - scannedItems.length);
     if (scannedItems.length === 0) {
       setToast("没有发现可导入的收藏卡片");
       return;
     }
 
     try {
-      const result = await runImportPipeline("extension_scan", "旧收藏扫描 Beta", extensionItemsToImportItems(scannedItems));
+      const result = annotateScanDuplicateStats(
+        await runImportPipeline("extension_scan", "旧收藏扫描 Beta", extensionItemsToImportItems(scannedItems)),
+        payload.items.length,
+        scanDuplicateCount
+      );
       commitImportResult(result);
       setSelectedItemId(result.importedSavedItems[0]?.id);
       setActiveView("old-import");
@@ -3150,6 +3155,20 @@ function normalizeExtensionItems(items: ExtensionScannedItem[]): ExtensionScanne
     .slice(0, 80);
 }
 
+function annotateScanDuplicateStats(result: ProcessImportBatchResult, rawCount: number, scanDuplicateCount: number): ProcessImportBatchResult {
+  if (scanDuplicateCount <= 0) return result;
+  const duplicateCount = result.batch.duplicateCount + scanDuplicateCount;
+  return {
+    ...result,
+    batch: {
+      ...result.batch,
+      rawCount: Math.max(result.batch.rawCount, rawCount),
+      duplicateCount,
+      status: result.batch.importedCount > 0 ? "partially_completed" : result.batch.status
+    }
+  };
+}
+
 function mergeSmartAlbums(existingAlbums: SmartAlbum[], generatedAlbums: SmartAlbum[]): SmartAlbum[] {
   const generatedById = new Map(generatedAlbums.map((album) => [album.id, album]));
   const merged = generatedAlbums.map((album) => {
@@ -3302,8 +3321,6 @@ function buildInsights(items: SavedItem[]) {
     categoryDistribution
   };
 }
-
-
 
 
 
