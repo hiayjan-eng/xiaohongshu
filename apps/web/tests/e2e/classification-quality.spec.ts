@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { collectConsoleErrors, expectNoConsoleErrors, importTestNote, readAppState, resetDemoData } from "./helpers";
+import { collectConsoleErrors, expectNoConsoleErrors, importTestNote, readAppState, resetDemoData, reviveImportedItem } from "./helpers";
 
 const genericNextActionPattern = /拆解一个参考案例|记录\s*3\s*个可模仿|先了解一下|整理成计划/;
 
@@ -11,72 +11,73 @@ const classificationCases = [
       rawShareText: "收藏一个小红书封面设计教程，适合做内容运营和图文排版参考",
       userNote: "之后做震海会小红书图文时可以参考"
     },
-    category: "内容创作",
-    subCategoryPattern: /小红书运营|封面设计|选题文案/
+    domain: "内容创作",
+    subDomainPattern: /小红书运营|封面设计|选题文案/,
+    intentPattern: /内容创作参考|想学习|想复现/
   },
   {
     note: {
-      sourceUrl: "https://www.xiaohongshu.com/explore/quality-ai-workflow",
-      title: "AI工具日常工作流入门",
-      rawShareText: "ChatGPT 提示词和自动化工作流教程，适合提升办公效率",
-      userNote: "想先复现第一个案例"
+      sourceUrl: "https://www.xiaohongshu.com/explore/quality-ai-cut-video",
+      title: "不用剪辑软件，100% AI 剪辑视频教程",
+      rawShareText: "AI 剪辑视频教程，不用传统剪辑软件也能做短视频",
+      userNote: "想学习或复现这个剪辑方法"
     },
-    category: "AI 与效率",
-    subCategoryPattern: /AI 工具|效率工作流/
+    domain: "内容创作",
+    subDomainPattern: /视频剪辑/,
+    intentPattern: /想学习|想复现/
   },
   {
     note: {
-      sourceUrl: "https://www.xiaohongshu.com/explore/quality-shenzhen-weekend",
-      title: "深圳周末展览路线",
-      rawShareText: "深圳周末展览、市集和咖啡路线，适合半日出行",
-      userNote: "周末想去，先看交通和预算"
+      sourceUrl: "https://www.xiaohongshu.com/explore/quality-ai-roundtable-prompt",
+      title: "长脑子最快的方式就是跟顶级好脑聊天",
+      rawShareText: "使用 Jung、Mankiw、Munger、Musk 多角色圆桌 Prompt 分析工作安排和决策",
+      userNote: "想复现这个 prompt，用来做工作安排和商业认知决策"
     },
-    category: "出行与探店",
-    subCategoryPattern: /展览活动|周末去处|美食探店/
-  },
-  {
-    note: {
-      sourceUrl: "https://www.xiaohongshu.com/explore/quality-low-cal-dinner",
-      title: "低卡晚餐备餐",
-      rawShareText: "低卡晚餐和减脂备餐食材清单，适合工作日做饭",
-      userNote: "想整理成购物清单"
-    },
-    category: "饮食与健康",
-    subCategoryPattern: /低卡备餐|菜谱做饭/
+    domain: "AI 与效率",
+    subDomainPattern: /Prompt 工程|决策辅助|多角色推演/,
+    intentPattern: /工作决策参考|想复现/
   },
   {
     note: {
       sourceUrl: "https://www.xiaohongshu.com/explore/quality-relationship-needs",
       title: "关系中如何表达需求",
       rawShareText: "亲密关系沟通，如何表达需求和边界感，适合手帐复盘",
-      userNote: "想写一个自己的例子"
+      userNote: "以后写文章也可能参考这个观点"
     },
-    category: "情绪与关系",
-    subCategoryPattern: /亲密关系|情绪成长|自我观察/
+    domain: "情绪与关系",
+    subDomainPattern: /亲密关系|情绪成长|自我观察/,
+    intentPattern: /内容创作参考|情绪共鸣/
   }
 ];
 
-test.describe("classification and action-card quality", () => {
-  test("classifies real-like Xiaohongshu imports into primary and secondary categories", async ({ page }) => {
+test.describe("classification, saved intent, and on-demand action cards", () => {
+  test("separates content domain from saved intent for real-like imports", async ({ page }) => {
     const errors = collectConsoleErrors(page);
     await resetDemoData(page);
 
     for (const entry of classificationCases) {
       const item = await importTestNote(page, entry.note);
-      const state = await readAppState(page);
-      const savedItem = state.savedItems.find((candidate) => candidate.id === item.id);
-      const actionCard = state.actionCards.find((card) => card.savedItemId === item.id);
+      let state = await readAppState(page);
+      let savedItem = state.savedItems.find((candidate) => candidate.id === item.id);
 
-      expect(savedItem?.category).toBe(entry.category);
-      expect(savedItem?.subCategory).toMatch(entry.subCategoryPattern);
-      expect(savedItem?.category).not.toBe("暂存");
-      expect(savedItem?.whyThisCategory).toBeTruthy();
-      expect(actionCard?.title).not.toMatch(/行动卡行动卡|其他行动卡行动卡/);
-      expect(actionCard?.nextAction).toBeTruthy();
-      expect(actionCard?.nextAction).not.toMatch(genericNextActionPattern);
-      expect(actionCard?.openOriginalFocus?.length).toBeGreaterThan(0);
-      expect(actionCard?.output).toBeTruthy();
-      expect(actionCard?.fields).toHaveProperty("打开原帖后重点看什么");
+      expect(savedItem?.contentDomain).toBe(entry.domain);
+      expect(savedItem?.contentSubDomain).toMatch(entry.subDomainPattern);
+      expect(savedItem?.savedIntent).toMatch(entry.intentPattern);
+      expect(savedItem?.contentDomain).not.toBe("暂存");
+      expect(savedItem?.whyThisDomain).toBeTruthy();
+      expect(savedItem?.whyThisIntent).toBeTruthy();
+      expect(state.actionCards.some((card) => card.savedItemId === item.id)).toBe(false);
+
+      const actionCard = await reviveImportedItem(page, item.id);
+      state = await readAppState(page);
+      savedItem = state.savedItems.find((candidate) => candidate.id === item.id);
+      expect(actionCard.title).not.toMatch(/行动卡行动卡|其他行动卡行动卡/);
+      expect(actionCard.nextAction).toBeTruthy();
+      expect(actionCard.nextAction).not.toMatch(genericNextActionPattern);
+      expect(actionCard.openOriginalFocus?.length).toBeGreaterThan(0);
+      expect(actionCard.output).toBeTruthy();
+      expect(actionCard.fields).toHaveProperty("打开原帖后重点看什么");
+      expect(savedItem?.contentDomain).toBe(entry.domain);
     }
 
     await expectNoConsoleErrors(errors);
@@ -93,7 +94,7 @@ test.describe("classification and action-card quality", () => {
     await page.getByTestId("import-submit").click();
 
     await expect(page.getByTestId("import-success-panel")).toContainText("整理完成");
-    await expect(page.getByTestId("import-success-panel")).toContainText("打开原帖后重点看");
+    await expect(page.getByTestId("import-success-panel")).toContainText("收藏用途");
     await expect(page.getByTestId("continue-import")).toBeVisible();
     await page.getByTestId("continue-import").click();
     await expect(page.getByTestId("import-title")).toHaveValue("");
@@ -101,12 +102,12 @@ test.describe("classification and action-card quality", () => {
     await expectNoConsoleErrors(errors);
   });
 
-  test("old import clearly explains the local extension beta requirement", async ({ page }) => {
+  test("old import explains the extension beta requirement and download path", async ({ page }) => {
     const errors = collectConsoleErrors(page);
     await page.goto("/old-import");
 
-    await expect(page.getByTestId("old-import-extension-warning")).toContainText("需要本地浏览器扩展 Beta");
-    await expect(page.getByText("不是 Chrome / Edge 商店正式扩展")).toBeVisible();
+    await expect(page.getByTestId("old-import-extension-warning")).toContainText("桌面浏览器扩展 Beta");
+    await expect(page.getByRole("link", { name: "下载旧收藏扫描 Beta" })).toBeVisible();
     await expect(page.getByRole("button", { name: "没有扩展？先用新收藏导入测试" })).toBeVisible();
 
     await expectNoConsoleErrors(errors);
