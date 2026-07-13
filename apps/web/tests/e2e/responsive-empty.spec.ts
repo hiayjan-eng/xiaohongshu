@@ -7,7 +7,7 @@ test.describe("MVP empty states and responsive basics", () => {
     await seedEmptyState(page);
 
     await page.goto("/dashboard");
-    await expect(page.getByRole("heading", { name: "今天，从一条收藏开始" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "先把旧收藏捡回来" })).toBeVisible();
     await expect(page.getByText("今天没有待复活收藏")).toBeVisible();
     await expect(page.getByText("收藏池还是空的")).toBeVisible();
 
@@ -37,7 +37,7 @@ test.describe("MVP empty states and responsive basics", () => {
       const errors = collectConsoleErrors(page);
       await page.setViewportSize({ width: viewport.width, height: viewport.height });
       await page.goto("/dashboard");
-      await expect(page.getByRole("heading", { name: "今天，从一条收藏开始" })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "先把旧收藏捡回来" })).toBeVisible();
       const globalSearch = page.getByRole("textbox", { name: "全局搜索" });
       await expect(globalSearch).toBeVisible();
       await globalSearch.fill("剪辑");
