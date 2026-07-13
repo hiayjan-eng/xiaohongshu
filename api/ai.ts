@@ -318,7 +318,18 @@ function inferCategory(text: string): { category: string; subCategory: string; i
     ["技能学习", "技能练习", ["教程", "学习", "剪辑", "摄影", "英语", "写作", "编程", "设计"], "用户可能想学习一个具体技能并完成一次小练习"]
   ];
   const normalized = text.toLowerCase();
-  const hit = rules.find(([, , terms]) => terms.some((term) => normalized.includes(term.toLowerCase())));
+  const scored = rules
+    .map((rule, index) => ({
+      rule,
+      index,
+      score: rule[2].reduce((sum, term) => {
+        const normalizedTerm = term.toLowerCase();
+        return normalized.includes(normalizedTerm) ? sum + (term.length >= 4 ? 2 : 1) : sum;
+      }, 0)
+    }))
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score || a.index - b.index);
+  const hit = scored[0]?.rule;
   if (!hit) return { category: "暂存", subCategory: "待补充备注", intent: "信息不足，先作为待补充收藏保存", whyThisCategory: "当前没有足够明确的主题词。" };
   return { category: hit[0], subCategory: hit[1], intent: hit[3], whyThisCategory: `命中了「${hit[1]}」相关线索。` };
 }
