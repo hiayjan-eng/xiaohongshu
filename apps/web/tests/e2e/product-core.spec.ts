@@ -4,9 +4,9 @@ import { collectConsoleErrors, expectNoConsoleErrors, importTestNote, readAppSta
 test.describe("product core stabilization", () => {
   test("hides internal QA and real-test from the normal sidebar but keeps routes accessible", async ({ page }) => {
     const errors = collectConsoleErrors(page);
-    await page.goto("/dashboard");
+    await page.goto("/dashboard?dev=0");
     await page.evaluate(() => window.localStorage.removeItem("developerMode"));
-    await page.reload();
+    await page.goto("/dashboard?dev=0");
 
     await expect(page.getByRole("navigation", { name: "主导航" })).not.toContainText("QA");
     await expect(page.getByRole("navigation", { name: "主导航" })).not.toContainText("真实试用");
