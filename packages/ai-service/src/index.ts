@@ -513,7 +513,7 @@ function inferSavedIntent(text: string, input: ShareInput, inference: CategoryIn
   ].filter((item): item is SavedIntent => Boolean(item));
   return {
     savedIntent: primary,
-    secondaryIntents: unique([primary, ...secondary]).filter((intent) => intent !== primary),
+    secondaryIntents: unique([primary, ...secondary]).filter((intent) => intent !== primary) as SavedIntent[],
     whyThisIntent: buildIntentReason(primary, input, inference)
   };
 }
@@ -664,7 +664,7 @@ function generateActionCard(category: Category, subCategory: string, input: Shar
     return card(common, relationLike ? "自我观察卡" : "思考笔记卡", relationLike ? `把“${topic}”转成一条自我观察，而不是停留在被触动。` : `把“${topic}”转成一条自己的笔记或追问。`, relationLike ? "你可能是被某个观点击中，需要把它放回自己的真实处境里。" : "你可能想保留一个观点，但真正有用的是写出自己的理解。", relationLike ? "打开原帖，摘出 1 句最触动你的观点；写 1 个自己的例子，并判断它适合进入手帐、复盘还是待办。" : "打开原帖，摘出 1 个最想保留的观点；用自己的话改写 3 句，并写下 1 个还想追问的问题。", relationLike ? ["最触动的观点", "作者给的例子", "适用边界", "评论区补充"] : ["核心观点", "书名/章节", "作者例子", "可继续追问的问题"], relationLike ? "1 条自我观察记录" : "3 句话笔记 + 1 个追问", "15分钟", "低", relationLike ? "写下观点、自己的例子和它归属手帐/复盘/待办的判断。" : "完成 3 句改写和 1 个追问。", "不要把它变成空泛鸡汤，也不要要求自己立刻解决整个问题。", "如果不知道哪里触动你，先写下当时为什么收藏它。", relationLike ? "如果它和真实关系有关，再选一个更温和的表达动作。" : "如果这个追问有价值，把它加入读书或写作素材。", [task("摘一句", relationLike ? "摘出最触动你的观点。" : "摘出最想保留的观点。", "4分钟"), task("写自己的例子", relationLike ? "写一个最近发生在自己身上的例子。" : "用自己的话改写 3 句。", "8分钟"), task("决定去处", relationLike ? "判断它进手帐、复盘还是待办。" : "写下一个继续追问的问题。", "3分钟")], { 核心观点: topic });
   }
 
-  return buildLowInfoCard(topic, input, keywords, intent);
+  return buildLowInfoCard(topic, input, keywords, String(savedIntent));
 }
 
 function buildLowInfoCard(topic: string, input: ShareInput, keywords: string[], intent: string): ActionCardDraft {
