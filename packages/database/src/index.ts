@@ -162,7 +162,7 @@ export function createInitialDemoData(): AppState {
     return createImportedRecords(DEFAULT_USER.id, input, classifyAndGenerateActionCard(input), date);
   });
 
-return {
+  return {
     schemaVersion: APP_SCHEMA_VERSION,
     user: DEFAULT_USER,
     savedItems: records.map((record, index) => ({
@@ -351,18 +351,46 @@ function normalizeAppState(state: AppState): AppState {
 }
 
 function normalizeSavedItem(item: SavedItem): SavedItem {
-  const raw = item as SavedItem & { subCategory?: string; whyThisCategory?: string; category?: string };
-  const category = normalizeCategoryValue(raw.category);
-  const subCategory = category === "暂存" && (!raw.subCategory || raw.subCategory === "其他") ? "待补充备注" : raw.subCategory || inferSubCategoryFromItem({ ...item, category });
+  const raw = item as SavedItem & {
+    contentDomain?: unknown;
+    contentSubDomain?: string;
+    savedIntent?: unknown;
+    secondaryIntents?: unknown;
+    confidence?: unknown;
+    whyThisDomain?: string;
+    whyThisIntent?: string;
+    subCategory?: string;
+    whyThisCategory?: string;
+    category?: string;
+    intent?: string;
+  };
+  const contentDomain = normalizeCategoryValue(raw.contentDomain ?? raw.category);
+  const contentSubDomain = contentDomain === "暂存" && (!raw.contentSubDomain && (!raw.subCategory || raw.subCategory === "其他"))
+    ? "待补充备注"
+    : cleanLegacyText(raw.contentSubDomain || raw.subCategory || inferSubCategoryFromItem({ ...item, category: contentDomain }));
+  const savedIntent = normalizeSavedIntent(raw.savedIntent ?? raw.intent);
+  const confidence = normalizeConfidence(raw.confidence ?? item.classificationConfidence, contentDomain);
+  const whyThisDomain = raw.whyThisDomain || raw.whyThisCategory || "基于标题、分享文案和备注综合判断内容主题。";
+  const whyThisIntent = raw.whyThisIntent || raw.intent || "基于用户备注和内容线索推断收藏用途。";
+
   return {
     ...item,
     sourcePlatform: detectPlatform(item.sourceUrl),
-    category,
-    subCategory,
+    contentDomain,
+    contentSubDomain,
+    savedIntent,
+    secondaryIntents: Array.isArray(raw.secondaryIntents) ? uniqueSavedIntents(raw.secondaryIntents) : [],
+    confidence,
+    whyThisDomain,
+    whyThisIntent,
+    category: contentDomain,
+    subCategory: contentSubDomain,
     title: normalizeStoredTitle(item.title, item.rawShareText),
-    summary: normalizeStoredSummary(item.summary, category),
-    whyThisCategory: raw.whyThisCategory || "基于标题、分享文案和备注综合判断。",
-    classificationConfidence: item.classificationConfidence ?? (category === "暂存" ? "low" : "medium")
+    summary: normalizeStoredSummary(item.summary, contentDomain),
+    intent: savedIntent,
+    whyThisCategory: whyThisDomain,
+    classificationConfidence: confidence,
+    searchableText: item.searchableText || buildSearchableText(item, contentDomain, contentSubDomain, savedIntent, item.keywords ?? [], item.entities ?? [])
   };
 }
 
@@ -386,15 +414,22 @@ function normalizeActionCard(card: ActionCard, item?: SavedItem): ActionCard {
 }
 
 function normalizeSmartAlbum(album: NonNullable<AppState["smartAlbums"]>[number]): NonNullable<AppState["smartAlbums"]>[number] {
-  const raw = album as NonNullable<AppState["smartAlbums"]>[number] & { priority?: unknown; priorityScore?: number; recommendedItemIds?: string[] };
+  const raw = album as NonNullable<AppState["smartAlbums"]>[number] & { priority?: unknown; priorityScore?: number; recommendedItemIds?: string[]; albumView?: unknown; contentDomain?: unknown; contentSubDomain?: string; savedIntent?: unknown };
   const priorityScore = raw.priorityScore ?? album.savedItemIds.length * 10 + album.keywords.length;
+  const albumView = raw.albumView === "saved_intent" ? "saved_intent" : "content_domain";
+  const contentDomain = normalizeCategoryValue(raw.contentDomain ?? album.category);
   return {
     ...album,
-    albumType: album.albumType || "theme",
+    albumView,
+    contentDomain,
+    contentSubDomain: raw.contentSubDomain || album.keywords[0] || album.albumType || "主题整理",
+    savedIntent: albumView === "saved_intent" ? normalizeSavedIntent(raw.savedIntent ?? album.albumType) : raw.savedIntent ? normalizeSavedIntent(raw.savedIntent) : undefined,
+    category: contentDomain,
+    albumType: album.albumType || (albumView === "saved_intent" ? "intent_album" : "domain_album"),
     recommendedItemIds: raw.recommendedItemIds ?? album.savedItemIds.slice(0, 3),
-    whyThisAlbum: album.whyThisAlbum || "这些收藏指向同一个使用场景，适合合并成一个行动主题。",
+    whyThisAlbum: album.whyThisAlbum || (albumView === "saved_intent" ? "这些收藏的用途相近，适合放在同一个用途视角里查看。" : "这些收藏讲的是相近主题，适合放在同一个主题视角里查看。"),
     whyStartHere: album.whyStartHere || "先从最近保存、信息更完整的 3 条开始。",
-    suggestedFirstAction: album.suggestedFirstAction || "先打开推荐的第一条，完成一个 5-30 分钟的小动作。",
+    suggestedFirstAction: album.suggestedFirstAction || "先挑一条真正想复活的收藏，再按用途生成行动卡。",
     priority: raw.priority === "high" || raw.priority === "medium" || raw.priority === "low" ? raw.priority : priorityScore >= 36 ? "high" : priorityScore >= 18 ? "medium" : "low",
     priorityScore
   };
