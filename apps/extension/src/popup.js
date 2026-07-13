@@ -400,6 +400,7 @@ function normalizeItems(items) {
       author: normalizeText(item.author || "") || undefined,
       noteType: item.noteType || "unknown",
       sourcePlatform: "xiaohongshu",
+      scanKey: item.scanKey,
       isDuplicate: Boolean(item.isDuplicate),
       isMissingTitle: Boolean(item.isMissingTitle || !normalizeText(item.title || "")),
       isMissingLink: Boolean(item.isMissingLink || !item.sourceUrl),
@@ -582,7 +583,7 @@ function getSelectedItems() {
 }
 
 function itemKey(item) {
-  return `${item.sourceUrl || ""}|${item.title || ""}`;
+  return item.scanKey || `${item.sourceUrl || ""}|${item.title || ""}`;
 }
 
 function buildPayload() {
