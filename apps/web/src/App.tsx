@@ -1534,6 +1534,7 @@ function OldImportView(props: {
     connected: boolean;
     checked: boolean;
     readyReceived: boolean;
+    domSignalReceived: boolean;
     pingSent: boolean;
     pongReceived: boolean;
     version?: string;
@@ -1552,6 +1553,7 @@ function OldImportView(props: {
     connected: false,
     checked: false,
     readyReceived: false,
+    domSignalReceived: false,
     pingSent: false,
     pongReceived: false,
     browser: detectBrowserName(),
@@ -1592,13 +1594,37 @@ function OldImportView(props: {
             failureReason: current.readyReceived ? "HANDSHAKE_TIMEOUT" : "PAGE_REFRESH_REQUIRED",
             message: current.readyReceived
               ? "扩展脚本已出现过，但这次没有收到 PONG。请在扩展管理页点击重新加载，再刷新本页后检测。"
-              : "扩展可能已经安装，但当前网页还没有加载连接脚本。请刷新本页面后再次检测。"
+              : "扩展可能已经安装，但当前网页还没有加载连接脚本。请刷新本页面后再次检测；如果仍失败，请点浏览器扩展图标里的“打开或刷新收藏复活扫描页”。"
           }
       );
     }, 3000);
   }
 
   useEffect(() => {
+    function applyDomSignal() {
+      const signal = readExtensionDomSignal();
+      if (!signal) return;
+      setExtensionStatus((current) => ({
+        ...current,
+        checked: true,
+        domSignalReceived: true,
+        readyReceived: current.readyReceived,
+        version: current.version || signal.version,
+        protocolVersion: current.protocolVersion || signal.protocolVersion,
+        browser: current.browser || signal.browser,
+        failureReason: signal.version && signal.version !== EXTENSION_BETA_VERSION ? "EXTENSION_VERSION_TOO_OLD" : current.failureReason,
+        message: current.connected
+          ? current.message
+          : signal.version && signal.version !== EXTENSION_BETA_VERSION
+            ? `检测到旧版扩展 v${signal.version}，请下载 v${EXTENSION_BETA_VERSION}，并在扩展管理页重新加载。`
+            : "已发现扩展脚本痕迹。请点击“检测扩展”，完成 PING / PONG 握手。"
+      }));
+    }
+
+    function handleBridgeEvent() {
+      applyDomSignal();
+    }
+
     function handleExtensionMessage(event: MessageEvent) {
       if (event.source !== window) return;
       if (event.origin !== window.location.origin) return;
@@ -1619,6 +1645,7 @@ function OldImportView(props: {
         connected: requestMatches && !versionTooOld && !protocolMismatch,
         checked: true,
         readyReceived: true,
+        domSignalReceived: current.domSignalReceived || Boolean(readExtensionDomSignal()),
         pongReceived: current.pongReceived || Boolean(requestMatches),
         version,
         protocolVersion,
@@ -1634,12 +1661,16 @@ function OldImportView(props: {
               : "已收到扩展 READY。请点击“检测扩展”，完成 PING / PONG 握手。"
       }));
     }
+    window.addEventListener("collection-revival-extension-bridge", handleBridgeEvent);
     window.addEventListener("message", handleExtensionMessage);
+    applyDomSignal();
     window.postMessage({ source: EXTENSION_WEB_SOURCE, type: "COLLECTION_REVIVAL_EXTENSION_PING", requestId: "initial-ready-check", protocolVersion: EXTENSION_PROTOCOL_VERSION }, window.location.origin);
     const timer = window.setTimeout(() => {
-      setExtensionStatus((current) => current.readyReceived ? current : { ...current, checked: true, failureReason: "CONTENT_SCRIPT_NOT_INJECTED" });
+      applyDomSignal();
+      setExtensionStatus((current) => current.readyReceived || current.domSignalReceived ? current : { ...current, checked: true, failureReason: "CONTENT_SCRIPT_NOT_INJECTED" });
     }, 1000);
     return () => {
+      window.removeEventListener("collection-revival-extension-bridge", handleBridgeEvent);
       window.removeEventListener("message", handleExtensionMessage);
       window.clearTimeout(timer);
       if (timeoutRef.current) window.clearTimeout(timeoutRef.current);
@@ -1657,6 +1688,7 @@ function OldImportView(props: {
       `Web 版本：${EXTENSION_BETA_VERSION}`,
       `Web 协议版本：${EXTENSION_PROTOCOL_VERSION}`,
       `扩展 READY 是否收到：${extensionStatus.readyReceived ? "是" : "否"}`,
+      `DOM 诊断信号是否收到：${extensionStatus.domSignalReceived ? "是" : "否"}`,
       `PING 是否发出：${extensionStatus.pingSent ? "是" : "否"}`,
       `PONG 是否收到：${extensionStatus.pongReceived ? "是" : "否"}`,
       `扩展版本：${extensionStatus.version || "未检测到"}`,
@@ -1725,7 +1757,7 @@ function OldImportView(props: {
             <strong>{extensionStatus.failureReason}</strong>
             <span>{extensionStatus.failureReason === "PAGE_REFRESH_REQUIRED"
               ? "加载或重新加载扩展后，已经打开的网页通常需要刷新一次，content script 才会注入。"
-              : "请按下方安装步骤确认扩展开关、版本和重新加载状态。"}</span>
+              : "请按下方安装步骤确认扩展开关、版本和重新加载状态。也可以点击扩展图标里的“打开或刷新收藏复活扫描页”让扩展主动刷新并注入连接脚本。"}</span>
           </div>
         )}
         <div className="install-tabs">
@@ -1753,6 +1785,7 @@ function OldImportView(props: {
           <Metric label="Web 版本" value={EXTENSION_BETA_VERSION} />
           <Metric label="Web 协议版本" value={EXTENSION_PROTOCOL_VERSION} />
           <Metric label="READY" value={extensionStatus.readyReceived ? "已收到" : "未收到"} />
+          <Metric label="DOM 信号" value={extensionStatus.domSignalReceived ? "已看到" : "未看到"} />
           <Metric label="PING" value={extensionStatus.pingSent ? "已发出" : "未发出"} />
           <Metric label="PONG" value={extensionStatus.pongReceived ? "已收到" : "未收到"} />
           <Metric label="扩展版本" value={extensionStatus.version || "未检测到"} />
@@ -3393,6 +3426,17 @@ function detectBrowserName(): string {
   return "Other";
 }
 
+function readExtensionDomSignal(): { version?: string; protocolVersion?: string; browser?: string } | undefined {
+  if (typeof document === "undefined") return undefined;
+  const dataset = document.documentElement.dataset;
+  if (dataset.collectionRevivalExtensionInstalled !== "true") return undefined;
+  return {
+    version: dataset.collectionRevivalExtensionVersion,
+    protocolVersion: dataset.collectionRevivalExtensionProtocolVersion,
+    browser: dataset.collectionRevivalExtensionBrowser
+  };
+}
+
 function normalizeImportInput(input: ShareInput): ShareInput {
   return parseShareInput(input);
 }
@@ -3495,8 +3539,6 @@ function buildInsights(items: SavedItem[]) {
     categoryDistribution
   };
 }
-
-
 
 
 
