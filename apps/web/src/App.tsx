@@ -1207,6 +1207,10 @@ export function App() {
               correctSavedItemClassification={correctSavedItemClassification}
               selectedAlbumId={selectedAlbumId}
               onSelectAlbum={selectAlbum}
+              removeItemFromAlbum={removeItemFromAlbum}
+              moveItemToTheme={moveItemToTheme}
+              addItemToIntentAlbum={addItemToIntentAlbum}
+              createManualAlbum={createManualAlbum}
               undoLastClassificationChange={undoLastClassificationChange}
               canUndoClassificationChange={Boolean(lastCorrectionUndoState)}
             />
