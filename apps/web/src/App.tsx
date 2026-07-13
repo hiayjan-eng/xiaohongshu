@@ -25,7 +25,7 @@ import { cloneTasksForCard, createPlansFromActionCards, generateSmartAlbums, PLA
 import { createAiClient, type AiRuntimeStatus } from "@revival/ai-service";
 import { extensionItemsToImportItems, parseShareInput, processImportBatchAsync, type ImportInputItem, type ProcessImportBatchResult } from "@revival/import-service";
 import {
-  createImportedRecords,
+  createActionCardRecord,
   createInitialDemoData,
   createSearchLog,
   STORAGE_KEY,
@@ -44,6 +44,7 @@ import { ThemeProvider } from "./theme/ThemeProvider";
 import { getStoredThemeId, getThemePreset, THEME_STORAGE_KEY, type ThemePresetId } from "./theme/themePresets";
 import {
   CATEGORIES,
+  REVIVE_INTENTS,
   STATUS_LABELS,
   type ActionCard,
   type AppState,
@@ -56,6 +57,8 @@ import {
   type ItemStatus,
   type Plan,
   type RevivalRecommendation,
+  type ReviveIntent,
+  type SavedIntent,
   type SavedItem,
   type SearchResult,
   type SearchLog,
@@ -66,7 +69,7 @@ import {
 
 type ViewKey = "welcome" | "dashboard" | "import" | "old-import" | "search" | "pool" | "detail" | "plans" | "albums" | "insights" | "mobile" | "settings" | "real-test" | "qa";
 type PoolViewMode = "cards" | "table";
-type ImportSuccessResult = { item: SavedItem; card: ActionCard };
+type ImportSuccessResult = { item: SavedItem; card?: ActionCard };
 
 const navItems: Array<{ key: ViewKey; label: string; icon: typeof LayoutDashboard }> = [
   { key: "dashboard", label: "今日复活", icon: LayoutDashboard },
@@ -74,7 +77,6 @@ const navItems: Array<{ key: ViewKey; label: string; icon: typeof LayoutDashboar
   { key: "albums", label: "智能专辑", icon: LayoutGrid },
   { key: "search", label: "搜索找回", icon: Search },
   { key: "pool", label: "收藏池", icon: Archive },
-  { key: "plans", label: "计划库", icon: ClipboardList },
   { key: "real-test", label: "真实试用", icon: CheckCircle2 },
   { key: "old-import", label: "旧收藏 Beta", icon: Sparkles },
   { key: "settings", label: "设置", icon: Settings },
@@ -366,7 +368,7 @@ export function App() {
           if (firstItem) {
             const firstCard = result.actionCards.find((card) => card.savedItemId === firstItem.id);
             setSelectedItemId(firstItem.id);
-            if (firstCard) setLastImportResult({ item: firstItem, card: firstCard });
+            setLastImportResult({ item: firstItem, card: firstCard });
             setImportSessionCount((count) => count + result.batch.importedCount);
             setActiveView("import");
             window.setTimeout(() => document.getElementById("import-result-panel")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
@@ -374,7 +376,7 @@ export function App() {
             setLastImportResult(null);
           }
           setImportInput(emptyImport);
-          setToast(result.batch.importedCount > 0 ? "已复活一条收藏" : result.batch.errorMessage || "这条收藏已经在收藏池里了");
+          setToast(result.batch.importedCount > 0 ? "已整理一条收藏，想行动时再复活它" : result.batch.errorMessage || "这条收藏已经在收藏池里了");
         })
         .catch(() => {
           setToast("导入时遇到问题，表单内容已保留。建议补充标题或备注后再试。");
@@ -507,58 +509,70 @@ export function App() {
     }));
   }
 
-  async function regenerateActionCard(itemId: string) {
+  async function reviveSavedItem(itemId: string, reviveIntent?: ReviveIntent) {
     const item = state.savedItems.find((entry) => entry.id === itemId);
-    const card = state.actionCards.find((entry) => entry.savedItemId === itemId);
-    if (!item || !card) {
-      setToast("No action card is available to regenerate");
+    if (!item) {
+      setToast("没有找到这条收藏");
       return;
     }
 
-    setToast("正在重新生成行动卡...");
-    const result = await aiClient.classifyAndGenerateActionCard({
-      sourceUrl: item.sourceUrl,
-      title: item.title,
-      rawShareText: item.rawShareText,
-      userNote: item.userNote
+    const existingCard = state.actionCards.find((entry) => entry.savedItemId === itemId);
+    const intentText = reviveIntent ? `\n你准备拿它做什么：${reviveIntent}` : "";
+    setToast(existingCard ? "正在重新生成行动卡..." : "正在为这条收藏生成行动卡...");
+    const draft = await aiClient.regenerateActionCard(itemId, {
+      savedItem: item,
+      userNote: `${item.userNote}${intentText}`.trim()
     });
-
     const now = new Date().toISOString();
-    setState((current) => ({
-      ...current,
-      savedItems: current.savedItems.map((entry) =>
-        entry.id === itemId
-          ? {
-              ...entry,
-              category: result.category,
-              classificationConfidence: result.confidence,
-              intent: result.intent,
-              summary: result.summary,
-              keywords: result.keywords,
-              entities: result.entities,
-              searchableText: result.searchableText,
-              updatedAt: now
-            }
-          : entry
-      ),
-      actionCards: current.actionCards.map((entry) =>
-        entry.id === card.id
-          ? {
-              ...entry,
-              category: result.category,
-              title: result.actionCard.title,
-              goal: result.actionCard.goal,
-              nextAction: result.actionCard.nextAction,
-              estimatedTime: result.actionCard.estimatedTime,
-              difficulty: result.actionCard.difficulty,
-              fields: result.actionCard.structuredFields,
-              tasks: cloneTasksForCard(entry.id, result.actionCard.tasks),
-              updatedAt: now
-            }
-          : entry
-      )
-    }));
-    setToast(aiClient.getStatus().fallbackActive ? "行动卡已用 mock fallback 重新生成" : "行动卡已用真实 AI 重新生成");
+
+    setState((current) => {
+      const currentItem = current.savedItems.find((entry) => entry.id === itemId) ?? item;
+      const card = current.actionCards.find((entry) => entry.savedItemId === itemId);
+      const newCard = createActionCardRecord(currentItem, draft, new Date());
+      const actionCards = card
+        ? current.actionCards.map((entry) =>
+            entry.id === card.id
+              ? {
+                  ...entry,
+                  category: currentItem.contentDomain,
+                  subCategory: currentItem.contentSubDomain,
+                  title: draft.title,
+                  goal: draft.goal,
+                  whySaved: draft.whySaved,
+                  nextAction: draft.nextAction,
+                  openOriginalFocus: draft.openOriginalFocus,
+                  output: draft.output,
+                  estimatedTime: draft.estimatedTime,
+                  difficulty: draft.difficulty,
+                  doneCriteria: draft.doneCriteria,
+                  avoidDoing: draft.avoidDoing,
+                  ifInfoMissing: draft.ifInfoMissing,
+                  followUp: draft.followUp,
+                  fields: draft.structuredFields,
+                  tasks: cloneTasksForCard(entry.id, draft.tasks),
+                  updatedAt: now
+                }
+              : entry
+          )
+        : [newCard, ...current.actionCards];
+
+      return {
+        ...current,
+        savedItems: current.savedItems.map((entry) =>
+          entry.id === itemId
+            ? { ...entry, savedIntent: mapReviveIntentToSavedIntent(reviveIntent, entry.savedIntent), intent: mapReviveIntentToSavedIntent(reviveIntent, entry.savedIntent), updatedAt: now }
+            : entry
+        ),
+        actionCards
+      };
+    });
+    setSelectedItemId(itemId);
+    setActiveView("detail");
+    setToast(aiClient.getStatus().fallbackActive ? "已用本地规则生成行动卡" : "已生成行动卡");
+  }
+
+  async function regenerateActionCard(itemId: string) {
+    await reviveSavedItem(itemId);
   }
 
   async function regenerateSmartAlbums() {
@@ -875,6 +889,7 @@ export function App() {
               aiStatus={aiStatus}
               changeStatus={changeStatus}
               viewActionCard={viewActionCard}
+              reviveSavedItem={reviveSavedItem}
               onContinueImport={continueImport}
             />
           )}
@@ -935,8 +950,19 @@ export function App() {
             />
           )}
 
-          {activeView === "detail" && (!selectedItem || !selectedCard) && (
-            <EmptyState title="还没有可查看的行动卡" text="先导入一条收藏，系统会生成行动卡和搜索索引。" />
+{activeView === "detail" && selectedItem && !selectedCard && (
+            <SavedIndexDetailView
+              item={selectedItem}
+              openSource={openSource}
+              updateSavedNote={updateSavedNote}
+              reviveSavedItem={reviveSavedItem}
+              setActiveView={setActiveView}
+              onContinueImport={continueImport}
+            />
+          )}
+
+          {activeView === "detail" && !selectedItem && (
+            <EmptyState title="还没有可查看的收藏" text="先导入一条收藏，它会进入收藏索引；想行动时再生成行动卡。" />
           )}
 
           {activeView === "plans" && (
@@ -1282,6 +1308,7 @@ function ImportView(props: {
   aiStatus: AiRuntimeStatus;
   changeStatus: (itemId: string, status: ItemStatus) => void;
   viewActionCard: (itemId: string) => void;
+  reviveSavedItem: (itemId: string, reviveIntent?: ReviveIntent) => void;
   onContinueImport: () => void;
 }) {
   const usingMock = props.aiStatus.mode === "mock" || props.aiStatus.fallbackActive;
@@ -1348,29 +1375,32 @@ function ImportView(props: {
           </div>
           <div className="import-success-body">
             <div className="row-meta">
-              <span>{props.lastImportResult.item.category}</span>
-              <span>{props.lastImportResult.item.subCategory}</span>
-              <span>信心：{confidenceLabel(props.lastImportResult.item.classificationConfidence)}</span>
-              <span>{props.lastImportResult.card.estimatedTime}</span>
+              <span>{props.lastImportResult.item.contentDomain}</span>
+              <span>{props.lastImportResult.item.contentSubDomain}</span>
+              <span>用途：{props.lastImportResult.item.savedIntent}</span>
+              <span>信心：{confidenceLabel(props.lastImportResult.item.confidence)}</span>
             </div>
-            <strong>{props.lastImportResult.card.title}</strong>
-            <p>{props.lastImportResult.card.nextAction}</p>
+            <strong>{formatItemTitle(props.lastImportResult.item)}</strong>
+            <p>{formatItemSummary(props.lastImportResult.item)}</p>
             <div className="field-grid compact-fields">
-              <div className="field-card"><span>系统判断你可能是为了</span><strong>{props.lastImportResult.item.intent}</strong></div>
-              <div className="field-card"><span>为什么这样分</span><strong>{props.lastImportResult.item.whyThisCategory}</strong></div>
-              <div className="field-card"><span>打开原帖后重点看</span><strong>{props.lastImportResult.card.openOriginalFocus.join(" / ")}</strong></div>
-              <div className="field-card"><span>这一步的产出</span><strong>{props.lastImportResult.card.output}</strong></div>
+              <div className="field-card"><span>内容主题</span><strong>{props.lastImportResult.item.contentDomain} / {props.lastImportResult.item.contentSubDomain}</strong></div>
+              <div className="field-card"><span>收藏用途</span><strong>{props.lastImportResult.item.savedIntent}</strong></div>
+              <div className="field-card"><span>为什么这样分</span><strong>{props.lastImportResult.item.whyThisDomain}</strong></div>
+              <div className="field-card"><span>为什么这样用</span><strong>{props.lastImportResult.item.whyThisIntent}</strong></div>
             </div>
-            {props.lastImportResult.item.classificationConfidence === "low" && (
-              <p className="quiet-copy">这条收藏信息较少，分类可能不准。建议补充一句“我为什么收藏它”，然后重新生成行动卡。</p>
+            <div className="tag-list">
+              {props.lastImportResult.item.keywords.slice(0, 6).map((keyword) => <span key={keyword}>{keyword}</span>)}
+            </div>
+            {props.lastImportResult.item.confidence === "low" && (
+              <p className="quiet-copy">这条收藏信息较少，分类可能不准。可以补充一句“我为什么收藏它”，再选择复活用途生成行动卡。</p>
             )}
             {props.importSessionCount >= 3 && <p className="quiet-copy">你已经连续导入了 {props.importSessionCount} 条，可以去智能专辑看看系统整理出的主题。</p>}
             {usingMock && <p className="quiet-copy">当前使用：本地规则 / Mock AI。生成质量可能有限，配置真实 AI 后分类和行动卡会更具体。</p>}
           </div>
           <div className="card-actions">
-            <button className="primary-button" onClick={props.onContinueImport} data-testid="continue-import">继续导入一条</button>
-            <button className="secondary-action" onClick={() => props.changeStatus(props.lastImportResult!.item.id, "today")}>加入今日复活</button>
-            <button className="secondary-action" onClick={() => props.viewActionCard(props.lastImportResult!.item.id)}>查看行动卡</button>
+            <button className="primary-button" onClick={() => props.reviveSavedItem(props.lastImportResult!.item.id)} data-testid="revive-imported-item">复活这条</button>
+            <button className="secondary-action" onClick={props.onContinueImport} data-testid="continue-import">继续导入一条</button>
+            <button className="secondary-action" onClick={() => props.viewActionCard(props.lastImportResult!.item.id)}>查看收藏索引</button>
             <button className="secondary-action" onClick={() => props.setActiveView("albums")}>查看智能专辑</button>
             <button className="ghost-action" onClick={() => props.setActiveView("search")}>搜索找回试试</button>
           </div>
@@ -1415,7 +1445,7 @@ function ImportView(props: {
               <span>导入 {batch.importedCount}</span>
               <span>重复 {batch.duplicateCount}</span>
               <span>失败 {batch.failedCount}</span>
-              <span>行动卡 {batch.createdActionCardCount}</span>
+              <span>已复活 {batch.createdActionCardCount}</span>
               <span>专辑 {batch.createdAlbumCount}</span>
               <button onClick={() => props.setActiveView(batch.source === "extension_scan" ? "old-import" : "albums")}>查看详情</button>
             </article>
@@ -3001,6 +3031,20 @@ function hasSourceUrl(item: Pick<SavedItem, "sourceUrl">): boolean {
   return Boolean(item.sourceUrl.trim());
 }
 
+function mapReviveIntentToSavedIntent(reviveIntent: ReviveIntent | undefined, fallback: SavedIntent): SavedIntent {
+  if (!reviveIntent) return fallback;
+  const map: Record<ReviveIntent, SavedIntent> = {
+    学会这个方法: "想学习",
+    照着做一次: "想复现",
+    用在工作里: "工作决策参考",
+    变成自己的内容: "内容创作参考",
+    安排一次出行: "想去",
+    做购买决定: "想买",
+    写一条观察或复盘: "情绪共鸣",
+    只是整理留存: "以后查阅"
+  };
+  return map[reviveIntent] ?? fallback;
+}
 function formatDate(value: string): string {
   return new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit" }).format(new Date(value));
 }
