@@ -7,7 +7,8 @@ import {
   installWindowOpenSpy,
   readAchievements,
   readAppState,
-  resetDemoData
+  resetDemoData,
+  reviveImportedItem
 } from "./helpers";
 
 async function runSearch(page: import("@playwright/test").Page, query: string) {
@@ -40,14 +41,19 @@ test.describe("MVP search recall", () => {
     const errors = collectConsoleErrors(page);
     await installWindowOpenSpy(page);
     await resetDemoData(page);
-    await importTestNote(page);
+    const imported = await importTestNote(page, {
+      sourceUrl: "https://www.xiaohongshu.com/explore/search-open-card-unique",
+      title: "唯一搜索封面行动卡",
+      rawShareText: "唯一搜索封面行动卡，内容创作封面设计参考，用来验证搜索结果进入行动卡详情",
+      userNote: "搜索打开行动卡回归测试"
+    });
+    await reviveImportedItem(page, imported.id);
 
-    const card = await runSearch(page, "封面");
+    const card = await runSearch(page, "唯一搜索封面");
     await card.getByTestId("view-action-card").click();
-    await expect(page.getByTestId("view-action-card").first()).toBeVisible();
     await expect(page.locator(".detail-title-input")).toBeVisible();
 
-    await runSearch(page, "封面");
+    await runSearch(page, "唯一搜索封面");
     await page.getByTestId("search-result-card").first().getByTestId("open-source-search").click();
     await expect.poll(async () => (await getOpenedUrls(page)).length).toBeGreaterThan(0);
     expect((await getOpenedUrls(page))[0]).toContain("xiaohongshu.com");
