@@ -97,7 +97,12 @@ async function refreshPageStatus() {
   if (!tab?.id || !/^https?:\/\//.test(state.tabUrl)) return;
 
   if (isWebAppUrl(state.tabUrl)) {
-    const bridgeInjected = await detectPageFlag(tab.id, "__collectionRevivalWebBridgeInstalled");
+    let bridgeInjected = await detectPageFlag(tab.id, "__collectionRevivalWebBridgeInstalled");
+    if (!bridgeInjected) {
+      await ensureWebBridgeScript(tab.id);
+      await wait(120);
+      bridgeInjected = await detectPageFlag(tab.id, "__collectionRevivalWebBridgeInstalled");
+    }
     updateDiagnostics(state.tabUrl, { bridgeInjected, scannerInjected: false });
     elements.pageHealth.className = bridgeInjected ? "page-health ok" : "page-health warn";
     elements.pageHealth.textContent = bridgeInjected
@@ -206,6 +211,16 @@ async function ensureScannerScript(tabId) {
   }
 }
 
+async function ensureWebBridgeScript(tabId) {
+  try {
+    const injected = await detectPageFlag(tabId, "__collectionRevivalWebBridgeInstalled");
+    if (injected) return;
+    await chrome.scripting.executeScript({ target: { tabId }, files: ["src/web-bridge.js"] });
+  } catch {
+    // The popup diagnosis will show that the Web Bridge was not injected.
+  }
+}
+
 async function detectPageFlag(tabId, flagName) {
   try {
     const [result] = await chrome.scripting.executeScript({
@@ -227,6 +242,8 @@ async function openOrRefreshWebApp() {
   if (existing?.id) {
     await chrome.tabs.update(existing.id, { active: true, url: targetUrl });
     await chrome.tabs.reload(existing.id);
+    await wait(800);
+    await ensureWebBridgeScript(existing.id);
     setStatus("已切换到收藏复活扫描页，并刷新页面以加载连接脚本。");
     return;
   }
