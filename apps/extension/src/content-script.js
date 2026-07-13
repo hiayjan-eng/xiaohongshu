@@ -3,15 +3,31 @@
   window.__collectionRevivalScannerInstalled = true;
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-    if (message?.type !== "REVIVAL_SCAN_VISIBLE_CARDS") return false;
+    if (message?.type === "REVIVAL_PING") {
+      sendResponse({ ok: true });
+      return false;
+    }
+
+    if (message?.type === "REVIVAL_GET_PAGE_STATUS") {
+      sendResponse({ ok: true, ...getPageStatus() });
+      return false;
+    }
+
+    if (message?.type !== "REVIVAL_SCAN_STEP") return false;
 
     (async () => {
       try {
-        if (message.autoScroll) {
-          await autoScrollPage(message.maxScrolls ?? 6, message.delayMs ?? 650);
+        const pageStatus = getPageStatus();
+        if (pageStatus.blocked) {
+          sendResponse({ ok: true, items: [], blocked: true, reason: pageStatus.reason, pageStatus, pageUrl: window.location.href });
+          return;
         }
+
+        const beforeY = window.scrollY;
+        if (message.scroll) await scrollOneStep(message.delayMs ?? 650);
         const items = scanVisibleXhsCards();
-        sendResponse({ ok: true, items, pageUrl: window.location.href });
+        const reachedEnd = Math.abs(window.scrollY + window.innerHeight - document.documentElement.scrollHeight) < 24;
+        sendResponse({ ok: true, items, reachedEnd, pageStatus: getPageStatus(), pageUrl: window.location.href, scrollY: window.scrollY, previousY: beforeY });
       } catch (error) {
         sendResponse({ ok: false, error: error instanceof Error ? error.message : "扫描失败" });
       }
@@ -20,22 +36,38 @@
     return true;
   });
 
+  function getPageStatus() {
+    const text = cleanText(document.body?.innerText || "").slice(0, 4000);
+    const blocked = /验证码|验证|安全验证|登录后查看|请先登录|访问频繁|稍后再试/.test(text);
+    const isXhs = /xiaohongshu\.com|xhslink\.com/i.test(location.hostname);
+    const looksCollection = /收藏|favorite|collection|笔记|我的/.test(text + " " + location.href);
+    return {
+      blocked,
+      reason: blocked ? "页面出现登录、验证码或访问限制，扩展已停止扫描，请在浏览器里处理后再继续。" : "",
+      isXhs,
+      looksCollection,
+      url: location.href
+    };
+  }
+
   function scanVisibleXhsCards() {
-    const anchors = Array.from(document.querySelectorAll('a[href]'))
+    const anchors = Array.from(document.querySelectorAll("a[href]"))
       .filter((anchor) => isLikelyXhsNoteUrl(anchor.href));
     const cards = anchors
       .map((anchor) => extractCard(anchor))
       .filter(Boolean);
 
-    return dedupe(cards).slice(0, 120);
+    return dedupe(cards).slice(0, 240);
   }
 
   function extractCard(anchor) {
     const container = findCardContainer(anchor);
     const title = pickTitle(container, anchor);
-    const visibleText = cleanText(container?.innerText || anchor.innerText || title).slice(0, 320);
+    const visibleText = cleanText(container?.innerText || anchor.innerText || title).slice(0, 360);
     const coverUrl = findCoverUrl(container);
     const sourceUrl = normalizeXhsUrl(anchor.href);
+    const author = pickAuthor(container);
+    const noteType = inferNoteType(container);
 
     if (!sourceUrl && !title) return null;
     return {
@@ -43,6 +75,8 @@
       sourceUrl,
       coverUrl,
       visibleText,
+      author,
+      noteType,
       sourcePlatform: "xiaohongshu"
     };
   }
@@ -65,7 +99,7 @@
     }
 
     let node = anchor.parentElement;
-    for (let depth = 0; node && depth < 5; depth += 1) {
+    for (let depth = 0; node && depth < 6; depth += 1) {
       if (isReasonableCard(node)) return node;
       node = node.parentElement;
     }
@@ -75,8 +109,8 @@
 
   function isReasonableCard(element) {
     const rect = element.getBoundingClientRect();
-    if (rect.width < 80 || rect.height < 60) return false;
-    if (rect.height > window.innerHeight * 1.4) return false;
+    if (rect.width < 72 || rect.height < 48) return false;
+    if (rect.height > window.innerHeight * 1.5) return false;
     return true;
   }
 
@@ -94,17 +128,34 @@
     for (const selector of titleSelectors) {
       const element = container?.querySelector(selector);
       const text = cleanText(element?.textContent || "");
-      if (text.length >= 2 && text.length <= 80) return text;
+      if (text.length >= 2 && text.length <= 90) return text;
     }
 
     const aria = cleanText(anchor.getAttribute("aria-label") || anchor.getAttribute("title") || "");
-    if (aria) return aria.slice(0, 80);
+    if (aria) return aria.slice(0, 90);
 
     const anchorText = cleanText(anchor.textContent || "");
-    if (anchorText) return anchorText.slice(0, 80);
+    if (anchorText) return anchorText.slice(0, 90);
 
     const imageAlt = cleanText(container?.querySelector("img")?.getAttribute("alt") || "");
-    return imageAlt.slice(0, 80);
+    return imageAlt.slice(0, 90);
+  }
+
+  function pickAuthor(container) {
+    const selectors = ["[class*='author']", "[class*='user']", "[class*='name']", "a[href*='/user/profile']"];
+    for (const selector of selectors) {
+      const text = cleanText(container?.querySelector(selector)?.textContent || "");
+      if (text.length >= 2 && text.length <= 40) return text;
+    }
+    return undefined;
+  }
+
+  function inferNoteType(container) {
+    const text = cleanText(container?.innerText || "");
+    if (/视频|播放|▶|video/i.test(text + " " + (container?.innerHTML || ""))) return "video";
+    if (container?.querySelector("video")) return "video";
+    if (container?.querySelector("img")) return "image";
+    return "unknown";
   }
 
   function findCoverUrl(container) {
@@ -117,7 +168,7 @@
     try {
       const url = new URL(value, window.location.href);
       if (!/xiaohongshu\.com|xhslink\.com/i.test(url.hostname)) return false;
-      return /\/explore\/|\/discovery\/item\/|\/user\/profile\/.+\/collections|note/i.test(url.pathname + url.search);
+      return /\/explore\/|\/discovery\/item\/|note|xhslink/i.test(url.pathname + url.search + url.hostname);
     } catch {
       return false;
     }
@@ -133,6 +184,11 @@
     }
   }
 
+  async function scrollOneStep(delayMs) {
+    window.scrollBy({ top: Math.round(window.innerHeight * 0.82), behavior: "smooth" });
+    await wait(delayMs);
+  }
+
   function cleanText(value) {
     return (value || "").replace(/\s+/g, " ").trim();
   }
@@ -145,22 +201,6 @@
       seen.add(key);
       return true;
     });
-  }
-
-  async function autoScrollPage(maxScrolls, delayMs) {
-    const startY = window.scrollY;
-    let previousHeight = document.documentElement.scrollHeight;
-
-    for (let index = 0; index < maxScrolls; index += 1) {
-      window.scrollBy({ top: Math.round(window.innerHeight * 0.85), behavior: "smooth" });
-      await wait(delayMs);
-      const currentHeight = document.documentElement.scrollHeight;
-      if (Math.abs(window.scrollY + window.innerHeight - currentHeight) < 20 && currentHeight === previousHeight) break;
-      previousHeight = currentHeight;
-    }
-
-    window.scrollTo({ top: startY, behavior: "smooth" });
-    await wait(Math.min(delayMs, 300));
   }
 
   function wait(ms) {
