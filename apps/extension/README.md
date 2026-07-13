@@ -1,4 +1,4 @@
-# 收藏复活旧收藏扫描 Beta
+﻿# 收藏复活旧收藏扫描 Beta
 
 这是一个 Manifest V3 浏览器扩展 Beta，用于验证“用户本人主动点击后，扫描自己小红书网页版当前已加载收藏卡片”的产品路径。它支持 Chrome 和 Microsoft Edge 的开发者模式加载，当前不是 Chrome Web Store 或 Edge Add-ons 正式版本。
 
@@ -13,8 +13,8 @@ pnpm --filter @revival/extension build
 构建产物：
 
 - `release-artifacts/extension-beta`：加载已解压扩展时选择这个目录。
-- `release-artifacts/collection-revival-extension-beta-v0.2.1.zip`：可给测试用户下载的 Beta ZIP。
-- `apps/web/public/downloads/collection-revival-extension-beta-v0.2.1.zip`：Web 端 `/old-import` 页面使用的下载文件。
+- `release-artifacts/collection-revival-extension-beta-v0.2.2.zip`：可给测试用户下载的 Beta ZIP。
+- `apps/web/public/downloads/collection-revival-extension-beta-v0.2.2.zip`：Web 端 `/old-import` 页面使用的下载文件。
 
 ## 安装
 
@@ -39,3 +39,4 @@ pnpm --filter @revival/extension typecheck
 ```
 
 校验会检查 Manifest V3、必要权限、popup/content script 语法，以及暂停/继续、断点、页面状态探测、Beta 导入来源等关键能力标记。
+
