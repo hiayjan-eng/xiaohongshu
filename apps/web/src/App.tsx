@@ -1611,7 +1611,7 @@ function OldImportView(props: {
         readyReceived: current.readyReceived,
         version: current.version || signal.version,
         protocolVersion: current.protocolVersion || signal.protocolVersion,
-        browser: current.browser || signal.browser,
+        browser: current.browser || signal.browser || detectBrowserName(),
         failureReason: signal.version && signal.version !== EXTENSION_BETA_VERSION ? "EXTENSION_VERSION_TOO_OLD" : current.failureReason,
         message: current.connected
           ? current.message
@@ -3539,7 +3539,6 @@ function buildInsights(items: SavedItem[]) {
     categoryDistribution
   };
 }
-
 
 
 
