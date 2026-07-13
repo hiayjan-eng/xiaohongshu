@@ -13,11 +13,11 @@ pnpm --filter @revival/extension build
 会生成两个产物：
 
 - `release-artifacts/extension-beta`：Chrome / Edge 开发者模式下加载的已解压扩展目录。
-- `release-artifacts/collection-revival-extension-beta-v0.2.0.zip`：给测试用户下载或留档的 Beta ZIP。
+- `release-artifacts/collection-revival-extension-beta-v0.2.1.zip`：给测试用户下载或留档的 Beta ZIP。
 
 同时构建脚本会复制一份到：
 
-- `apps/web/public/downloads/collection-revival-extension-beta-v0.2.0.zip`
+- `apps/web/public/downloads/collection-revival-extension-beta-v0.2.1.zip`
 
 线上 `/old-import` 可以用这个 ZIP 作为测试安装入口。
 
