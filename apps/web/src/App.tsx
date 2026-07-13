@@ -3214,6 +3214,20 @@ function QaView(props: {
         <p className="quiet-copy">请提醒朋友不要输入隐私内容。完成 3-5 条真实收藏测试后，可以在 /real-test 复制试用总结发回来。</p>
       </section>
 
+      <section className="tool-panel single qa-panel" data-testid="qa-classification-shadow">
+        <PanelHeader icon={<Sparkles size={18} />} title="分类 Shadow Mode" meta="Rule / Semantic / Hybrid" />
+        {props.state.savedItems[0]?.classificationShadow ? (
+          <div className="qa-status-list">
+            <span>Rule：<strong>{props.state.savedItems[0].classificationShadow.rule.contentDomain} / {props.state.savedItems[0].classificationShadow.rule.contentSubDomain}</strong></span>
+            <span>Semantic Top3：<strong>{props.state.savedItems[0].classificationShadow.semanticCandidates.map((candidate) => `${candidate.contentDomain}/${candidate.contentSubDomain}`).join("、")}</strong></span>
+            <span>Hybrid：<strong>{props.state.savedItems[0].classificationShadow.hybrid.contentDomain} / {props.state.savedItems[0].classificationShadow.hybrid.contentSubDomain}</strong></span>
+            <span>Provider：<strong>{props.state.savedItems[0].classificationShadow.provider}</strong></span>
+          </div>
+        ) : (
+          <p className="quiet-copy">旧数据可能还没有 shadow 诊断。可以在设置里重新整理旧收藏，或新导入一条内容后查看。</p>
+        )}
+      </section>
+
       <div className="qa-layout">
         <section className="tool-panel single qa-panel">
           <PanelHeader icon={<CheckCircle2 size={18} />} title="本地存储状态" meta={storageStatus.ok ? "正常" : "需要检查"} />
