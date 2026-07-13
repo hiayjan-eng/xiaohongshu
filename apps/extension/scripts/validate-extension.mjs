@@ -46,8 +46,8 @@ const webBridge = readFileSync(new URL("../src/web-bridge.js", import.meta.url),
 const scanner = readFileSync(new URL("../src/xhs-scanner.js", import.meta.url), "utf8");
 const popupHtml = readFileSync(new URL("../src/popup.html", import.meta.url), "utf8");
 
-const popupMarkers = ["CHECKPOINT_KEY", "pauseScan", "resumeScan", "browser-extension-beta", "autoScrollToggle", "clearCheckpoint", "openOrRefreshWebApp", "bridgeStatus", "scannerStatus"];
-const bridgeMarkers = ["COLLECTION_REVIVAL_EXTENSION_READY", "COLLECTION_REVIVAL_EXTENSION_PING", "COLLECTION_REVIVAL_EXTENSION_PONG", "requestId", "protocolVersion", "collection-revival-web-bridge-v1"];
+const popupMarkers = ["CHECKPOINT_KEY", "pauseScan", "resumeScan", "browser-extension-beta", "autoScrollToggle", "clearCheckpoint", "openOrRefreshWebApp", "ensureWebBridgeScript", "bridgeStatus", "scannerStatus"];
+const bridgeMarkers = ["COLLECTION_REVIVAL_EXTENSION_READY", "COLLECTION_REVIVAL_EXTENSION_PING", "COLLECTION_REVIVAL_EXTENSION_PONG", "requestId", "protocolVersion", "collection-revival-web-bridge-v1", "collectionRevivalExtensionVersion", "collection-revival-extension-bridge"];
 const scannerMarkers = ["REVIVAL_GET_PAGE_STATUS", "REVIVAL_SCAN_STEP", "scrollOneStep", "blocked", "验证码"];
 for (const marker of popupMarkers) {
   if (!popupJs.includes(marker) && !popupHtml.includes(marker)) throw new Error(`Missing popup beta capability marker: ${marker}`);
