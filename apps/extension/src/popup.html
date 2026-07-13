@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>收藏复活扫描 Beta</title>
+    <link rel="stylesheet" href="./popup.css" />
+  </head>
+  <body>
+    <main class="popup-shell">
+      <header class="popup-header">
+        <span class="brand-dot">复</span>
+        <div>
+          <strong>旧收藏扫描 Beta · v<span id="extensionVersion">0.2.2</span></strong>
+          <small>仅在你主动点击后读取当前小红书收藏页中已加载的可见卡片，不模拟登录，也不绕过平台限制。</small>
+        </div>
+      </header>
+
+      <section id="pageHealth" class="page-health">正在检测当前标签页...</section>
+
+      <section class="scan-panel" aria-label="扫描旧收藏">
+        <div class="scan-options">
+          <span>本次扫描数量</span>
+          <div class="limit-grid">
+            <label><input type="radio" name="scanLimit" value="200" checked />先试 200 条</label>
+            <label><input type="radio" name="scanLimit" value="500" />扫描 500 条</label>
+            <label><input type="radio" name="scanLimit" value="1000" />扫描 1000 条</label>
+            <label><input type="radio" name="scanLimit" value="all" />尽可能扫描全部</label>
+          </div>
+        </div>
+
+        <div class="actions primary-actions" id="scanActions">
+          <button id="startScan" class="primary">开始扫描旧收藏</button>
+          <button id="scanVisible" class="secondary">扫描当前可见</button>
+          <button id="openCollection" class="secondary hidden">打开我的小红书收藏页</button>
+        </div>
+
+        <div class="actions scan-control-actions">
+          <button id="pauseScan" class="secondary" disabled>暂停</button>
+          <button id="resumeScan" class="secondary" disabled>继续</button>
+          <button id="retryScan" class="secondary" disabled>重试</button>
+        </div>
+      </section>
+
+      <section class="progress-card" aria-label="扫描进度">
+        <div class="progress-head">
+          <strong id="progressTitle">等待扫描</strong>
+          <span id="progressMode">200 条上限</span>
+        </div>
+        <div class="progress-track" id="progressTrack">
+          <div class="progress-fill" id="progressFill"></div>
+        </div>
+        <div class="progress-meta">
+          <span id="progressPrimary">0 / 200 条</span>
+          <span id="progressStage">识别页面</span>
+        </div>
+        <div class="stage-steps" id="stageSteps">
+          <span data-stage="recognizing">识别页面</span>
+          <span data-stage="loading">加载收藏</span>
+          <span data-stage="extracting">提取卡片</span>
+          <span data-stage="deduping">清理去重</span>
+          <span data-stage="complete">扫描完成</span>
+        </div>
+      </section>
+
+      <section class="stats" id="statsGrid" aria-label="扫描统计">
+        <span><strong>0</strong><small>已发现</small></span>
+        <span><strong>0</strong><small>本轮新增</small></span>
+        <span><strong>0</strong><small>重复</small></span>
+        <span><strong>0</strong><small>缺链接</small></span>
+        <span><strong>0</strong><small>待导入</small></span>
+      </section>
+
+      <div id="status" class="status">等待扫描</div>
+
+      <section class="results">
+        <div class="results-head">
+          <strong>待导入清单</strong>
+          <span id="count">0 条</span>
+        </div>
+        <div class="filter-bar">
+          <input id="searchBox" placeholder="按标题或作者搜索" />
+          <select id="filterSelect" aria-label="筛选结果">
+            <option value="all">全部</option>
+            <option value="selected">已选</option>
+            <option value="duplicate">重复</option>
+            <option value="missing-title">缺标题</option>
+            <option value="own">疑似本人发布</option>
+            <option value="missing-link">无链接</option>
+          </select>
+        </div>
+        <div class="select-actions">
+          <button id="selectAll" class="link-button" disabled>全选当前筛选</button>
+          <button id="clearSelection" class="link-button" disabled>取消当前筛选</button>
+        </div>
+        <div id="list" class="result-list"></div>
+      </section>
+
+      <div class="sticky-import">
+        <div>
+          <strong id="importSummary">将导入 0 条</strong>
+          <small id="skipSummary">跳过 0 条重复内容</small>
+        </div>
+        <button id="importToWeb" class="primary" disabled>导入收藏复活</button>
+      </div>
+
+      <details class="more-settings">
+        <summary>更多设置和诊断</summary>
+        <label class="field">
+          <span>导入到 Web 地址</span>
+          <input id="webAppUrl" placeholder="https://xiaohongshu-green.vercel.app/old-import" />
+        </label>
+        <label class="toggle-row">
+          <input id="autoScrollToggle" type="checkbox" checked />
+          <span>自动向下加载更多收藏</span>
+        </label>
+        <div class="actions double">
+          <button id="openWeb" class="secondary">打开或刷新收藏复活扫描页</button>
+          <button id="redetectPage" class="secondary">重新检测当前页面</button>
+          <button id="clearCheckpoint" class="secondary">清空断点</button>
+          <button id="exportJson" class="secondary" disabled>导出 JSON</button>
+        </div>
+        <section class="diagnostics">
+          <div><span>当前页面</span><strong id="pageType">检测中</strong></div>
+          <div><span>Web Bridge</span><strong id="bridgeStatus">检测中</strong></div>
+          <div><span>小红书扫描脚本</span><strong id="scannerStatus">检测中</strong></div>
+          <div><span>扫描支持</span><strong id="supportStatus">检测中</strong></div>
+        </section>
+      </details>
+    </main>
+    <script src="./popup.js"></script>
+  </body>
+</html>
