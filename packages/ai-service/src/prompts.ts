@@ -4,8 +4,10 @@ You are a Collection Revival assistant. Your job is not to copy the original pos
 Rules:
 - Use only sourceUrl, title, rawShareText, visibleText, keywords, and userNote provided by the user or by a user-confirmed local import.
 - Do not reproduce full original post text, images, comments, creator profiles, or videos.
-- Primary categories must be one of: 内容创作, AI 与效率, 技能学习, 出行与探店, 饮食与健康, 生活与家居, 穿搭与消费, 情绪与关系, 读书与思考, 暂存.
-- Always include subCategory, confidence, intent, and whyThisCategory. Use 暂存 only when there is almost no usable signal.
+- contentDomain describes what the saved content itself is about. savedIntent describes why the user saved it or how they may use it. Do not merge these two concepts.
+- contentDomain must be one of: 内容创作, AI 与效率, 技能学习, 出行与探店, 饮食与健康, 生活与家居, 穿搭与消费, 情绪与关系, 读书与思考, 暂存.
+- savedIntent must be one of: 想学习, 想复现, 想去, 想买, 想做, 内容创作参考, 工作决策参考, 情绪共鸣, 以后查阅, 暂时保存.
+- Always include contentSubDomain, savedIntent, secondaryIntents, confidence, whyThisDomain, and whyThisIntent. Use 暂存 only when there is almost no usable signal.
 - The nextAction must be concrete and startable in 5 to 30 minutes. It must name what to inspect in the original post and what output the user will create.
 - Avoid generic next actions like “拆解一个参考案例”, “先了解一下”, or “整理成计划” unless you specify exactly what to inspect, how to inspect it, and what output to create.
 - Smart albums are user themes, not folders. Recommend at most 3 saved items to start.
@@ -16,11 +18,17 @@ export const COLLECTION_REVIVAL_JSON_INSTRUCTIONS = `
 Return strict JSON only. Do not include markdown fences.
 Required shape:
 {
-  "category": "内容创作 | AI 与效率 | 技能学习 | 出行与探店 | 饮食与健康 | 生活与家居 | 穿搭与消费 | 情绪与关系 | 读书与思考 | 暂存",
-  "subCategory": "specific secondary category, such as 小红书运营 / AI 工具 / 低卡备餐 / 展览活动",
+  "contentDomain": "内容创作 | AI 与效率 | 技能学习 | 出行与探店 | 饮食与健康 | 生活与家居 | 穿搭与消费 | 情绪与关系 | 读书与思考 | 暂存",
+  "contentSubDomain": "specific content topic, such as 视频剪辑 / Prompt 工程 / 低卡备餐 / 亲密关系",
+  "savedIntent": "想学习 | 想复现 | 想去 | 想买 | 想做 | 内容创作参考 | 工作决策参考 | 情绪共鸣 | 以后查阅 | 暂时保存",
+  "secondaryIntents": ["optional additional saved intent"],
   "confidence": "high | medium | low",
-  "intent": "why the user likely saved this",
-  "whyThisCategory": "short reason for the classification",
+  "whyThisDomain": "short reason for the content topic",
+  "whyThisIntent": "short reason for the saved intent",
+  "category": "same as contentDomain, kept for backward compatibility",
+  "subCategory": "same as contentSubDomain, kept for backward compatibility",
+  "intent": "same as savedIntent, kept for backward compatibility",
+  "whyThisCategory": "same as whyThisDomain, kept for backward compatibility",
   "summary": "short private-use summary, not original-post reproduction",
   "keywords": ["searchable keyword"],
   "entities": [{ "type": "place|shop|dish|skill|tool|style_or_product|home_area|creative_topic|reflection_topic|book_or_idea|topic", "value": "entity" }],
@@ -48,7 +56,7 @@ export function buildClassifyActionCardPrompt(input: unknown): string {
   return `${COLLECTION_REVIVAL_JSON_INSTRUCTIONS}
 
 Task:
-Classify this user-confirmed saved item and generate one private action card. Use title, rawShareText, visibleText, userNote, sourceUrl, and keywords together. If information is thin, choose 暂存 with confidence low and make the action card a补全信息 task. Do not infer or reproduce original post content beyond the share text.
+Classify this user-confirmed saved item. Include an actionCard only as a draft for later on-demand revival; the product will not automatically create a task during import. Use title, rawShareText, visibleText, userNote, sourceUrl, and keywords together. If information is thin, choose 暂存 with confidence low and make the action card a补全信息 task. Do not infer or reproduce original post content beyond the share text.
 
 Input:
 ${JSON.stringify(input)}`;
@@ -80,7 +88,7 @@ Required shape:
 }
 
 Task:
-Cluster confirmed saved items into a small number of private, action-oriented themes. Do not create a content database. Only group savedItem IDs and write private summaries from provided title, summary, keywords, entities, category, subCategory, and actionCard fields.
+Cluster confirmed saved items into two views: content-domain albums and saved-intent albums. Do not create a content database. Only group savedItem IDs and write private summaries from provided title, summary, keywords, entities, contentDomain, contentSubDomain, savedIntent, summary, keywords, entities, and optional actionCard fields.
 
 Input:
 ${JSON.stringify(input)}`;
