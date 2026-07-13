@@ -23,7 +23,7 @@ mkdirSync(srcOut, { recursive: true });
 mkdirSync(webDownloadDir, { recursive: true });
 
 copyFileSync(resolve(root, "manifest.json"), resolve(outDir, "manifest.json"));
-for (const file of ["popup.html", "popup.js", "popup.css", "web-bridge.js", "xhs-scanner.js"]) {
+for (const file of ["popup.html", "popup.js", "popup.css", "web-bridge.js", "xhs-scanner.js", "background.js"]) {
   copyFileSync(resolve(root, "src", file), resolve(srcOut, file));
 }
 
