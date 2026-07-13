@@ -950,6 +950,63 @@ export function App() {
     setActiveView("albums");
     window.history.pushState(null, "", `/albums/${encodeURIComponent(albumId)}`);
   }
+
+  function removeItemFromAlbum(albumId: string, itemId: string) {
+    setState((current) => {
+      const smartAlbums = (current.smartAlbums ?? smartAlbums)
+        .map((album) =>
+          album.id === albumId
+            ? {
+                ...album,
+                savedItemIds: album.savedItemIds.filter((id) => id !== itemId),
+                recommendedItemIds: album.recommendedItemIds.filter((id) => id !== itemId),
+                updatedAt: new Date().toISOString()
+              }
+            : album
+        )
+        .filter((album) => album.status === "confirmed" || album.savedItemIds.length > 0);
+      return { ...current, smartAlbums };
+    });
+    setToast("已从当前专辑移除，收藏本身仍在收藏池");
+  }
+
+  function moveItemToTheme(itemId: string) {
+    correctSavedItemClassification(itemId, "domain");
+  }
+
+  function addItemToIntentAlbum(itemId: string) {
+    correctSavedItemClassification(itemId, "intent");
+  }
+
+  function createManualAlbum() {
+    const title = window.prompt("新建专辑名称")?.trim();
+    if (!title) return;
+    const now = new Date().toISOString();
+    const album: SmartAlbum = {
+      id: createLocalId("album_manual"),
+      title,
+      description: "用户手动创建的专辑，不会被自动重新整理覆盖。",
+      albumView: "content_domain",
+      contentDomain: "暂存",
+      contentSubDomain: "手动专辑",
+      category: "暂存",
+      albumType: "manual_album",
+      keywords: ["手动专辑"],
+      savedItemIds: [],
+      recommendedItemIds: [],
+      whyThisAlbum: "这是用户手动创建的收藏集合。",
+      whyStartHere: "手动添加收藏后再决定从哪一条开始。",
+      suggestedFirstAction: "先添加 2 条以上同主题收藏，再挑一条复活。",
+      priority: "low",
+      priorityScore: 0,
+      status: "confirmed",
+      createdAt: now,
+      updatedAt: now
+    };
+    setState((current) => ({ ...current, smartAlbums: [album, ...(current.smartAlbums ?? smartAlbums)] }));
+    setSelectedAlbumId(album.id);
+    setToast("已新建手动专辑");
+  }
   if (activeView === "welcome") {
     return (
       <ThemeProvider themeId={themeId}>
