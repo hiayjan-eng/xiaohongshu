@@ -80,6 +80,15 @@ importers:
 
   packages/ai-service:
     dependencies:
+      '@revival/classification-service':
+        specifier: workspace:*
+        version: link:../classification-service
+      '@revival/shared-types':
+        specifier: workspace:*
+        version: link:../shared-types
+
+  packages/classification-service:
+    dependencies:
       '@revival/shared-types':
         specifier: workspace:*
         version: link:../shared-types
