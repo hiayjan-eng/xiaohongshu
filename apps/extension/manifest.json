@@ -1,0 +1,47 @@
+{
+  "manifest_version": 3,
+  "name": "收藏复活旧收藏扫描 Beta",
+  "version": "0.2.1",
+  "description": "在用户主动点击后，扫描本人小红书网页版当前已加载收藏卡片，支持暂停继续和导入前确认。",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "downloads",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://xiaohongshu-green.vercel.app/*",
+    "http://localhost:5173/*",
+    "http://127.0.0.1:5173/*",
+    "https://www.xiaohongshu.com/*",
+    "https://xiaohongshu.com/*"
+  ],
+  "action": {
+    "default_title": "收藏复活扫描",
+    "default_popup": "src/popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://xiaohongshu-green.vercel.app/*",
+        "http://localhost:5173/*",
+        "http://127.0.0.1:5173/*"
+      ],
+      "js": [
+        "src/web-bridge.js"
+      ],
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://www.xiaohongshu.com/*",
+        "https://xiaohongshu.com/*"
+      ],
+      "js": [
+        "src/xhs-scanner.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}
