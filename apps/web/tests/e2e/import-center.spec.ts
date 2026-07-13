@@ -71,6 +71,22 @@ test.describe("Import Center architecture", () => {
     await page.goto("/albums");
     await expect(page.getByRole("heading", { name: "智能专辑" })).toBeVisible();
     await expect(page.getByTestId("smart-album-card").first()).toBeVisible();
+    await expect.poll(async () => page.getByText(/主题专辑|用途专辑/).count()).toBeGreaterThan(0);
+    await expect(page.getByRole("button", { name: "改主题" }).first()).toBeVisible();
+
+    const domainAnswers = ["内容创作", "封面设计"];
+    page.on("dialog", async (dialog) => {
+      await dialog.accept(domainAnswers.shift() ?? "封面设计");
+    });
+    await page.getByRole("button", { name: "改主题" }).first().click();
+    await expect.poll(async () => (await readAppState(page)).savedItems.some((item) => item.contentDomain === "内容创作" && item.contentSubDomain === "封面设计")).toBe(true);
+    page.removeAllListeners("dialog");
+
+    page.once("dialog", async (dialog) => {
+      await dialog.accept("内容创作参考");
+    });
+    await page.getByRole("button", { name: "改用途" }).first().click();
+    await expect.poll(async () => (await readAppState(page)).savedItems.some((item) => item.savedIntent === "内容创作参考")).toBe(true);
     await page.getByTestId("confirm-album").first().click();
     await expect.poll(async () => (await readAppState(page)).smartAlbums?.some((album) => album.status === "confirmed")).toBe(true);
 
