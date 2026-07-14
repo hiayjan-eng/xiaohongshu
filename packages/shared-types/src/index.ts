@@ -131,6 +131,9 @@ export interface SavedItem {
   classificationShadow?: ClassificationShadowResult;
   rawTitle?: string;
   cleanedTitle?: string;
+  userEditedTitle?: string;
+  displayTitle?: string;
+  textNormalizationVersion?: number;
   summary: string;
   keywords: string[];
   entities: EntityTag[];
@@ -202,6 +205,7 @@ export interface PlanCard {
   savedItemId: string;
   actionCardId: string;
   title: string;
+  sourceTitle?: string;
   plannedDate: string;
   estimatedMinutes: number;
   oneNextStep: string;
@@ -209,7 +213,9 @@ export interface PlanCard {
   status: PlanCardStatus;
   reminderEnabled: boolean;
   createdAt: string;
+  updatedAt?: string;
   completedAt?: string;
+  cancelledAt?: string;
 }
 
 export interface Plan {
@@ -300,6 +306,15 @@ export interface ImportBatch {
   createdActionCardCount: number;
   createdAlbumCount: number;
   errorMessage?: string;
+  scanSummary?: {
+    totalFound?: number;
+    selectedCount?: number;
+    missingTitleCount?: number;
+    missingLinkCount?: number;
+    duplicateCount?: number;
+    lastScannedAt?: string;
+    sampleTitles?: string[];
+  };
   createdAt: string;
   updatedAt: string;
 }
@@ -309,6 +324,11 @@ export interface ImportBatchItem {
   batchId: string;
   sourceUrl: string;
   title: string;
+  rawTitle?: string;
+  cleanedTitle?: string;
+  userEditedTitle?: string;
+  displayTitle?: string;
+  textNormalizationVersion?: number;
   rawShareText: string;
   visibleText?: string;
   coverUrl?: string;
@@ -387,8 +407,28 @@ export interface SmartAlbum {
   priority: SmartAlbumPriority;
   priorityScore: number;
   status: "candidate" | "confirmed" | "archived";
+  confirmedAt?: string;
+  archivedAt?: string;
+  autoCollectEnabled?: boolean;
+  mediumMatchRequiresApproval?: boolean;
+  matchProfile?: SmartAlbumMatchProfile;
+  suggestedItemIds?: string[];
+  manuallyAddedItemIds?: string[];
+  manuallyRemovedItemIds?: string[];
+  lastMatchedAt?: string;
+  schemaVersion?: number;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface SmartAlbumMatchProfile {
+  contentDomain?: ContentDomain;
+  contentSubDomain?: string;
+  savedIntent?: SavedIntent;
+  keywords: string[];
+  entityValues: string[];
+  positiveExamples: string[];
+  negativeExamples: string[];
 }
 
 export interface AppState {
