@@ -47,16 +47,34 @@ type AppState = {
     savedItemId: string;
     actionCardId: string;
     title: string;
+    sourceTitle?: string;
     plannedDate: string;
     estimatedMinutes: number;
     oneNextStep: string;
+    doneCriteria?: string;
     status: string;
+    cancelledAt?: string;
   }>;
   classificationCorrections?: Array<{ id: string; savedItemId: string; correctedDomain: string; correctedSubDomain: string }>;
   searchLogs: Array<{ query: string; resultCount: number; clickedSavedItemId?: string }>;
   importBatches?: Array<{ id: string; source: string; rawCount: number; importedCount: number; duplicateCount: number; failedCount: number; createdActionCardCount: number; createdAlbumCount: number; status: string }>;
   importBatchItems?: Array<{ id: string; batchId: string; status: string; sourceUrl: string; title: string }>;
-  smartAlbums?: Array<{ id: string; title: string; status: string; savedItemIds: string[]; albumView?: string; savedIntent?: string; contentDomain?: string }>;
+  smartAlbums?: Array<{
+    id: string;
+    title: string;
+    status: string;
+    confirmedAt?: string;
+    archivedAt?: string;
+    autoCollectEnabled?: boolean;
+    mediumMatchRequiresApproval?: boolean;
+    savedItemIds: string[];
+    suggestedItemIds?: string[];
+    manuallyRemovedItemIds?: string[];
+    matchProfile?: { contentDomain?: string; contentSubDomain?: string; savedIntent?: string; keywords?: string[] };
+    albumView?: string;
+    savedIntent?: string;
+    contentDomain?: string;
+  }>;
 };
 
 export function collectConsoleErrors(page: Page): string[] {
