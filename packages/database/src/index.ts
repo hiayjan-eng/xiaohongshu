@@ -823,12 +823,12 @@ function cleanScannedTitle(title: string, rawShareText: string): string {
   const withoutUrl = cleanScannedText(source).replace(/https?:\/\/\S+/g, " ");
   const bracket = withoutUrl.match(/[【\[]([^】\]]+)[】\]]/);
   const candidate = bracket?.[1] ?? withoutUrl.replace(/^\d+[\s.、-]*/, "");
-  return candidate
+  const cleaned = candidate
     .replace(/\s+[-—–]\s+[^|｜】]+(\s*[|｜]\s*小红书.*)?$/, "")
     .replace(/小红书\s*-\s*你的生活兴趣社区|你的生活兴趣社区/g, " ")
     .replace(/\s+/g, " ")
     .trim();
-  return truncateGraphemeSafe(candidate, 80);
+  return truncateGraphemeSafe(cleaned, 80);
 }
 
 function cleanScannedText(value: string): string {
@@ -847,8 +847,13 @@ function cleanScannedText(value: string): string {
 
 function truncateGraphemeSafe(value: string, maxLength: number): string {
   if (value.length <= maxLength) return value;
-  const segmenter = typeof Intl !== "undefined" && "Segmenter" in Intl
-    ? new Intl.Segmenter("zh-CN", { granularity: "grapheme" })
+  const intlWithSegmenter = Intl as typeof Intl & {
+    Segmenter?: new (locale: string, options: { granularity: "grapheme" }) => {
+      segment(value: string): Iterable<{ segment: string }>;
+    };
+  };
+  const segmenter = typeof Intl !== "undefined" && intlWithSegmenter.Segmenter
+    ? new intlWithSegmenter.Segmenter("zh-CN", { granularity: "grapheme" })
     : undefined;
   if (!segmenter) return Array.from(value).slice(0, maxLength).join("");
   let output = "";
