@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { collectConsoleErrors, expectNoConsoleErrors, importTestNote, readAppState, resetDemoData } from "./helpers";
-import { migrateScannedTextV2 } from "../../../../packages/database/src/index";
+import { migrateScannedTextV3 } from "../../../../packages/database/src/index";
 
 test.describe("product core stabilization", () => {
   test("hides internal QA and real-test from the normal sidebar but keeps routes accessible", async ({ page }) => {
@@ -92,14 +92,24 @@ test.describe("product core stabilization", () => {
     state = await readAppState(page);
     expect(state.planCards?.length).toBeGreaterThanOrEqual(1);
     expect(state.planCards?.[0].savedItemId).toBe(item.id);
+    expect(state.planCards?.[0].sourceTitle).toContain("小红书封面设计技巧");
     await page.goto("/dashboard");
     await expect(page.getByTestId("today-plan-cards")).toBeVisible();
+    await expect(page.getByTestId("today-plan-cards")).toContainText("来源：小红书封面设计技巧");
+
+    await page.getByRole("button", { name: "延期到明天" }).first().click();
+    state = await readAppState(page);
+    expect(state.planCards?.[0].status).toBe("planned");
+    await page.getByRole("button", { name: "取消计划" }).first().click();
+    state = await readAppState(page);
+    expect(state.planCards?.[0].status).toBe("cancelled");
+    expect(state.planCards?.[0].cancelledAt).toBeTruthy();
 
     await expectNoConsoleErrors(errors);
   });
 
   test("migrates scanned title text without destroying special characters or emoji", () => {
-    const report = migrateScannedTextV2({
+    const report = migrateScannedTextV3({
       schemaVersion: 2,
       user: { id: "user_local_001", name: "本地用户", email: "local@revival.app", createdAt: "2026-07-06T00:00:00.000Z" },
       savedItems: [
@@ -137,12 +147,25 @@ test.describe("product core stabilization", () => {
       importBatches: [],
       importBatchItems: []
     });
-    expect(report.migratedCount).toBe(1);
-    expect(report.repairedTitleCount).toBe(1);
+    expect(report.checkedCount).toBe(1);
+    expect(report.changedCount).toBe(1);
     expect(report.state.savedItems[0].rawTitle).toContain("全÷回血");
     expect(report.state.savedItems[0].title).toContain("全÷回血");
     expect(report.state.savedItems[0].title).toContain("😆");
     expect(report.state.savedItems[0].title).not.toContain("https://");
     expect(report.state.savedItems[0].searchableText).toContain("商业与经营");
+  });
+
+  test("previews and applies scanned text migration from settings without auto running", async ({ page }) => {
+    const errors = collectConsoleErrors(page);
+    await resetDemoData(page);
+    await page.goto("/settings");
+    await page.getByTestId("settings-preview-text-migration").click();
+    await expect(page.getByTestId("text-migration-preview")).toBeVisible();
+    await expect(page.getByTestId("text-migration-preview")).toContainText("检查数量");
+    await page.getByTestId("settings-apply-text-migration").click();
+    await expect(page.getByTestId("text-migration-preview")).toBeHidden();
+    await page.getByTestId("settings-undo-text-migration").click();
+    await expectNoConsoleErrors(errors);
   });
 });
