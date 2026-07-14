@@ -32,8 +32,10 @@ import {
   STORAGE_KEY,
   loadAppState,
   migrateScannedTextV2,
+  migrateScannedTextV3,
   persistAppState,
-  updateItemStatus
+  updateItemStatus,
+  type ScannedTextMigrationV3Report
 } from "@revival/database";
 import { getDailyRevivalRecommendations } from "@revival/recommendation-service";
 import { searchSavedItems } from "@revival/search-service";
@@ -80,6 +82,10 @@ const EXTENSION_ZIP_FILE_NAME = `collection-revival-extension-beta-v${EXTENSION_
 const EXTENSION_PROTOCOL_VERSION = "collection-revival-web-bridge-v1";
 const EXTENSION_WEB_SOURCE = "collection-revival-web";
 const EXTENSION_SOURCE = "collection-revival-extension";
+const SMART_ALBUM_MATCH_THRESHOLDS = {
+  high: 82,
+  medium: 52
+} as const;
 type PoolViewMode = "cards" | "table";
 type ImportSuccessResult = { item: SavedItem; card?: ActionCard };
 
@@ -193,8 +199,11 @@ export function App() {
   const [importSessionCount, setImportSessionCount] = useState(0);
   const [isImporting, setIsImporting] = useState(false);
   const [selectedItemId, setSelectedItemId] = useState<string | undefined>(state.savedItems[0]?.id);
-  const [globalQuery, setGlobalQuery] = useState("");
-  const [submittedSearch, setSubmittedSearch] = useState("");
+  const initialSearchQuery = getInitialSearchQuery();
+  const [globalQuery, setGlobalQuery] = useState(initialSearchQuery);
+  const [submittedSearch, setSubmittedSearch] = useState(initialSearchQuery);
+  const [dashboardQuery, setDashboardQuery] = useState("");
+  const [dashboardSubmittedQuery, setDashboardSubmittedQuery] = useState("");
   const [poolQuery, setPoolQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<Category | "all">("all");
   const [statusFilter, setStatusFilter] = useState<ItemStatus | "all">("all");
@@ -206,6 +215,10 @@ export function App() {
   const [mobileQuery, setMobileQuery] = useState("");
   const [selectedAlbumId, setSelectedAlbumId] = useState<string | undefined>(() => getInitialAlbumId());
   const [developerMode, setDeveloperMode] = useState(() => detectDeveloperMode());
+  const [albumFilter, setAlbumFilter] = useState<"candidate" | "confirmed" | "suggested" | "archived">("candidate");
+  const [lastPlanUndoState, setLastPlanUndoState] = useState<AppState | null>(null);
+  const [lastMigrationUndoState, setLastMigrationUndoState] = useState<AppState | null>(null);
+  const [textMigrationPreview, setTextMigrationPreview] = useState<ScannedTextMigrationV3Report | null>(null);
   const [themeId, setThemeId] = useState<ThemePresetId>(() => getStoredThemeId(typeof window === "undefined" ? undefined : window.localStorage));
   const [unlockedAchievements, setUnlockedAchievements] = useState<UnlockedAchievementMap>(() =>
     loadUnlockedAchievements(typeof window === "undefined" ? undefined : window.localStorage)
@@ -261,6 +274,23 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    const syncViewFromLocation = () => {
+      const nextView = getInitialView();
+      setActiveView(nextView);
+      if (nextView === "search") {
+        const query = getInitialSearchQuery();
+        setSubmittedSearch(query);
+        setGlobalQuery(query);
+      }
+      if (nextView === "albums") {
+        setSelectedAlbumId(getInitialAlbumId());
+      }
+    };
+    window.addEventListener("popstate", syncViewFromLocation);
+    return () => window.removeEventListener("popstate", syncViewFromLocation);
+  }, []);
+
+  useEffect(() => {
     const payload = readExtensionImportFromHash();
     if (!payload) return;
     importExtensionPayload(payload);
@@ -307,13 +337,18 @@ export function App() {
   const latestExtensionBatch = importBatches.find((batch) => batch.source === "extension_scan");
 
   const searchResults = useMemo(
-    () => searchSavedItems(submittedSearch, state.savedItems, state.actionCards),
-    [state.actionCards, state.savedItems, submittedSearch]
+    () => searchSavedItems(submittedSearch, state.savedItems, state.actionCards, smartAlbums),
+    [state.actionCards, state.savedItems, smartAlbums, submittedSearch]
+  );
+
+  const dashboardSearchResults = useMemo(
+    () => searchSavedItems(dashboardSubmittedQuery, state.savedItems, state.actionCards, smartAlbums).slice(0, 5),
+    [dashboardSubmittedQuery, state.actionCards, state.savedItems, smartAlbums]
   );
 
   const mobileResults = useMemo(
-    () => searchSavedItems(mobileQuery, state.savedItems, state.actionCards).slice(0, 4),
-    [mobileQuery, state.actionCards, state.savedItems]
+    () => searchSavedItems(mobileQuery, state.savedItems, state.actionCards, smartAlbums).slice(0, 4),
+    [mobileQuery, state.actionCards, state.savedItems, smartAlbums]
   );
 
   const filteredItems = useMemo(() => {
@@ -328,12 +363,12 @@ export function App() {
     }
 
     if (poolQuery.trim()) {
-      const ids = new Set(searchSavedItems(poolQuery, items, state.actionCards).map((result) => result.item.id));
+      const ids = new Set(searchSavedItems(poolQuery, items, state.actionCards, smartAlbums).map((result) => result.item.id));
       items = items.filter((item) => ids.has(item.id));
     }
 
     return items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  }, [categoryFilter, poolQuery, state.actionCards, state.savedItems, statusFilter]);
+  }, [categoryFilter, poolQuery, smartAlbums, state.actionCards, state.savedItems, statusFilter]);
 
   const insights = useMemo(() => buildInsights(state.savedItems), [state.savedItems]);
   const revivalStats = useMemo(() => buildRevivalStats(state.savedItems), [state.savedItems]);
@@ -345,17 +380,33 @@ export function App() {
     [unlockedAchievements]
   );
 
-  function runSearch(query: string) {
+  function runSearch(query: string, options: { syncUrl?: boolean } = { syncUrl: true }) {
     const clean = query.trim();
     if (!clean) return;
-    const results = searchSavedItems(clean, state.savedItems, state.actionCards);
+    const results = searchSavedItems(clean, state.savedItems, state.actionCards, smartAlbums);
     setSubmittedSearch(clean);
     setGlobalQuery(clean);
     setActiveView("search");
+    if (options.syncUrl !== false && typeof window !== "undefined") {
+      window.history.pushState(null, "", `/search?q=${encodeURIComponent(clean)}`);
+    }
     setState((current) => ({
       ...current,
       searchLogs: [...current.searchLogs, createSearchLog(current.user.id, clean, results.length)]
     }));
+  }
+
+  function runDashboardSearch(query: string) {
+    const clean = query.trim();
+    if (!clean) {
+      setDashboardSubmittedQuery("");
+      return;
+    }
+    setDashboardSubmittedQuery(clean);
+  }
+
+  function viewAllSearchResults(query: string) {
+    runSearch(query);
   }
 
   async function testAiConnection(): Promise<string> {
@@ -451,11 +502,15 @@ export function App() {
   function commitImportResult(result: ProcessImportBatchResult) {
     setState((current) => {
       const savedItems = [...result.importedSavedItems, ...current.savedItems];
+      const matchedAlbums = applyConfirmedAlbumMatching(
+        mergeSmartAlbums(current.smartAlbums ?? smartAlbums, result.smartAlbumCandidates),
+        result.importedSavedItems
+      );
       return {
         ...current,
         savedItems,
         actionCards: [...result.actionCards, ...current.actionCards],
-        smartAlbums: result.smartAlbumCandidates,
+        smartAlbums: matchedAlbums,
         importBatches: [result.batch, ...(current.importBatches ?? [])],
         importBatchItems: [...result.batchItems, ...(current.importBatchItems ?? [])]
       };
@@ -806,24 +861,104 @@ export function App() {
     setToast("专辑名称已更新");
   }
 
-  function confirmSmartAlbum(albumId: string) {
+  function confirmSmartAlbum(albumId: string, options: { autoCollectEnabled?: boolean; mediumMatchRequiresApproval?: boolean } = {}) {
+    const now = new Date().toISOString();
     setState((current) => ({
       ...current,
       smartAlbums: (current.smartAlbums ?? smartAlbums).map((entry) =>
-        entry.id === albumId ? { ...entry, status: "confirmed", updatedAt: new Date().toISOString() } : entry
+        entry.id === albumId
+          ? {
+              ...entry,
+              status: "confirmed",
+              confirmedAt: entry.confirmedAt ?? now,
+              archivedAt: undefined,
+              autoCollectEnabled: options.autoCollectEnabled ?? true,
+              mediumMatchRequiresApproval: options.mediumMatchRequiresApproval ?? true,
+              matchProfile: buildAlbumMatchProfile(entry, current.savedItems),
+              schemaVersion: 2,
+              updatedAt: now
+            }
+          : entry
       )
     }));
-    setToast("已确认这个专辑");
+    setToast("高度匹配的新收藏会自动进入，中等匹配会先等待确认。");
   }
 
   function archiveSmartAlbum(albumId: string) {
+    const album = smartAlbums.find((entry) => entry.id === albumId);
+    if (album && !window.confirm("归档后会从待确认列表隐藏，但不会删除收藏，可以随时恢复。")) return;
+    const now = new Date().toISOString();
     setState((current) => ({
       ...current,
       smartAlbums: (current.smartAlbums ?? smartAlbums).map((entry) =>
-        entry.id === albumId ? { ...entry, status: "archived", updatedAt: new Date().toISOString() } : entry
+        entry.id === albumId ? { ...entry, status: "archived", archivedAt: now, updatedAt: now } : entry
       )
     }));
     setToast("已归档这个专辑候选，收藏本身不会被删除");
+  }
+
+  function restoreSmartAlbum(albumId: string) {
+    const now = new Date().toISOString();
+    setState((current) => ({
+      ...current,
+      smartAlbums: (current.smartAlbums ?? smartAlbums).map((entry) =>
+        entry.id === albumId ? { ...entry, status: "candidate", archivedAt: undefined, updatedAt: now } : entry
+      )
+    }));
+    setToast("已恢复为候选专辑");
+  }
+
+  function acceptSuggestedAlbumItem(albumId: string, itemId: string) {
+    updateAlbumMembership(albumId, [itemId], "accept_suggested");
+  }
+
+  function rejectSuggestedAlbumItem(albumId: string, itemId: string) {
+    updateAlbumMembership(albumId, [itemId], "reject_suggested");
+  }
+
+  function acceptAllSuggestedAlbumItems(albumId: string) {
+    const album = smartAlbums.find((entry) => entry.id === albumId);
+    if (!album || !album.suggestedItemIds?.length) return;
+    updateAlbumMembership(albumId, album.suggestedItemIds, "accept_suggested");
+  }
+
+  function updateAlbumMembership(albumId: string, itemIds: string[], action: "accept_suggested" | "reject_suggested" | "remove") {
+    const previousSnapshot = state;
+    const now = new Date().toISOString();
+    setState((current) => ({
+      ...current,
+      smartAlbums: (current.smartAlbums ?? smartAlbums).map((album) => {
+        if (album.id !== albumId) return album;
+        const itemSet = new Set(album.savedItemIds);
+        const suggestedSet = new Set(album.suggestedItemIds ?? []);
+        const manuallyAdded = new Set(album.manuallyAddedItemIds ?? []);
+        const manuallyRemoved = new Set(album.manuallyRemovedItemIds ?? []);
+        itemIds.forEach((id) => {
+          if (action === "accept_suggested") {
+            itemSet.add(id);
+            suggestedSet.delete(id);
+            manuallyAdded.add(id);
+            manuallyRemoved.delete(id);
+          } else {
+            itemSet.delete(id);
+            suggestedSet.delete(id);
+            manuallyRemoved.add(id);
+            manuallyAdded.delete(id);
+          }
+        });
+        return {
+          ...album,
+          savedItemIds: [...itemSet],
+          recommendedItemIds: album.recommendedItemIds.filter((id) => itemSet.has(id)).slice(0, 3),
+          suggestedItemIds: [...suggestedSet],
+          manuallyAddedItemIds: [...manuallyAdded],
+          manuallyRemovedItemIds: [...manuallyRemoved],
+          updatedAt: now
+        };
+      })
+    }));
+    setLastCorrectionUndoState(previousSnapshot);
+    setToast(action === "accept_suggested" ? "已加入专辑" : "已从专辑移除，后续不会自动塞回");
   }
 
   function correctSavedItemClassification(itemId: string, mode: "domain" | "intent") {
@@ -916,6 +1051,7 @@ export function App() {
       savedItemId: item.id,
       actionCardId: card.id,
       title: card.title,
+      sourceTitle: formatItemTitle(item),
       plannedDate: parsePlanDate(dateInput, now).toISOString(),
       estimatedMinutes: clampEstimatedMinutes(Number(estimatedInput)),
       oneNextStep: nextAction,
@@ -936,13 +1072,85 @@ export function App() {
 
   function updatePlanCardStatus(planCardId: string, status: PlanCardStatus) {
     const now = new Date().toISOString();
+    const previousSnapshot = state;
+    const planCard = state.planCards?.find((entry) => entry.id === planCardId);
+    const previousItem = planCard ? state.savedItems.find((item) => item.id === planCard.savedItemId) : undefined;
     setState((current) => ({
       ...current,
       planCards: (current.planCards ?? []).map((planCard) =>
-        planCard.id === planCardId ? { ...planCard, status, completedAt: status === "done" ? now : planCard.completedAt } : planCard
+        planCard.id === planCardId
+          ? {
+              ...planCard,
+              status,
+              completedAt: status === "done" ? now : planCard.completedAt,
+              cancelledAt: status === "cancelled" ? now : planCard.cancelledAt
+            }
+          : planCard
+      ),
+      savedItems: status === "done" && planCard
+        ? current.savedItems.map((item) =>
+            item.id === planCard.savedItemId ? { ...item, status: "completed", updatedAt: now } : item
+          )
+        : status === "doing" && planCard
+          ? current.savedItems.map((item) =>
+              item.id === planCard.savedItemId && item.status !== "completed" ? { ...item, status: "in_progress", updatedAt: now } : item
+            )
+          : current.savedItems
+    }));
+    setLastPlanUndoState(previousSnapshot);
+    if (status === "done") {
+      unlockAchievements(["plan_finished"]);
+      if (previousItem?.status !== "completed") {
+        triggerCompletionReward(updateItemStatus(state.savedItems, planCard?.savedItemId ?? "", "completed"));
+      }
+    }
+  }
+
+  function postponePlanCard(planCardId: string) {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(9, 0, 0, 0);
+    updatePlanCardDate(planCardId, tomorrow, "已延期到明天");
+  }
+
+  function reschedulePlanCard(planCardId: string) {
+    const current = state.planCards?.find((planCard) => planCard.id === planCardId);
+    const value = window.prompt("更换到哪天？可填：今天 / 明天 / 2026-07-20", current ? formatDateInput(current.plannedDate) : "明天")?.trim();
+    if (!value) return;
+    updatePlanCardDate(planCardId, parsePlanDate(value, new Date()), "已更新计划日期");
+  }
+
+  function cancelPlanCard(planCardId: string) {
+    updatePlanCardStatus(planCardId, "cancelled");
+    setToast("已取消这张计划卡，历史会保留");
+  }
+
+  function updatePlanCardDate(planCardId: string, plannedDate: Date, message: string) {
+    const previousSnapshot = state;
+    const now = new Date().toISOString();
+    setState((current) => ({
+      ...current,
+      planCards: (current.planCards ?? []).map((planCard) =>
+        planCard.id === planCardId ? { ...planCard, plannedDate: plannedDate.toISOString(), status: "planned", updatedAt: now } : planCard
       )
     }));
-    if (status === "done") unlockAchievements(["plan_finished"]);
+    setLastPlanUndoState(previousSnapshot);
+    setToast(message);
+  }
+
+  function viewPlanSource(planCard: PlanCard) {
+    setSelectedItemId(planCard.savedItemId);
+    setActiveView("detail");
+  }
+
+  function undoPlanChange() {
+    if (!lastPlanUndoState) {
+      setToast("暂无可撤销的计划修改");
+      return;
+    }
+    setState(lastPlanUndoState);
+    setLastPlanUndoState(null);
+    setToast("已撤销上次计划修改");
   }
 
   function selectAlbum(albumId: string) {
@@ -952,6 +1160,7 @@ export function App() {
   }
 
   function removeItemFromAlbum(albumId: string, itemId: string) {
+    const previousSnapshot = state;
     setState((current) => {
       const nextSmartAlbums: SmartAlbum[] = (current.smartAlbums ?? smartAlbums)
         .map((album: SmartAlbum) =>
@@ -960,6 +1169,8 @@ export function App() {
                 ...album,
                 savedItemIds: album.savedItemIds.filter((id: string) => id !== itemId),
                 recommendedItemIds: album.recommendedItemIds.filter((id: string) => id !== itemId),
+                suggestedItemIds: (album.suggestedItemIds ?? []).filter((id: string) => id !== itemId),
+                manuallyRemovedItemIds: Array.from(new Set([...(album.manuallyRemovedItemIds ?? []), itemId])),
                 updatedAt: new Date().toISOString()
               }
             : album
@@ -967,6 +1178,7 @@ export function App() {
         .filter((album: SmartAlbum) => album.status === "confirmed" || album.savedItemIds.length > 0);
       return { ...current, smartAlbums: nextSmartAlbums };
     });
+    setLastCorrectionUndoState(previousSnapshot);
     setToast("已从当前专辑移除，收藏本身仍在收藏池");
   }
 
@@ -976,6 +1188,57 @@ export function App() {
 
   function addItemToIntentAlbum(itemId: string) {
     correctSavedItemClassification(itemId, "intent");
+  }
+
+  function bulkCorrectAlbumItems(itemIds: string[], mode: "domain" | "intent") {
+    if (itemIds.length === 0) {
+      setToast("先选择至少一条收藏");
+      return;
+    }
+    const previousSnapshot = state;
+    const now = new Date().toISOString();
+    let patchFactory: (item: SavedItem) => Partial<SavedItem>;
+    if (mode === "domain") {
+      const domainInput = window.prompt(`批量移动主题（可选：${CATEGORIES.join(" / ")}）`, "暂存")?.trim();
+      if (!domainInput) return;
+      const safeDomain = (CATEGORIES as readonly string[]).includes(domainInput) ? domainInput as Category : "暂存";
+      const subDomainInput = window.prompt("批量二级主题，例如 AI工具 / 展览活动 / 封面设计", safeDomain === "暂存" ? "待补充备注" : "主题整理")?.trim();
+      patchFactory = () => ({
+        contentDomain: safeDomain,
+        category: safeDomain,
+        contentSubDomain: subDomainInput || (safeDomain === "暂存" ? "待补充备注" : "主题整理"),
+        subCategory: subDomainInput || (safeDomain === "暂存" ? "待补充备注" : "主题整理"),
+        confidence: "medium",
+        classificationConfidence: "medium",
+        whyThisDomain: "用户在智能专辑中批量移动过内容主题。",
+        whyThisCategory: "用户在智能专辑中批量移动过内容主题。"
+      });
+    } else {
+      const intentInput = window.prompt(`批量添加用途专辑（可选：${SAVED_INTENTS.join(" / ")}）`, "以后查阅")?.trim();
+      if (!intentInput) return;
+      const safeIntent = (SAVED_INTENTS as readonly string[]).includes(intentInput) ? intentInput as SavedIntent : "以后查阅";
+      patchFactory = () => ({
+        savedIntent: safeIntent,
+        intent: safeIntent,
+        whyThisIntent: "用户在智能专辑中批量调整过收藏用途。"
+      });
+    }
+    const selectedIds = new Set(itemIds);
+    setState((current) => {
+      const savedItems = current.savedItems.map((item) => {
+        if (!selectedIds.has(item.id)) return item;
+        const patch = patchFactory(item);
+        const nextItem = { ...item, ...patch, updatedAt: now };
+        return { ...nextItem, searchableText: rebuildItemSearchableText(nextItem) };
+      });
+      return {
+        ...current,
+        savedItems,
+        smartAlbums: mergeGeneratedSmartAlbums(current.smartAlbums ?? smartAlbums, savedItems)
+      };
+    });
+    setLastCorrectionUndoState(previousSnapshot);
+    setToast(mode === "domain" ? "已批量移动主题，可撤销" : "已批量添加用途专辑，可撤销");
   }
 
   function createManualAlbum() {
@@ -1085,6 +1348,19 @@ export function App() {
               plans={plans}
               planCards={todaysPlanCards}
               updatePlanCardStatus={updatePlanCardStatus}
+              postponePlanCard={postponePlanCard}
+              reschedulePlanCard={reschedulePlanCard}
+              cancelPlanCard={cancelPlanCard}
+              viewPlanSource={viewPlanSource}
+              undoPlanChange={undoPlanChange}
+              canUndoPlanChange={Boolean(lastPlanUndoState)}
+              dashboardQuery={dashboardQuery}
+              setDashboardQuery={setDashboardQuery}
+              dashboardSubmittedQuery={dashboardSubmittedQuery}
+              dashboardSearchResults={dashboardSearchResults}
+              runDashboardSearch={runDashboardSearch}
+              viewAllSearchResults={viewAllSearchResults}
+              reviveSavedItem={reviveSavedItem}
               insights={insights}
               revivalStats={revivalStats}
               achievements={unlockedAchievementDisplays}
@@ -1203,6 +1479,10 @@ export function App() {
               renameAlbum={renameSmartAlbum}
               confirmAlbum={confirmSmartAlbum}
               archiveAlbum={archiveSmartAlbum}
+              restoreAlbum={restoreSmartAlbum}
+              acceptSuggestedItem={acceptSuggestedAlbumItem}
+              rejectSuggestedItem={rejectSuggestedAlbumItem}
+              acceptAllSuggestedItems={acceptAllSuggestedAlbumItems}
               regenerateSmartAlbums={regenerateSmartAlbums}
               correctSavedItemClassification={correctSavedItemClassification}
               selectedAlbumId={selectedAlbumId}
@@ -1210,9 +1490,12 @@ export function App() {
               removeItemFromAlbum={removeItemFromAlbum}
               moveItemToTheme={moveItemToTheme}
               addItemToIntentAlbum={addItemToIntentAlbum}
+              bulkCorrectAlbumItems={bulkCorrectAlbumItems}
               createManualAlbum={createManualAlbum}
               undoLastClassificationChange={undoLastClassificationChange}
               canUndoClassificationChange={Boolean(lastCorrectionUndoState)}
+              albumFilter={albumFilter}
+              setAlbumFilter={setAlbumFilter}
             />
           )}
 
