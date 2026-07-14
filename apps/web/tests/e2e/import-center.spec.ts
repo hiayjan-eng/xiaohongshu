@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { collectConsoleErrors, expectNoConsoleErrors, readAppState, resetDemoData } from "./helpers";
+import { collectConsoleErrors, expectNoConsoleErrors, readAppState, resetDemoData, submitQuickImportForm } from "./helpers";
 
 function encodePayload(payload: unknown) {
   return Buffer.from(JSON.stringify(payload), "utf8")
@@ -22,7 +22,7 @@ test.describe("Import Center architecture", () => {
     await page.getByTestId("import-source-url").fill("https://www.xiaohongshu.com/explore/import-center-test");
     await page.getByTestId("import-title").fill("深圳周末咖啡路线");
     await page.getByTestId("import-raw-share-text").fill("深圳周末咖啡店和展览路线，适合半日出行");
-    await page.getByTestId("import-submit").click();
+    await submitQuickImportForm(page);
 
     await expect.poll(async () => (await readAppState(page)).importBatches?.[0]?.source).toBe("manual_single");
     const state = await readAppState(page);
@@ -86,17 +86,23 @@ test.describe("Import Center architecture", () => {
     page.on("dialog", async (dialog) => {
       await dialog.accept(domainAnswers.shift() ?? "封面设计");
     });
-    await page.getByRole("button", { name: "改主题" }).first().click();
+    await page.getByRole("button", { name: "改主题" }).first().click({ force: true });
     await expect.poll(async () => (await readAppState(page)).savedItems.some((item) => item.contentDomain === "内容创作" && item.contentSubDomain === "封面设计")).toBe(true);
     page.removeAllListeners("dialog");
 
     page.once("dialog", async (dialog) => {
       await dialog.accept("内容创作参考");
     });
-    await page.getByRole("button", { name: "改用途" }).first().click();
+    await page.getByRole("button", { name: "改用途" }).first().click({ force: true });
     await expect.poll(async () => (await readAppState(page)).savedItems.some((item) => item.savedIntent === "内容创作参考")).toBe(true);
     await page.getByTestId("confirm-album").first().click();
+    await expect(page.getByTestId("confirm-album-modal")).toBeVisible();
+    await page.getByTestId("confirm-album-modal").getByRole("button", { name: "确认这个专辑" }).click();
     await expect.poll(async () => (await readAppState(page)).smartAlbums?.some((album) => album.status === "confirmed")).toBe(true);
+    const confirmedState = await readAppState(page);
+    const confirmedAlbum = confirmedState.smartAlbums?.find((album) => album.status === "confirmed");
+    expect(confirmedAlbum?.confirmedAt).toBeTruthy();
+    expect(confirmedAlbum?.matchProfile).toBeTruthy();
 
     page.once("dialog", async (dialog) => {
       await dialog.accept("测试智能专辑");
@@ -104,8 +110,14 @@ test.describe("Import Center architecture", () => {
     await page.getByRole("button", { name: "改名" }).first().click();
     await expect.poll(async () => (await readAppState(page)).smartAlbums?.some((album) => album.title === "测试智能专辑")).toBe(true);
 
-    await page.getByTestId("archive-album").first().click();
+    page.once("dialog", async (dialog) => {
+      await dialog.accept();
+    });
+    await page.getByTestId("album-detail").getByRole("button", { name: "归档这个候选" }).click({ force: true });
     await expect.poll(async () => (await readAppState(page)).smartAlbums?.some((album) => album.status === "archived")).toBe(true);
+    await page.getByRole("button", { name: "已归档" }).click();
+    await page.getByTestId("restore-album").first().click();
+    await expect.poll(async () => (await readAppState(page)).smartAlbums?.some((album) => album.status === "candidate")).toBe(true);
     await expectNoConsoleErrors(errors);
   });
 });

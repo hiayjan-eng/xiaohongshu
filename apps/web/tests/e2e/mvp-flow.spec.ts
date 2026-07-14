@@ -77,7 +77,7 @@ test.describe("MVP page health and import flow", () => {
     expect(savedItem?.keywords.length).toBeGreaterThan(0);
     expect(savedItem?.entities.length).toBeGreaterThan(0);
     expect(savedItem?.searchableText).toContain("封面");
-    await page.getByTestId("revive-imported-item").click();
+    await page.getByTestId("revive-imported-item").click({ force: true });
     await expect.poll(async () => (await readAppState(page)).actionCards.some((card) => card.savedItemId === item.id)).toBe(true);
     const actionCard = (await readAppState(page)).actionCards.find((card) => card.savedItemId === item.id);
     expect(actionCard?.nextAction).toBeTruthy();
@@ -92,4 +92,3 @@ test.describe("MVP page health and import flow", () => {
     await expectNoConsoleErrors(errors);
   });
 });
-

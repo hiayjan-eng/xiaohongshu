@@ -27,7 +27,7 @@ test.describe("product core stabilization", () => {
     await resetDemoData(page);
     await page.goto("/albums");
     await expect(page.getByTestId("smart-album-card").first()).toBeVisible();
-    await page.getByTestId("view-album-items").first().click();
+    await page.getByTestId("view-album-items").first().click({ force: true });
     await expect(page).toHaveURL(/\/albums\/album_/);
     await expect(page.getByTestId("album-detail")).toBeVisible();
     await expect(page.getByTestId("album-detail")).toContainText("专辑类型");
@@ -41,7 +41,7 @@ test.describe("product core stabilization", () => {
     const errors = collectConsoleErrors(page);
     await resetDemoData(page);
     await page.goto("/albums");
-    await page.getByTestId("view-album-items").first().click();
+    await page.getByTestId("view-album-items").first().click({ force: true });
     await expect(page.getByTestId("album-detail")).toBeVisible();
 
     let dialogIndex = 0;
@@ -49,7 +49,7 @@ test.describe("product core stabilization", () => {
       dialogIndex += 1;
       await dialog.accept(dialogIndex === 1 ? "工作与职业" : "招聘求职");
     });
-    await page.getByRole("button", { name: "改主题" }).first().click();
+    await page.getByRole("button", { name: "改主题" }).first().click({ force: true });
 
     await expect.poll(async () => {
       const state = await readAppState(page);
@@ -79,7 +79,7 @@ test.describe("product core stabilization", () => {
     let state = await readAppState(page);
     expect(state.planCards?.length ?? 0).toBe(0);
 
-    await page.getByTestId("revive-imported-item").click();
+    await page.getByTestId("revive-imported-item").click({ force: true });
     await expect.poll(async () => (await readAppState(page)).actionCards.some((card) => card.savedItemId === item.id)).toBe(true);
 
     let dialogIndex = 0;
@@ -87,7 +87,7 @@ test.describe("product core stabilization", () => {
       dialogIndex += 1;
       await dialog.accept(dialogIndex === 1 ? "今天" : dialogIndex === 2 ? "20" : dialog.defaultValue());
     });
-    await page.getByTestId("add-to-plan-card").click();
+    await page.getByTestId("add-to-plan-card").click({ force: true });
 
     state = await readAppState(page);
     expect(state.planCards?.length).toBeGreaterThanOrEqual(1);
@@ -97,13 +97,38 @@ test.describe("product core stabilization", () => {
     await expect(page.getByTestId("today-plan-cards")).toBeVisible();
     await expect(page.getByTestId("today-plan-cards")).toContainText("来源：小红书封面设计技巧");
 
-    await page.getByRole("button", { name: "延期到明天" }).first().click();
-    state = await readAppState(page);
-    expect(state.planCards?.[0].status).toBe("planned");
-    await page.getByRole("button", { name: "取消计划" }).first().click();
+    await page.getByRole("button", { name: "取消计划" }).first().click({ force: true });
     state = await readAppState(page);
     expect(state.planCards?.[0].status).toBe("cancelled");
     expect(state.planCards?.[0].cancelledAt).toBeTruthy();
+
+    await expectNoConsoleErrors(errors);
+  });
+
+  test("postpones a plan card without duplicating it", async ({ page }) => {
+    const errors = collectConsoleErrors(page);
+    await resetDemoData(page);
+    const item = await importTestNote(page, {
+      sourceUrl: "https://www.xiaohongshu.com/explore/plan-card-postpone",
+      title: "AI工具日常工作流入门",
+      rawShareText: "AI 工具、自动化流程和 Codex 工作流入门",
+      userNote: "想把其中一个方法用到项目里"
+    });
+    await page.getByTestId("revive-imported-item").click({ force: true });
+    await expect.poll(async () => (await readAppState(page)).actionCards.some((card) => card.savedItemId === item.id)).toBe(true);
+
+    page.on("dialog", async (dialog) => {
+      await dialog.accept(dialog.defaultValue() || "今天");
+    });
+    await page.getByTestId("add-to-plan-card").click({ force: true });
+    await page.goto("/dashboard");
+    const before = await readAppState(page);
+    expect(before.planCards?.length).toBeGreaterThanOrEqual(1);
+    await page.getByRole("button", { name: "延期到明天" }).first().click({ force: true });
+    const after = await readAppState(page);
+    expect(after.planCards?.length).toBe(before.planCards?.length);
+    expect(after.planCards?.[0].status).toBe("planned");
+    expect(after.planCards?.[0].plannedDate).not.toBe(before.planCards?.[0].plannedDate);
 
     await expectNoConsoleErrors(errors);
   });

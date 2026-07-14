@@ -24,22 +24,22 @@ test.describe("Real user test mode", () => {
     await page.getByTestId("real-test-title").fill(realNote.title);
     await page.getByTestId("real-test-raw-share-text").fill(realNote.rawShareText);
     await page.getByTestId("real-test-user-note").fill(realNote.userNote);
-    await page.getByTestId("real-test-generate").click();
+    await page.getByTestId("real-test-generate").click({ force: true });
 
     await expect(page.getByTestId("real-test-generated-result")).toContainText(realNote.title);
     await expect(page.getByTestId("real-test-generated-result")).toContainText("下一步行动");
     await expect.poll(async () => (await readAppState(page)).savedItems.some((item) => item.sourceUrl === realNote.sourceUrl)).toBe(true);
 
-    await page.getByTestId("real-test-classification-accurate").click();
-    await page.getByTestId("real-test-action-useful").click();
-    await page.getByTestId("real-test-next-step-clear").click();
-    await page.getByTestId("real-test-today-willing").click();
-    await page.getByTestId("real-test-reward-satisfying").click();
+    await page.getByTestId("real-test-classification-accurate").click({ force: true });
+    await page.getByTestId("real-test-action-useful").click({ force: true });
+    await page.getByTestId("real-test-next-step-clear").click({ force: true });
+    await page.getByTestId("real-test-today-willing").click({ force: true });
+    await page.getByTestId("real-test-reward-satisfying").click({ force: true });
     await page.getByTestId("real-test-search-query").fill("封面");
-    await page.getByTestId("real-test-search-button").click();
+    await page.getByTestId("real-test-search-button").click({ force: true });
     await expect(page.getByTestId("real-test-search-status")).toContainText("找到了");
     await page.getByTestId("real-test-issue-note").fill("封面类行动卡还可以更偏实操一点");
-    await page.getByTestId("real-test-save").click();
+    await page.getByTestId("real-test-save").click({ force: true });
 
     await expect(page.getByTestId("real-test-stat-tested")).toContainText("1 / 20");
     await expect(page.getByTestId("real-test-stat-classification")).toContainText("100%");

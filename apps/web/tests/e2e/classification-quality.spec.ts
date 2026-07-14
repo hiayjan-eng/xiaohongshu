@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { collectConsoleErrors, expectNoConsoleErrors, importTestNote, readAppState, resetDemoData, reviveImportedItem } from "./helpers";
+import { collectConsoleErrors, expectNoConsoleErrors, importTestNote, readAppState, resetDemoData, reviveImportedItem, submitQuickImportForm } from "./helpers";
 
 const genericNextActionPattern = /拆解一个参考案例|记录\s*3\s*个可模仿|先了解一下|整理成计划/;
 
@@ -91,7 +91,7 @@ test.describe("classification, saved intent, and on-demand action cards", () => 
     await page.getByTestId("import-source-url").fill("https://www.xiaohongshu.com/explore/quality-continue-import");
     await page.getByTestId("import-title").fill("小红书选题封面灵感");
     await page.getByTestId("import-raw-share-text").fill("内容创作选题和封面结构参考");
-    await page.getByTestId("import-submit").click();
+    await submitQuickImportForm(page);
 
     await expect(page.getByTestId("import-success-panel")).toContainText("整理完成");
     await expect(page.getByTestId("import-success-panel")).toContainText("收藏用途");

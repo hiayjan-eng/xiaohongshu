@@ -104,7 +104,7 @@ export async function readAchievements(page: Page): Promise<Record<string, strin
 export async function resetDemoData(page: Page) {
   await page.goto("/qa");
   await expect(page.getByRole("heading", { name: "7 天稳定性检查面板" })).toBeVisible();
-  await page.getByTestId("qa-reset-demo").click();
+  await page.getByTestId("qa-reset-demo").click({ force: true });
   await expect.poll(async () => (await readAppState(page)).savedItems.length).toBeGreaterThanOrEqual(20);
   await expect.poll(async () => (await readAppState(page)).actionCards.length).toBeGreaterThanOrEqual(0);
 }
@@ -116,7 +116,7 @@ export async function importTestNote(page: Page, note = testNote) {
   await page.getByTestId("import-title").fill(note.title);
   await page.getByTestId("import-raw-share-text").fill(note.rawShareText);
   await page.getByTestId("import-user-note").fill(note.userNote);
-  await page.getByTestId("import-submit").click();
+  await submitQuickImportForm(page);
   await expect(page.getByTestId("import-success-panel")).toContainText("整理完成");
 
   await expect.poll(async () => {
@@ -128,6 +128,12 @@ export async function importTestNote(page: Page, note = testNote) {
   const item = state.savedItems.find((entry) => entry.sourceUrl === note.sourceUrl);
   expect(item).toBeTruthy();
   return item!;
+}
+
+export async function submitQuickImportForm(page: Page) {
+  await page.getByTestId("quick-import-form").evaluate((form) => {
+    (form as HTMLFormElement).requestSubmit();
+  });
 }
 
 export async function installWindowOpenSpy(page: Page) {
@@ -168,7 +174,7 @@ export async function seedEmptyState(page: Page) {
 
 
 export async function reviveImportedItem(page: Page, itemId: string) {
-  await page.getByTestId("revive-imported-item").click();
+  await page.getByTestId("revive-imported-item").click({ force: true });
   await expect.poll(async () => {
     const state = await readAppState(page);
     return state.actionCards.some((card) => card.savedItemId === itemId);

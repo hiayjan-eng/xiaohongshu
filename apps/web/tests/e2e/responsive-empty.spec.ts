@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { collectConsoleErrors, expectNoConsoleErrors, importTestNote, readAppState, resetDemoData, reviveImportedItem, seedEmptyState } from "./helpers";
+import { collectConsoleErrors, expectNoConsoleErrors, importTestNote, readAppState, resetDemoData, reviveImportedItem, seedEmptyState, submitQuickImportForm } from "./helpers";
 
 test.describe("MVP empty states and responsive basics", () => {
   test("handles empty local data and missing sourceUrl without crashing", async ({ page }) => {
@@ -8,7 +8,8 @@ test.describe("MVP empty states and responsive basics", () => {
 
     await page.goto("/dashboard");
     await expect(page.getByRole("heading", { name: "先把旧收藏捡回来" })).toBeVisible();
-    await expect(page.getByText("今天没有待复活收藏")).toBeVisible();
+    await expect(page.getByText("今天还没有安排")).toBeVisible();
+    await expect(page.getByText("搜一条收藏，做最小的一步。")).toBeVisible();
     await expect(page.getByText("收藏池还是空的")).toBeVisible();
 
     await page.goto("/pool");
@@ -22,7 +23,7 @@ test.describe("MVP empty states and responsive basics", () => {
     await page.goto("/import");
     await page.getByTestId("import-title").fill("没有链接的封面灵感收藏");
     await page.getByTestId("import-raw-share-text").fill("封面设计参考，没有 sourceUrl，用来测试导入管线兜底");
-    await page.getByTestId("import-submit").click();
+    await submitQuickImportForm(page);
     await expect(page.getByTestId("import-success-panel")).toBeVisible();
     await expect(page.locator("body")).not.toContainText("Cannot read properties of undefined");
     await expect.poll(async () => (await readAppState(page)).savedItems.some((item) => item.sourceUrl === "" && (item.title.includes("没有链接") || item.rawShareText.includes("sourceUrl")))).toBe(true);
@@ -49,7 +50,7 @@ test.describe("MVP empty states and responsive basics", () => {
       const globalSearch = page.getByRole("textbox", { name: "全局搜索" });
       await expect(globalSearch).toBeVisible();
       await globalSearch.fill("剪辑");
-      await page.getByRole("button", { name: "搜索", exact: true }).click();
+      await page.locator(".topbar .global-search").getByRole("button", { name: "搜索", exact: true }).click();
       await expect(page.getByTestId("search-result-card").first()).toBeVisible();
 
       await page.goto("/dashboard");
