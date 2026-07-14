@@ -1,4 +1,4 @@
-import type { ActionCard, Category, Plan, PlanType, SavedIntent, SavedItem, SmartAlbum, SmartAlbumPriority, Task } from "@revival/shared-types";
+import type { ActionCard, Category, Plan, PlanType, SavedIntent, SavedItem, SmartAlbum, SmartAlbumMatchProfile, SmartAlbumPriority, Task } from "@revival/shared-types";
 
 export const PLAN_TYPE_LABELS: Record<PlanType, string> = {
   learning: "学习计划",
@@ -206,6 +206,7 @@ function buildSmartAlbum(cluster: AlbumCluster, now: Date): SmartAlbum {
   const title = pickAlbumTitle(cluster);
   const priorityScore = cluster.items.length * 12 + cluster.keywords.length * 3 + (cluster.category === "暂存" ? -8 : 0) + (cluster.albumView === "saved_intent" ? 3 : 0);
   const priority: SmartAlbumPriority = priorityScore >= 36 ? "high" : priorityScore >= 18 ? "medium" : "low";
+  const matchProfile = buildMatchProfile(cluster);
 
   return {
     id: `album_${cluster.albumView}_${slugify(cluster.savedIntent ?? cluster.category)}_${slugify(cluster.subCategory)}_${slugify(cluster.keywords[0] ?? cluster.key)}`,
@@ -229,8 +230,29 @@ function buildSmartAlbum(cluster: AlbumCluster, now: Date): SmartAlbum {
     priority,
     priorityScore,
     status: "candidate",
+    autoCollectEnabled: false,
+    mediumMatchRequiresApproval: true,
+    matchProfile,
+    suggestedItemIds: [],
+    manuallyAddedItemIds: [],
+    manuallyRemovedItemIds: [],
+    schemaVersion: 2,
     createdAt,
     updatedAt: createdAt
+  };
+}
+
+function buildMatchProfile(cluster: AlbumCluster): SmartAlbumMatchProfile {
+  const entityValues = new Set<string>();
+  cluster.items.forEach((item) => item.entities.forEach((entity) => entityValues.add(entity.value)));
+  return {
+    contentDomain: cluster.albumView === "content_domain" ? cluster.category : undefined,
+    contentSubDomain: cluster.albumView === "content_domain" ? cluster.subCategory : undefined,
+    savedIntent: cluster.albumView === "saved_intent" ? cluster.savedIntent : undefined,
+    keywords: cluster.keywords.slice(0, 10),
+    entityValues: [...entityValues].slice(0, 12),
+    positiveExamples: cluster.items.slice(0, 5).map((item) => item.id),
+    negativeExamples: []
   };
 }
 
