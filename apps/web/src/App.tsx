@@ -1733,6 +1733,19 @@ function DashboardView(props: {
   plans: Plan[];
   planCards: PlanCard[];
   updatePlanCardStatus: (planCardId: string, status: PlanCardStatus) => void;
+  postponePlanCard: (planCardId: string) => void;
+  reschedulePlanCard: (planCardId: string) => void;
+  cancelPlanCard: (planCardId: string) => void;
+  viewPlanSource: (planCard: PlanCard) => void;
+  undoPlanChange: () => void;
+  canUndoPlanChange: boolean;
+  dashboardQuery: string;
+  setDashboardQuery: (value: string) => void;
+  dashboardSubmittedQuery: string;
+  dashboardSearchResults: SearchResult[];
+  runDashboardSearch: (query: string) => void;
+  viewAllSearchResults: (query: string) => void;
+  reviveSavedItem: (itemId: string) => void;
   insights: ReturnType<typeof buildInsights>;
   revivalStats: ReturnType<typeof buildRevivalStats>;
   achievements: AchievementDisplay[];
@@ -1745,6 +1758,11 @@ function DashboardView(props: {
   viewActionCard: (itemId: string) => void;
   changeStatus: (itemId: string, status: ItemStatus) => void;
 }) {
+  function handleDashboardSearch(event: FormEvent) {
+    event.preventDefault();
+    props.runDashboardSearch(props.dashboardQuery);
+  }
+
   return (
     <div className="dashboard-redesign">
       <section className="dashboard-hero-v3 reveal-up">
@@ -1752,11 +1770,21 @@ function DashboardView(props: {
           <span className="welcome-kicker"><Sparkles size={16} /> 今日复活</span>
           <h1>先把旧收藏捡回来</h1>
           <p>扫描旧收藏，整理成主题和用途；等你决定复活哪一条，再生成行动卡。</p>
-          <div className="dashboard-search-prompt" aria-label="全局搜索提示">
+          <form className="dashboard-search-prompt dashboard-search-form" aria-label="今日复活搜索" onSubmit={handleDashboardSearch}>
             <Search size={18} />
-            <span>搜地点、技能、店名、菜名、工具名，找回你收藏过的原帖</span>
+            <label>
+              <strong>找一条收藏，今天复活</strong>
+              <span>搜一个地点、技能、菜名、工具或主题，只做最小的一步。</span>
+              <input
+                value={props.dashboardQuery}
+                onChange={(event) => props.setDashboardQuery(event.target.value)}
+                placeholder="比如 AI、深圳、低卡晚餐、封面设计"
+                data-testid="dashboard-search-input"
+              />
+            </label>
             <kbd>Ctrl K</kbd>
-          </div>
+            <button type="submit" data-testid="dashboard-search-submit">搜索</button>
+          </form>
         </div>
 
         <div className="dashboard-stat-grid" aria-label="复活数据摘要">
@@ -1784,10 +1812,11 @@ function DashboardView(props: {
                   changeStatus={props.changeStatus}
                 />
               ))
-            ) : (
-              <EmptyState title="今天没有待复活收藏" text="导入一条新收藏，系统会帮你生成今天可以做的一步。" />
-            )}
+            ) : null}
           </div>
+          {props.planCards.length === 0 && (
+            <EmptyState title="今天还没有安排" text="搜一条收藏，做最小的一步。" />
+          )}
           {props.planCards.length > 0 && (
             <div className="plan-card-stack" data-testid="today-plan-cards">
               <div className="section-heading-soft">
@@ -1796,15 +1825,33 @@ function DashboardView(props: {
               </div>
               {props.planCards.map((planCard) => (
                 <article className="plan-mini-row" key={planCard.id}>
-                  <strong>{planCard.title}</strong>
-                  <span>{planCard.estimatedMinutes} 分钟 · {planCard.oneNextStep}</span>
-                  <button onClick={() => props.updatePlanCardStatus(planCard.id, planCard.status === "done" ? "planned" : "done")}>
-                    {planCard.status === "done" ? "已完成" : "完成"}
-                  </button>
+                  <div>
+                    <strong>{planCard.title}</strong>
+                    <span>来源：{planCard.sourceTitle || "来源收藏待补充"}</span>
+                    <span>{planCard.estimatedMinutes} 分钟 · {planCard.oneNextStep}</span>
+                    <small>{formatDate(planCard.plannedDate)} · 完成标准：{planCard.doneCriteria} · {planCard.status === "doing" ? "进行中" : planCard.status === "done" ? "已完成" : "计划中"}</small>
+                  </div>
+                  <div className="plan-card-actions">
+                    <button onClick={() => props.updatePlanCardStatus(planCard.id, "doing")}>开始</button>
+                    <button onClick={() => props.updatePlanCardStatus(planCard.id, "done")}>完成</button>
+                    <button onClick={() => props.postponePlanCard(planCard.id)}>延期到明天</button>
+                    <button onClick={() => props.reschedulePlanCard(planCard.id)}>更换日期</button>
+                    <button onClick={() => props.cancelPlanCard(planCard.id)}>取消计划</button>
+                    <button onClick={() => props.viewPlanSource(planCard)}>查看来源收藏</button>
+                  </div>
                 </article>
               ))}
+              <button className="ghost-action" onClick={props.undoPlanChange} disabled={!props.canUndoPlanChange}>撤销上次计划修改</button>
             </div>
           )}
+          <DashboardSearchResults
+            query={props.dashboardSubmittedQuery}
+            results={props.dashboardSearchResults}
+            openSource={props.openSource}
+            viewActionCard={props.viewActionCard}
+            reviveSavedItem={props.reviveSavedItem}
+            viewAllSearchResults={props.viewAllSearchResults}
+          />
         </section>
 
         <section className="quick-revive-board reveal-up delay-2">
@@ -2492,7 +2539,9 @@ function OldImportView(props: {
       </section>
     </>
   );
-}function SearchView(props: {
+}
+
+function SearchView(props: {
   query: string;
   results: SearchResult[];
   runSearch: (query: string) => void;
@@ -2506,6 +2555,14 @@ function OldImportView(props: {
     setLocalQuery(props.query);
   }, [props.query]);
 
+  function updateLocalQuery(value: string) {
+    setLocalQuery(value);
+    if (typeof window !== "undefined" && window.location.pathname === "/search") {
+      const clean = value.trim();
+      window.history.replaceState(null, "", clean ? `/search?q=${encodeURIComponent(clean)}` : "/search");
+    }
+  }
+
   return (
     <>
       <div className="page-title-row">
@@ -2518,7 +2575,7 @@ function OldImportView(props: {
 
       <form className="search-page-form" onSubmit={(event) => { event.preventDefault(); props.runSearch(localQuery); }}>
         <Search size={18} />
-        <input value={localQuery} onChange={(event) => setLocalQuery(event.target.value)} placeholder="试试搜：大理、剪辑、低卡晚餐、周末去处、AI工具" />
+        <input value={localQuery} onChange={(event) => updateLocalQuery(event.target.value)} placeholder="试试搜：大理、剪辑、低卡晚餐、周末去处、AI工具" />
         <button type="submit">找回</button>
       </form>
 
@@ -3676,7 +3733,45 @@ function QuickImportForm(props: {
       <p className="import-hint">第一版用模拟分享导入，后续会接入手机系统分享入口。</p>
     </form>
   );
-}function RecommendationRow(props: {
+}
+
+function DashboardSearchResults(props: {
+  query: string;
+  results: SearchResult[];
+  openSource: (item: SavedItem, origin?: OpenSourceOrigin) => void;
+  viewActionCard: (itemId: string) => void;
+  reviveSavedItem: (itemId: string) => void;
+  viewAllSearchResults: (query: string) => void;
+}) {
+  if (!props.query) return null;
+  return (
+    <section className="dashboard-search-results" data-testid="dashboard-search-results">
+      <div className="section-heading-soft">
+        <span><Search size={18} /> “{props.query}” 的收藏</span>
+        <button className="ghost-action" onClick={() => props.viewAllSearchResults(props.query)} data-testid="dashboard-view-all-search">查看全部搜索结果</button>
+      </div>
+      <div className="compact-list">
+        {props.results.map((result) => (
+          <article className="dashboard-search-row" key={result.item.id} data-testid="dashboard-search-result">
+            <div>
+              <strong>{formatItemTitle(result.item)}</strong>
+              <small>{formatCategoryLabel(result.item)} · 用途：{result.item.savedIntent}</small>
+              <span>{result.matchReasons[0] || formatItemSummary(result.item)}</span>
+            </div>
+            <div className="row-actions">
+              {hasSourceUrl(result.item) ? <button onClick={() => props.openSource(result.item)}>打开原帖</button> : <button disabled>暂无原帖</button>}
+              <button onClick={() => props.viewActionCard(result.item.id)}>查看收藏</button>
+              <button className="primary-button" onClick={() => props.reviveSavedItem(result.item.id)}>复活这条</button>
+            </div>
+          </article>
+        ))}
+        {props.results.length === 0 && <EmptyState title="没有搜到这条收藏" text="换个更模糊的词试试，或者先从导入中心补一条收藏。" />}
+      </div>
+    </section>
+  );
+}
+
+function RecommendationRow(props: {
   recommendation: RevivalRecommendation;
   openSource: (item: SavedItem, origin?: OpenSourceOrigin) => void;
   viewActionCard: (itemId: string) => void;
@@ -4143,6 +4238,11 @@ function getInitialAlbumId(): string | undefined {
   if (typeof window === "undefined") return undefined;
   const match = window.location.pathname.match(/^\/albums\/([^/]+)/);
   return match?.[1] ? decodeURIComponent(match[1]) : undefined;
+}
+
+function getInitialSearchQuery(): string {
+  if (typeof window === "undefined") return "";
+  return new URLSearchParams(window.location.search).get("q")?.trim() ?? "";
 }
 
 function detectDeveloperMode(): boolean {
