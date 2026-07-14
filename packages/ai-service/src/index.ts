@@ -307,13 +307,13 @@ export class AiHttpClient implements AiProvider {
 
   async generateSmartAlbums(input: GenerateSmartAlbumsInput): Promise<SmartAlbum[]> {
     const fallback = await Promise.resolve(this.fallback.generateSmartAlbums(input));
-    const data = await this.callTask<SmartAlbum[]>("generate_smart_albums", input, fallback);
+    const data = await this.callTask<SmartAlbum[]>("generate_smart_albums", compactSmartAlbumsInput(input), fallback);
     return normalizeSmartAlbumsResult(data, input.savedItems, fallback, input.now);
   }
 
   async regenerateActionCard(savedItemId: string, options: RegenerateActionCardOptions = {}): Promise<ActionCardDraft> {
     const fallback = await Promise.resolve(this.fallback.regenerateActionCard(savedItemId, options));
-    const data = await this.callTask<ActionCardDraft>("regenerate_action_card", { savedItemId, ...options }, fallback);
+    const data = await this.callTask<ActionCardDraft>("regenerate_action_card", { savedItemId, ...compactRegenerateOptions(options) }, fallback);
     return normalizeActionCardDraft(data, fallback);
   }
 
@@ -353,6 +353,71 @@ export function createAiClient(options?: AiClientOptions): AiProvider {
 
 function statusFromMeta(meta: AiResponseMeta, defaultStatus: AiCallStatus): AiRuntimeStatus {
   return { mode: meta.provider === "real" ? "real" : "mock", providerName: meta.providerName, modelName: meta.model, apiKeyConfigured: meta.apiKeyConfigured, lastCallStatus: meta.fallback ? "fallback" : defaultStatus, fallbackActive: meta.fallback, lastError: meta.reason };
+}
+
+function compactRegenerateOptions(options: RegenerateActionCardOptions): RegenerateActionCardOptions {
+  const item = options.savedItem;
+  return {
+    title: options.title,
+    rawShareText: options.rawShareText,
+    userNote: options.userNote,
+    savedItem: item ? compactSavedItemForAi(item) : undefined
+  };
+}
+
+function compactSmartAlbumsInput(input: GenerateSmartAlbumsInput): GenerateSmartAlbumsInput {
+  return {
+    savedItems: input.savedItems.map(compactSavedItemForAi),
+    existingAlbums: input.existingAlbums?.map((album) => ({
+      id: album.id,
+      title: album.title,
+      description: album.description,
+      albumView: album.albumView,
+      contentDomain: album.contentDomain,
+      contentSubDomain: album.contentSubDomain,
+      savedIntent: album.savedIntent,
+      category: album.category,
+      albumType: album.albumType,
+      keywords: album.keywords.slice(0, 8),
+      savedItemIds: album.savedItemIds,
+      recommendedItemIds: album.recommendedItemIds.slice(0, 3),
+      coverItemId: album.coverItemId,
+      whyThisAlbum: album.whyThisAlbum,
+      whyStartHere: album.whyStartHere,
+      suggestedFirstAction: album.suggestedFirstAction,
+      priority: album.priority,
+      priorityScore: album.priorityScore,
+      status: album.status,
+      autoCollectEnabled: album.autoCollectEnabled,
+      mediumMatchRequiresApproval: album.mediumMatchRequiresApproval,
+      suggestedItemIds: album.suggestedItemIds?.slice(0, 10),
+      manuallyAddedItemIds: album.manuallyAddedItemIds?.slice(0, 20),
+      manuallyRemovedItemIds: album.manuallyRemovedItemIds?.slice(0, 20),
+      createdAt: album.createdAt,
+      updatedAt: album.updatedAt
+    })),
+    now: input.now
+  };
+}
+
+function compactSavedItemForAi(item: SavedItem): SavedItem {
+  return {
+    ...item,
+    rawShareText: truncateForAi(item.rawShareText, 1000),
+    userNote: truncateForAi(item.userNote, 600),
+    summary: truncateForAi(item.summary, 600),
+    searchableText: truncateForAi(item.searchableText, 1200),
+    keywords: item.keywords.slice(0, 12),
+    entities: item.entities.slice(0, 12),
+    positiveEvidence: item.positiveEvidence?.slice(0, 5),
+    negativeEvidence: item.negativeEvidence?.slice(0, 5),
+    conflictingEvidence: item.conflictingEvidence?.slice(0, 5),
+    classificationShadow: undefined
+  };
+}
+
+function truncateForAi(value: string, maxLength: number): string {
+  return value.length <= maxLength ? value : `${value.slice(0, maxLength)}…`;
 }
 type CategoryRule = {
   category: Category;
