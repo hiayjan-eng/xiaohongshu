@@ -814,6 +814,38 @@ export function App() {
     }
   }
 
+  function previewTextMigration() {
+    const report = migrateScannedTextV3(state);
+    setTextMigrationPreview(report);
+    setToast(`已检查 ${report.checkedCount} 条记录，发现 ${report.abnormalCount} 条可能需要修复`);
+  }
+
+  function applyTextMigration() {
+    if (!textMigrationPreview) {
+      setToast("请先生成旧扫描文本修复预览");
+      return;
+    }
+    setLastMigrationUndoState(state);
+    setState(textMigrationPreview.state);
+    setTextMigrationPreview(null);
+    setToast("已应用旧扫描文本修复，可在本次会话撤销");
+  }
+
+  function cancelTextMigration() {
+    setTextMigrationPreview(null);
+    setToast("已取消旧扫描文本修复");
+  }
+
+  function undoTextMigration() {
+    if (!lastMigrationUndoState) {
+      setToast("暂无可撤销的文本修复");
+      return;
+    }
+    setState(lastMigrationUndoState);
+    setLastMigrationUndoState(null);
+    setToast("已撤销上次旧扫描文本修复");
+  }
+
   function addRealTestImportedRecords(savedItem: SavedItem, actionCard: ActionCard) {
     setState((current) => ({
       ...current,
@@ -1533,6 +1565,12 @@ export function App() {
               clearLocalTestData={clearLocalTestData}
               exportLocalData={exportLocalData}
               reprocessLocalData={reprocessLocalData}
+              previewTextMigration={previewTextMigration}
+              applyTextMigration={applyTextMigration}
+              cancelTextMigration={cancelTextMigration}
+              undoTextMigration={undoTextMigration}
+              textMigrationPreview={textMigrationPreview}
+              canUndoTextMigration={Boolean(lastMigrationUndoState)}
               themeId={themeId}
               setThemeId={setThemeId}
               aiStatus={aiStatus}
