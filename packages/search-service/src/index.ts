@@ -1,4 +1,4 @@
-import type { ActionCard, Category, SavedItem, SearchResult } from "@revival/shared-types";
+import type { ActionCard, Category, SavedItem, SearchResult, SmartAlbum } from "@revival/shared-types";
 
 type SemanticRule = {
   triggers: string[];
@@ -18,13 +18,14 @@ const semanticRules: SemanticRule[] = [
   { triggers: ["读书", "书单", "观点", "笔记", "阅读", "摘抄"], categories: ["读书与思考"], reason: "语义匹配：阅读、观点或思考笔记" }
 ];
 
-export function searchSavedItems(query: string, savedItems: SavedItem[], actionCards: ActionCard[]): SearchResult[] {
+export function searchSavedItems(query: string, savedItems: SavedItem[], actionCards: ActionCard[], smartAlbums: SmartAlbum[] = []): SearchResult[] {
   const cleanQuery = normalize(query);
   if (!cleanQuery) return [];
   const cardByItemId = new Map(actionCards.map((card) => [card.savedItemId, card]));
+  const albumsByItemId = groupAlbumsByItemId(smartAlbums);
   const queryTerms = buildQueryTerms(cleanQuery);
   return savedItems
-    .map((item) => scoreItem(item, cardByItemId.get(item.id), cleanQuery, queryTerms))
+    .map((item) => scoreItem(item, cardByItemId.get(item.id), albumsByItemId.get(item.id) ?? [], cleanQuery, queryTerms))
     .filter((result): result is SearchResult => result !== undefined && result.score > 0)
     .sort((a, b) => (b.score !== a.score ? b.score - a.score : new Date(b.item.createdAt).getTime() - new Date(a.item.createdAt).getTime()));
 }
@@ -33,30 +34,83 @@ export async function semanticSearch(_query: string): Promise<SearchResult[]> {
   return [];
 }
 
-function scoreItem(item: SavedItem, actionCard: ActionCard | undefined, cleanQuery: string, queryTerms: string[]): SearchResult | undefined {
+function scoreItem(item: SavedItem, actionCard: ActionCard | undefined, albums: SmartAlbum[], cleanQuery: string, queryTerms: string[]): SearchResult | undefined {
   let score = 0;
   const reasons = new Set<string>();
   const cardFields = actionCard ? flattenFields(actionCard.fields) : "";
   const taskText = actionCard ? actionCard.tasks.map((task) => `${task.title} ${task.description}`).join(" ") : "";
   const cardText = actionCard ? [actionCard.title, actionCard.goal, actionCard.whySaved, actionCard.nextAction, actionCard.openOriginalFocus.join(" "), actionCard.output, actionCard.doneCriteria, actionCard.avoidDoing, actionCard.ifInfoMissing, actionCard.followUp, cardFields, taskText].join(" ") : "";
+  const extendedItem = item as SavedItem & {
+    displayTitle?: string;
+    cleanedTitle?: string;
+    rawTitle?: string;
+    userEditedTitle?: string;
+    visibleText?: string;
+  };
+  const titleText = [
+    item.title,
+    extendedItem.displayTitle,
+    extendedItem.cleanedTitle,
+    extendedItem.rawTitle,
+    extendedItem.userEditedTitle
+  ].filter(Boolean).join(" ");
+  const itemText = [
+    titleText,
+    item.rawShareText,
+    item.userNote,
+    extendedItem.visibleText,
+    item.summary,
+    item.searchableText,
+    item.contentDomain,
+    item.contentSubDomain,
+    item.savedIntent,
+    item.secondaryIntents.join(" "),
+    item.whyThisDomain,
+    item.whyThisIntent
+  ].filter(Boolean).join(" ");
+  const albumText = albums.map((album) => [
+    album.title,
+    album.description,
+    album.contentDomain,
+    album.contentSubDomain,
+    album.savedIntent,
+    album.keywords.join(" "),
+    album.whyThisAlbum,
+    album.suggestedFirstAction
+  ].filter(Boolean).join(" ")).join(" ");
 
   queryTerms.forEach((term) => {
-    if (matches(item.title, term)) { score += 80; reasons.add(`命中标题：${displayTerm(term)}`); }
+    if (matches(titleText, term)) { score += 85; reasons.add(`命中标题：${displayTerm(term)}`); }
     const keywordHit = item.keywords.find((keyword) => matches(keyword, term) || term.includes(normalize(keyword)));
     if (keywordHit) { score += 70; reasons.add(`命中关键词：${keywordHit}`); }
     const entityHit = item.entities.find((entity) => matches(entity.value, term) || term.includes(normalize(entity.value)));
     if (entityHit) { score += 65; reasons.add(`命中${entityLabel(entityHit.type)}：${entityHit.value}`); }
-    if (matches(item.category, term) || matches(item.subCategory, term) || matches(item.intent, term) || matches(item.whyThisCategory, term)) { score += 42; reasons.add(`命中分类：${item.category} / ${item.subCategory}`); }
+    if (matches(item.category, term) || matches(item.subCategory, term) || matches(item.intent, term) || matches(item.whyThisCategory, term) || matches(item.contentDomain, term) || matches(item.contentSubDomain, term) || matches(item.savedIntent, term)) { score += 46; reasons.add(`命中分类：${item.contentDomain} / ${item.contentSubDomain}`); }
     if (matches(item.userNote, term)) { score += 36; reasons.add(`命中备注：${displayTerm(term)}`); }
-    if (matches(item.summary, term) || matches(item.rawShareText, term)) { score += 30; reasons.add(`命中分享信息：${displayTerm(term)}`); }
+    if (matches(item.summary, term) || matches(item.rawShareText, term) || matches(extendedItem.visibleText, term)) { score += 30; reasons.add(`命中分享信息：${displayTerm(term)}`); }
     if (matches(cardText, term)) { score += 28; reasons.add(`命中行动卡：${actionCard?.title ?? displayTerm(term)}`); }
-    if (matches(item.searchableText, term)) { score += 12; if (reasons.size < 3) reasons.add(`命中索引：${displayTerm(term)}`); }
+    if (matches(albumText, term)) {
+      const album = albums.find((entry) => matches(entry.title, term) || matches(entry.keywords.join(" "), term));
+      score += 34;
+      reasons.add(`命中专辑：${album?.title ?? displayTerm(term)}`);
+    }
+    if (matches(itemText, term)) { score += 12; if (reasons.size < 3) reasons.add(`命中索引：${displayTerm(term)}`); }
   });
 
   const semanticReason = getSemanticReason(cleanQuery, item.category);
   if (semanticReason) { score += 38; reasons.add(semanticReason); }
   if (!score) return undefined;
   return { item, actionCard, score, matchReasons: Array.from(reasons).slice(0, 5) };
+}
+
+function groupAlbumsByItemId(albums: SmartAlbum[]): Map<string, SmartAlbum[]> {
+  const map = new Map<string, SmartAlbum[]>();
+  albums.forEach((album) => {
+    [...album.savedItemIds, ...(album.suggestedItemIds ?? [])].forEach((itemId) => {
+      map.set(itemId, [...(map.get(itemId) ?? []), album]);
+    });
+  });
+  return map;
 }
 
 function buildQueryTerms(cleanQuery: string): string[] {
