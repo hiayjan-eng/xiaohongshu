@@ -2992,8 +2992,12 @@ function SmartAlbumsView(props: {
   viewActionCard: (itemId: string) => void;
   openSource: (item: SavedItem, origin?: OpenSourceOrigin) => void;
   renameAlbum: (albumId: string) => void;
-  confirmAlbum: (albumId: string) => void;
+  confirmAlbum: (albumId: string, options?: { autoCollectEnabled?: boolean; mediumMatchRequiresApproval?: boolean }) => void;
   archiveAlbum: (albumId: string) => void;
+  restoreAlbum: (albumId: string) => void;
+  acceptSuggestedItem: (albumId: string, itemId: string) => void;
+  rejectSuggestedItem: (albumId: string, itemId: string) => void;
+  acceptAllSuggestedItems: (albumId: string) => void;
   regenerateSmartAlbums: () => void;
   correctSavedItemClassification: (itemId: string, mode: "domain" | "intent") => void;
   selectedAlbumId?: string;
@@ -3001,20 +3005,67 @@ function SmartAlbumsView(props: {
   removeItemFromAlbum: (albumId: string, itemId: string) => void;
   moveItemToTheme: (itemId: string) => void;
   addItemToIntentAlbum: (itemId: string) => void;
+  bulkCorrectAlbumItems: (itemIds: string[], mode: "domain" | "intent") => void;
   createManualAlbum: () => void;
   undoLastClassificationChange: () => void;
   canUndoClassificationChange: boolean;
+  albumFilter: "candidate" | "confirmed" | "suggested" | "archived";
+  setAlbumFilter: (value: "candidate" | "confirmed" | "suggested" | "archived") => void;
 }) {
-  const visibleAlbums = props.albums.filter((album) => album.status !== "archived");
+  const [confirmingAlbum, setConfirmingAlbum] = useState<SmartAlbum | null>(null);
+  const [confirmAutoCollect, setConfirmAutoCollect] = useState(true);
+  const [confirmMediumRequiresApproval, setConfirmMediumRequiresApproval] = useState(true);
+  const [selectedItemIds, setSelectedItemIds] = useState<string[]>([]);
   const candidateCount = props.albums.filter((album) => album.status === "candidate").length;
   const confirmedCount = props.albums.filter((album) => album.status === "confirmed").length;
+  const suggestedCount = props.albums.reduce((count, album) => count + (album.suggestedItemIds?.length ?? 0), 0);
+  const archivedCount = props.albums.filter((album) => album.status === "archived").length;
   const confirmedItemIds = new Set(props.albums.filter((album) => album.status === "confirmed").flatMap((album) => album.savedItemIds));
-  const selectedAlbum = visibleAlbums.find((album) => album.id === props.selectedAlbumId) ?? visibleAlbums[0];
+  const visibleAlbums = props.albums.filter((album) => {
+    if (props.albumFilter === "suggested") return (album.suggestedItemIds?.length ?? 0) > 0;
+    return album.status === props.albumFilter;
+  });
+  const selectedAlbum = props.albums.find((album) => album.id === props.selectedAlbumId) ?? visibleAlbums[0];
   const selectedItems = selectedAlbum
     ? selectedAlbum.savedItemIds
         .map((id) => props.savedItems.find((item) => item.id === id))
         .filter((item): item is SavedItem => Boolean(item))
     : [];
+  const suggestedItems = selectedAlbum
+    ? (selectedAlbum.suggestedItemIds ?? [])
+        .map((id) => props.savedItems.find((item) => item.id === id))
+        .filter((item): item is SavedItem => Boolean(item))
+    : [];
+
+  useEffect(() => {
+    setSelectedItemIds([]);
+  }, [selectedAlbum?.id]);
+
+  function openConfirmModal(album: SmartAlbum) {
+    setConfirmingAlbum(album);
+    setConfirmAutoCollect(album.autoCollectEnabled ?? true);
+    setConfirmMediumRequiresApproval(album.mediumMatchRequiresApproval ?? true);
+  }
+
+  function submitConfirmAlbum() {
+    if (!confirmingAlbum) return;
+    props.confirmAlbum(confirmingAlbum.id, {
+      autoCollectEnabled: confirmAutoCollect,
+      mediumMatchRequiresApproval: confirmMediumRequiresApproval
+    });
+    setConfirmingAlbum(null);
+    props.setAlbumFilter("confirmed");
+  }
+
+  function toggleSelectedItem(itemId: string) {
+    setSelectedItemIds((current) => current.includes(itemId) ? current.filter((id) => id !== itemId) : [...current, itemId]);
+  }
+
+  function bulkRemoveSelected() {
+    if (!selectedAlbum) return;
+    selectedItemIds.forEach((itemId) => props.removeItemFromAlbum(selectedAlbum.id, itemId));
+    setSelectedItemIds([]);
+  }
 
   return (
     <>
@@ -3027,10 +3078,19 @@ function SmartAlbumsView(props: {
       </div>
 
       <section className="album-overview-grid">
-        <Metric label="候选专辑" value={candidateCount.toString()} />
-        <Metric label="已确认专辑" value={confirmedCount.toString()} />
+        <Metric label="待确认" value={candidateCount.toString()} />
+        <Metric label="已确认" value={confirmedCount.toString()} />
+        <Metric label="待确认新增" value={suggestedCount.toString()} />
+        <Metric label="已归档" value={archivedCount.toString()} />
         <Metric label="待处理收藏" value={Math.max(0, props.savedItems.length - confirmedItemIds.size).toString()} />
       </section>
+
+      <div className="album-status-tabs" data-testid="album-status-tabs">
+        <button className={props.albumFilter === "candidate" ? "active" : ""} onClick={() => props.setAlbumFilter("candidate")}>待确认</button>
+        <button className={props.albumFilter === "confirmed" ? "active" : ""} onClick={() => props.setAlbumFilter("confirmed")}>已确认</button>
+        <button className={props.albumFilter === "suggested" ? "active" : ""} onClick={() => props.setAlbumFilter("suggested")}>待确认新增</button>
+        <button className={props.albumFilter === "archived" ? "active" : ""} onClick={() => props.setAlbumFilter("archived")}>已归档</button>
+      </div>
 
       <section className="extension-import-guide">
         <div>
@@ -3047,7 +3107,7 @@ function SmartAlbumsView(props: {
           const albumItems = album.savedItemIds
             .map((id) => props.savedItems.find((item) => item.id === id))
             .filter((item): item is SavedItem => Boolean(item));
-          const priorityItems = (album.recommendedItemIds.length > 0 ? album.recommendedItemIds : album.savedItemIds)
+          const priorityItems = ((album.recommendedItemIds ?? []).length > 0 ? album.recommendedItemIds : album.savedItemIds)
             .map((id) => props.savedItems.find((item) => item.id === id))
             .filter((item): item is SavedItem => Boolean(item))
             .slice(0, 3);
@@ -3055,11 +3115,11 @@ function SmartAlbumsView(props: {
           return (
             <section className="smart-album-card" key={album.id} data-testid="smart-album-card">
               <div className="smart-album-head">
-                <span>{album.albumView === "saved_intent" ? "用途专辑" : "主题专辑"} · {album.albumView === "saved_intent" ? album.savedIntent ?? album.albumType : `${album.contentDomain ?? album.category} / ${album.contentSubDomain ?? album.albumType}`} · {album.priority === "high" ? "高优先级" : album.priority === "medium" ? "中优先级" : "低优先级"} · {album.status === "confirmed" ? "已确认" : "候选"}</span>
+                <span>{album.albumView === "saved_intent" ? "用途专辑" : "主题专辑"} · {albumStatusLabel(album)} · {albumItems.length} 条</span>
                 <strong>{album.title}</strong>
                 <small>{album.description}</small>
                 <small>{album.whyThisAlbum}</small>
-                <small>{album.whyStartHere}</small>
+                {album.status === "confirmed" && <small>已确认 · {album.autoCollectEnabled ? "自动收纳已开启" : "自动收纳未开启"} · 待确认新增 {(album.suggestedItemIds ?? []).length} 条</small>}
               </div>
               <div className="tag-list album-keywords">
                 {album.keywords.slice(0, 6).map((keyword) => <span key={keyword}>{keyword}</span>)}
@@ -3084,12 +3144,24 @@ function SmartAlbumsView(props: {
                 })}
               </div>
               <div className="album-actions">
-                <button className="primary-button" onClick={() => props.confirmAlbum(album.id)} disabled={album.status === "confirmed"} data-testid="confirm-album">
-                  {album.status === "confirmed" ? "已确认" : "确认这个专辑"}
-                </button>
-                <button className="secondary-action" onClick={() => props.renameAlbum(album.id)}>改名</button>
-                <button className="secondary-action" onClick={() => props.onSelectAlbum(album.id)} data-testid="view-album-items">查看收藏</button>
-                <button className="ghost-action" onClick={() => props.archiveAlbum(album.id)} data-testid="archive-album">暂不需要</button>
+                <button className="secondary-action" onClick={() => props.onSelectAlbum(album.id)} data-testid="view-album-items">查看并整理</button>
+                {album.status === "confirmed" ? (
+                  <button className="primary-button" disabled data-testid="confirm-album">已确认</button>
+                ) : album.status === "archived" ? (
+                  <>
+                    <button className="secondary-action" onClick={() => props.restoreAlbum(album.id)} data-testid="restore-album">恢复为候选</button>
+                    <button className="primary-button" onClick={() => openConfirmModal(album)} data-testid="confirm-album">直接确认</button>
+                  </>
+                ) : (
+                  <button className="primary-button" onClick={() => openConfirmModal(album)} data-testid="confirm-album">确认这个专辑</button>
+                )}
+                {album.status !== "archived" && (
+                  <details className="album-more-menu">
+                    <summary>更多</summary>
+                    <button onClick={() => props.renameAlbum(album.id)}>改名</button>
+                    <button onClick={() => props.archiveAlbum(album.id)} data-testid="archive-album">归档这个候选</button>
+                  </details>
+                )}
               </div>
             </section>
           );
@@ -3101,17 +3173,49 @@ function SmartAlbumsView(props: {
           <PanelHeader icon={<LayoutGrid size={18} />} title={`${selectedAlbum.title} · 全部收藏`} meta={`${selectedItems.length} 条`} />
           <div className="field-grid compact-fields">
             <div className="field-card"><span>专辑类型</span><strong>{selectedAlbum.albumView === "saved_intent" ? "用途专辑" : "主题专辑"}</strong></div>
+            <div className="field-card"><span>当前状态</span><strong>{albumStatusLabel(selectedAlbum)}</strong></div>
             <div className="field-card"><span>为什么在一起</span><strong>{selectedAlbum.whyThisAlbum}</strong></div>
+            <div className="field-card"><span>匹配依据</span><strong>{formatAlbumMatchProfile(selectedAlbum)}</strong></div>
+            <div className="field-card"><span>自动收纳</span><strong>{selectedAlbum.autoCollectEnabled ? "高度匹配自动加入" : "未开启"}{selectedAlbum.mediumMatchRequiresApproval ? "；中匹配待确认" : ""}</strong></div>
+            <div className="field-card"><span>待确认新增</span><strong>{suggestedItems.length} 条</strong></div>
             <div className="field-card"><span>推荐先看</span><strong>{selectedAlbum.whyStartHere}</strong></div>
             <div className="field-card"><span>第一步</span><strong>{selectedAlbum.suggestedFirstAction}</strong></div>
           </div>
           <div className="album-actions">
             <button className="secondary-action" onClick={() => props.renameAlbum(selectedAlbum.id)}>改名</button>
-            <button className="secondary-action" onClick={() => props.confirmAlbum(selectedAlbum.id)} disabled={selectedAlbum.status === "confirmed"}>
+            <button className="secondary-action" onClick={() => openConfirmModal(selectedAlbum)} disabled={selectedAlbum.status === "confirmed"}>
               {selectedAlbum.status === "confirmed" ? "已确认" : "确认这个专辑"}
             </button>
-            <button className="ghost-action" onClick={() => props.archiveAlbum(selectedAlbum.id)}>暂不需要</button>
+            {selectedAlbum.status === "archived" ? <button className="secondary-action" onClick={() => props.restoreAlbum(selectedAlbum.id)}>恢复为候选</button> : <button className="ghost-action" onClick={() => props.archiveAlbum(selectedAlbum.id)}>归档这个候选</button>}
             <button className="ghost-action" onClick={props.undoLastClassificationChange} disabled={!props.canUndoClassificationChange}>撤销上次分类修改</button>
+          </div>
+          {suggestedItems.length > 0 && (
+            <section className="suggested-items-panel" data-testid="suggested-items-panel">
+              <div className="section-heading-soft">
+                <span>待确认新增</span>
+                <button className="secondary-action" onClick={() => props.acceptAllSuggestedItems(selectedAlbum.id)}>全部加入</button>
+              </div>
+              {suggestedItems.map((item) => (
+                <article className="qa-result-row" key={item.id}>
+                  <div>
+                    <strong>{formatItemTitle(item)}</strong>
+                    <small>{item.contentDomain} / {item.contentSubDomain} · 用途：{item.savedIntent}</small>
+                  </div>
+                  <div className="qa-row-actions">
+                    <button onClick={() => props.acceptSuggestedItem(selectedAlbum.id, item.id)}>加入</button>
+                    <button onClick={() => props.moveItemToTheme(item.id)}>移到其他主题</button>
+                    <button onClick={() => props.addItemToIntentAlbum(item.id)}>添加到其他用途专辑</button>
+                    <button onClick={() => props.rejectSuggestedItem(selectedAlbum.id, item.id)}>不属于这里</button>
+                  </div>
+                </article>
+              ))}
+            </section>
+          )}
+          <div className="album-bulk-actions">
+            <span>已选择 {selectedItemIds.length} 条</span>
+            <button onClick={() => props.bulkCorrectAlbumItems(selectedItemIds, "domain")} disabled={selectedItemIds.length === 0}>批量移动主题</button>
+            <button onClick={() => props.bulkCorrectAlbumItems(selectedItemIds, "intent")} disabled={selectedItemIds.length === 0}>批量添加用途专辑</button>
+            <button onClick={bulkRemoveSelected} disabled={selectedItemIds.length === 0}>批量移出当前专辑</button>
           </div>
           <div className="qa-result-list">
             {selectedItems.map((item, index) => {
@@ -3119,12 +3223,15 @@ function SmartAlbumsView(props: {
               return (
                 <article key={item.id} className="qa-result-row">
                   <div>
-                    <strong>{index + 1}. {item.title}</strong>
+                    <label className="album-select-row">
+                      <input type="checkbox" checked={selectedItemIds.includes(item.id)} onChange={() => toggleSelectedItem(item.id)} />
+                      <strong>{index + 1}. {formatItemTitle(item)}</strong>
+                    </label>
                     <small>{item.contentDomain} / {item.contentSubDomain} · 用途：{item.savedIntent} · {DISPLAY_STATUS_LABELS[item.status]}</small>
                     <span>{card?.nextAction ?? item.summary}</span>
                   </div>
                   <div className="qa-row-actions">
-                    <button onClick={() => props.viewActionCard(item.id)}>查看</button>
+                    <button onClick={() => props.viewActionCard(item.id)}>{card ? "查看收藏" : "复活这条"}</button>
                     <button onClick={() => props.correctSavedItemClassification(item.id, "domain")}>改主题</button>
                     <button onClick={() => props.correctSavedItemClassification(item.id, "intent")}>改用途</button>
                     <button onClick={() => props.moveItemToTheme(item.id)}>移动到其他主题</button>
@@ -3140,6 +3247,26 @@ function SmartAlbumsView(props: {
       )}
 
       {visibleAlbums.length === 0 && <EmptyState title="还没有智能专辑" text="先从导入中心导入一条收藏，或用旧收藏扫描 Beta 导入一批已加载收藏。" />}
+      {confirmingAlbum && (
+        <div className="inline-modal-backdrop" role="dialog" aria-modal="true" data-testid="confirm-album-modal">
+          <div className="inline-modal">
+            <h2>确认这个专辑</h2>
+            <p>确认后，这个专辑会长期保留。以后新导入的相似收藏可以自动加入，或先等待你确认。</p>
+            <label>
+              <input type="checkbox" checked={confirmAutoCollect} onChange={(event) => setConfirmAutoCollect(event.target.checked)} />
+              高度匹配的收藏自动加入
+            </label>
+            <label>
+              <input type="checkbox" checked={confirmMediumRequiresApproval} onChange={(event) => setConfirmMediumRequiresApproval(event.target.checked)} />
+              中等匹配的收藏进入待确认新增
+            </label>
+            <div className="card-actions">
+              <button className="primary-button" onClick={submitConfirmAlbum}>确认这个专辑</button>
+              <button className="secondary-action" onClick={() => setConfirmingAlbum(null)}>取消</button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
@@ -3382,6 +3509,12 @@ function SettingsView(props: {
   clearLocalTestData: () => void;
   exportLocalData: () => void;
   reprocessLocalData: () => void;
+  previewTextMigration: () => void;
+  applyTextMigration: () => void;
+  cancelTextMigration: () => void;
+  undoTextMigration: () => void;
+  textMigrationPreview: ScannedTextMigrationV3Report | null;
+  canUndoTextMigration: boolean;
   themeId: ThemePresetId;
   setThemeId: (themeId: ThemePresetId) => void;
   aiStatus: AiRuntimeStatus;
@@ -3415,9 +3548,38 @@ function SettingsView(props: {
         <p className="quiet-copy">如果你之前测试过旧版本，建议先重新整理或清空本地测试数据，再验证新版分类和行动卡效果。</p>
         <div className="qa-actions">
           <button className="secondary-action" onClick={props.reprocessLocalData} data-testid="settings-reprocess-local">重新整理旧收藏</button>
+          <button className="secondary-action" onClick={props.previewTextMigration} data-testid="settings-preview-text-migration">修复旧扫描文本</button>
           <button className="secondary-action" onClick={props.exportLocalData} data-testid="settings-export-local">导出本地数据</button>
+          <button className="secondary-action" onClick={props.undoTextMigration} disabled={!props.canUndoTextMigration} data-testid="settings-undo-text-migration">撤销文本修复</button>
           <button className="danger-button" onClick={props.clearLocalTestData} data-testid="settings-clear-local">清空本地测试数据</button>
         </div>
+        {props.textMigrationPreview && (
+          <div className="migration-preview" data-testid="text-migration-preview">
+            <div className="metric-grid insight-metrics">
+              <Metric label="检查数量" value={props.textMigrationPreview.checkedCount.toString()} />
+              <Metric label="异常数量" value={props.textMigrationPreview.abnormalCount.toString()} />
+              <Metric label="将修改" value={props.textMigrationPreview.changedCount.toString()} />
+              <Metric label="无法判断" value={props.textMigrationPreview.uncertainCount.toString()} />
+              <Metric label="SavedItem" value={props.textMigrationPreview.savedItemCount.toString()} />
+              <Metric label="ImportBatchItem" value={props.textMigrationPreview.importBatchItemCount.toString()} />
+            </div>
+            <div className="migration-change-list">
+              {props.textMigrationPreview.changes.slice(0, 8).map((change) => (
+                <article key={change.id} className={change.uncertain ? "migration-change uncertain" : "migration-change"}>
+                  <span>{change.type === "SavedItem" ? "收藏" : "导入明细"} · {change.uncertain ? "需要人工确认" : "可自动修复"}</span>
+                  <strong>{change.before || "空标题"} → {change.after || "标题待补充"}</strong>
+                </article>
+              ))}
+              {props.textMigrationPreview.changes.length === 0 && <p className="quiet-copy">没有发现需要修复的旧扫描文本。</p>}
+            </div>
+            <div className="qa-actions">
+              <button className="secondary-action" onClick={props.exportLocalData}>先导出备份</button>
+              <button className="primary-button" onClick={props.applyTextMigration} data-testid="settings-apply-text-migration">应用修复</button>
+              <button className="secondary-action" onClick={props.cancelTextMigration}>取消</button>
+            </div>
+            <p className="quiet-copy">这一步只在你点击“应用修复”后才会改写当前浏览器里的标题和搜索索引，不会自动覆盖现有数据。</p>
+          </div>
+        )}
       </section>
 
       <section className="tool-panel single settings-list">
@@ -4188,14 +4350,7 @@ function mergeSmartAlbums(existingAlbums: SmartAlbum[], generatedAlbums: SmartAl
   const merged = generatedAlbums.map((album) => {
     const existing = existingAlbums.find((entry) => entry.id === album.id);
     if (!existing) return album;
-    return {
-      ...album,
-      title: existing.title,
-      description: existing.description || album.description,
-      status: existing.status,
-      createdAt: existing.createdAt,
-      updatedAt: album.updatedAt
-    };
+    return mergeAlbumRecord(existing, album);
   });
 
   existingAlbums
@@ -4210,14 +4365,7 @@ function mergeGeneratedSmartAlbums(existingAlbums: SmartAlbum[], savedItems: Sav
   const merged = generated.map((album) => {
     const existing = existingById.get(album.id);
     if (!existing) return album;
-    return {
-      ...album,
-      title: existing.title,
-      description: existing.description || album.description,
-      status: existing.status,
-      createdAt: existing.createdAt,
-      updatedAt: album.updatedAt
-    };
+    return mergeAlbumRecord(existing, album);
   });
 
   existingAlbums
@@ -4225,6 +4373,104 @@ function mergeGeneratedSmartAlbums(existingAlbums: SmartAlbum[], savedItems: Sav
     .forEach((album) => merged.push(album));
 
   return merged.sort((a, b) => b.priorityScore - a.priorityScore || b.savedItemIds.length - a.savedItemIds.length);
+}
+
+function mergeAlbumRecord(existing: SmartAlbum, generated: SmartAlbum): SmartAlbum {
+  const isLocked = existing.status === "confirmed" || existing.status === "archived";
+  const manuallyAdded = existing.manuallyAddedItemIds ?? [];
+  const manuallyRemoved = new Set(existing.manuallyRemovedItemIds ?? []);
+  const savedItemIds = isLocked
+    ? Array.from(new Set([...existing.savedItemIds, ...manuallyAdded])).filter((id) => !manuallyRemoved.has(id))
+    : generated.savedItemIds.filter((id) => !manuallyRemoved.has(id));
+  return {
+    ...generated,
+    title: existing.title,
+    description: existing.description || generated.description,
+    status: existing.status,
+    confirmedAt: existing.confirmedAt,
+    archivedAt: existing.archivedAt,
+    autoCollectEnabled: existing.autoCollectEnabled ?? generated.autoCollectEnabled,
+    mediumMatchRequiresApproval: existing.mediumMatchRequiresApproval ?? generated.mediumMatchRequiresApproval,
+    matchProfile: existing.matchProfile ?? generated.matchProfile,
+    suggestedItemIds: existing.suggestedItemIds ?? generated.suggestedItemIds ?? [],
+    manuallyAddedItemIds: manuallyAdded,
+    manuallyRemovedItemIds: [...manuallyRemoved],
+    lastMatchedAt: existing.lastMatchedAt,
+    schemaVersion: existing.schemaVersion ?? generated.schemaVersion,
+    savedItemIds,
+    recommendedItemIds: (isLocked ? existing.recommendedItemIds : generated.recommendedItemIds).filter((id) => savedItemIds.includes(id)).slice(0, 3),
+    createdAt: existing.createdAt,
+    updatedAt: generated.updatedAt
+  };
+}
+
+function applyConfirmedAlbumMatching(albums: SmartAlbum[], newItems: SavedItem[]): SmartAlbum[] {
+  if (newItems.length === 0) return albums;
+  const now = new Date().toISOString();
+  return albums.map((album) => {
+    if (album.status !== "confirmed" || !album.autoCollectEnabled) return album;
+    const savedSet = new Set(album.savedItemIds);
+    const suggestedSet = new Set(album.suggestedItemIds ?? []);
+    const removedSet = new Set(album.manuallyRemovedItemIds ?? []);
+    let changed = false;
+    newItems.forEach((item) => {
+      if (savedSet.has(item.id) || suggestedSet.has(item.id) || removedSet.has(item.id)) return;
+      const score = scoreAlbumMatch(album, item);
+      if (score >= SMART_ALBUM_MATCH_THRESHOLDS.high) {
+        savedSet.add(item.id);
+        changed = true;
+      } else if (score >= SMART_ALBUM_MATCH_THRESHOLDS.medium && album.mediumMatchRequiresApproval !== false) {
+        suggestedSet.add(item.id);
+        changed = true;
+      }
+    });
+    if (!changed) return album;
+    const savedItemIds = [...savedSet];
+    return {
+      ...album,
+      savedItemIds,
+      suggestedItemIds: [...suggestedSet].filter((id) => !savedSet.has(id)),
+      recommendedItemIds: album.recommendedItemIds.filter((id) => savedSet.has(id)).slice(0, 3),
+      lastMatchedAt: now,
+      updatedAt: now
+    };
+  });
+}
+
+function scoreAlbumMatch(album: SmartAlbum, item: SavedItem): number {
+  const profile = album.matchProfile;
+  if (!profile) return 0;
+  let score = 0;
+  if (profile.contentDomain && profile.contentDomain === item.contentDomain) score += 38;
+  if (profile.contentSubDomain && profile.contentSubDomain === item.contentSubDomain) score += 26;
+  if (profile.savedIntent && profile.savedIntent === item.savedIntent) score += 30;
+  const itemKeywords = new Set([item.contentSubDomain, item.savedIntent, ...item.keywords, ...item.entities.map((entity) => entity.value)].filter(Boolean));
+  const keywordHits = profile.keywords.filter((keyword) => itemKeywords.has(keyword)).length;
+  score += Math.min(24, keywordHits * 8);
+  const entityHits = profile.entityValues.filter((value) => itemKeywords.has(value)).length;
+  score += Math.min(12, entityHits * 6);
+  return score;
+}
+
+function buildAlbumMatchProfile(album: SmartAlbum, savedItems: SavedItem[]): NonNullable<SmartAlbum["matchProfile"]> {
+  const albumItems = album.savedItemIds
+    .map((id) => savedItems.find((item) => item.id === id))
+    .filter((item): item is SavedItem => Boolean(item));
+  const keywords = new Set<string>(album.keywords);
+  const entityValues = new Set<string>();
+  albumItems.forEach((item) => {
+    [item.contentSubDomain, item.savedIntent, ...item.keywords].filter(Boolean).forEach((value) => keywords.add(value));
+    item.entities.forEach((entity) => entityValues.add(entity.value));
+  });
+  return {
+    contentDomain: album.albumView === "content_domain" ? album.contentDomain : undefined,
+    contentSubDomain: album.albumView === "content_domain" ? album.contentSubDomain : undefined,
+    savedIntent: album.albumView === "saved_intent" ? album.savedIntent : undefined,
+    keywords: [...keywords].slice(0, 12),
+    entityValues: [...entityValues].slice(0, 12),
+    positiveExamples: album.savedItemIds.slice(0, 6),
+    negativeExamples: album.matchProfile?.negativeExamples ?? []
+  };
 }
 function getInitialView(): ViewKey {
   if (typeof window === "undefined") return "welcome";
@@ -4338,6 +4584,12 @@ function parsePlanDate(value: string, now: Date): Date {
   return date;
 }
 
+function formatDateInput(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toISOString().slice(0, 10);
+}
+
 function parseEstimatedMinutes(value: string): number {
   const match = value.match(/\d+/);
   return clampEstimatedMinutes(match ? Number(match[0]) : 20);
@@ -4361,8 +4613,9 @@ function formatCategoryLabel(item: Pick<SavedItem, "category" | "subCategory" | 
   return category + " / " + subCategory + (confidence === "low" ? " · 低置信" : "");
 }
 
-function formatItemTitle(item: Pick<SavedItem, "title" | "rawShareText">): string {
-  const title = item.title.replace(/其他行动卡行动卡|行动卡行动卡|其他行动卡/g, "").trim();
+function formatItemTitle(item: Pick<SavedItem, "title" | "rawShareText"> & Partial<Pick<SavedItem, "displayTitle" | "userEditedTitle" | "cleanedTitle" | "rawTitle">>): string {
+  const rawTitle = item.userEditedTitle || item.displayTitle || item.cleanedTitle || item.title || item.rawTitle || "";
+  const title = rawTitle.replace(/其他行动卡行动卡|行动卡行动卡|其他行动卡/g, "").trim();
   if (title) return title;
   const fallback = item.rawShareText.replace(/https?:\/\/\S+/g, "").trim().slice(0, 20);
   return fallback || "待整理收藏";
@@ -4373,6 +4626,23 @@ function formatItemSummary(item: Pick<SavedItem, "summary" | "category">): strin
     return "信息还不够完整，补充一句收藏原因后可以重新整理。";
   }
   return item.summary || "信息还不够完整，补充一句收藏原因后可以重新整理。";
+}
+
+function albumStatusLabel(album: Pick<SmartAlbum, "status">): string {
+  if (album.status === "confirmed") return "已确认";
+  if (album.status === "archived") return "已归档";
+  return "待确认";
+}
+
+function formatAlbumMatchProfile(album: SmartAlbum): string {
+  const profile = album.matchProfile;
+  const parts = [
+    profile?.contentDomain,
+    profile?.contentSubDomain,
+    profile?.savedIntent,
+    ...(profile?.keywords ?? []).slice(0, 3)
+  ].filter(Boolean);
+  return parts.length > 0 ? parts.join(" / ") : album.keywords.slice(0, 4).join(" / ") || "按主题、用途和关键词匹配";
 }
 
 function hasSourceUrl(item: Pick<SavedItem, "sourceUrl">): boolean {
