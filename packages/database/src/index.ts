@@ -56,6 +56,9 @@ export function createSavedItemRecord(
   const savedIntent = normalizeSavedIntent(aiResult.savedIntent ?? aiResult.intent);
   const secondaryIntents = uniqueSavedIntents([...(aiResult.secondaryIntents ?? []), savedIntent]).filter((intent) => intent !== savedIntent);
   const confidence = normalizeConfidence(aiResult.confidence, contentDomain);
+  const rawTitle = input.title || input.rawShareText;
+  const cleanedTitle = normalizeStoredTitle(input.title, input.rawShareText || aiResult.actionCard?.title);
+  const displayTitle = pickDisplayTitle({ cleanedTitle, rawTitle });
 
   return {
     id: createId("item"),
@@ -63,7 +66,7 @@ export function createSavedItemRecord(
     sourcePlatform: detectPlatform(input.sourceUrl),
     sourceUrl: input.sourceUrl,
     rawShareText: input.rawShareText,
-    title: normalizeStoredTitle(input.title, input.rawShareText || aiResult.actionCard?.title),
+    title: displayTitle,
     userNote: input.userNote,
     contentDomain,
     contentSubDomain,
@@ -83,12 +86,14 @@ export function createSavedItemRecord(
     classificationConfidence: confidence,
     intent: savedIntent,
     whyThisCategory: aiResult.whyThisDomain || aiResult.whyThisCategory || "基于标题、分享文案和备注判断内容主题。",
-    rawTitle: input.title || input.rawShareText,
-    cleanedTitle: normalizeStoredTitle(input.title, input.rawShareText || aiResult.actionCard?.title),
+    rawTitle,
+    cleanedTitle,
+    displayTitle,
+    textNormalizationVersion: 3,
     summary: normalizeStoredSummary(aiResult.summary, contentDomain),
     keywords: aiResult.keywords ?? [],
     entities: aiResult.entities ?? [],
-    searchableText: aiResult.searchableText || buildSearchableText(input, contentDomain, contentSubDomain, savedIntent, aiResult.keywords ?? [], aiResult.entities ?? []),
+    searchableText: aiResult.searchableText || buildSearchableText({ ...input, title: displayTitle }, contentDomain, contentSubDomain, savedIntent, aiResult.keywords ?? [], aiResult.entities ?? []),
     status: "not_started",
     createdAt,
     updatedAt: createdAt
@@ -359,8 +364,8 @@ function normalizeAppState(state: AppState): AppState {
     classificationCorrections: state.classificationCorrections ?? [],
     searchLogs: state.searchLogs ?? [],
     smartAlbums: (state.smartAlbums ?? []).map(normalizeSmartAlbum),
-    importBatches: state.importBatches ?? [],
-    importBatchItems: state.importBatchItems ?? []
+    importBatches: (state.importBatches ?? []).map(normalizeImportBatch),
+    importBatchItems: (state.importBatchItems ?? []).map(normalizeImportBatchItem)
   };
 }
 
@@ -392,6 +397,14 @@ function normalizeSavedItem(item: SavedItem): SavedItem {
   const whyThisDomain = raw.whyThisDomain || raw.whyThisCategory || "基于标题、分享文案和备注综合判断内容主题。";
   const whyThisIntent = raw.whyThisIntent || raw.intent || "基于用户备注和内容线索推断收藏用途。";
 
+  const rawTitle = (item.rawTitle || item.title || item.rawShareText || "").normalize("NFC");
+  const cleanedTitle = normalizeStoredTitle(item.cleanedTitle || item.title, item.rawShareText);
+  const displayTitle = pickDisplayTitle({
+    userEditedTitle: item.userEditedTitle,
+    cleanedTitle,
+    rawTitle
+  });
+
   return {
     ...item,
     sourcePlatform: detectPlatform(item.sourceUrl),
@@ -407,11 +420,13 @@ function normalizeSavedItem(item: SavedItem): SavedItem {
     negativeEvidence: Array.isArray(raw.negativeEvidence) ? raw.negativeEvidence.filter(isString) : [],
     conflictingEvidence: Array.isArray(raw.conflictingEvidence) ? raw.conflictingEvidence.filter(isString) : [],
     dominantIntent: raw.dominantIntent || savedIntent,
-    rawTitle: (item.rawTitle || item.title || item.rawShareText || "").normalize("NFC"),
-    cleanedTitle: normalizeStoredTitle(item.cleanedTitle || item.title, item.rawShareText),
+    rawTitle,
+    cleanedTitle,
+    displayTitle,
+    textNormalizationVersion: item.textNormalizationVersion ?? 2,
     category: contentDomain,
     subCategory: contentSubDomain,
-    title: normalizeStoredTitle(item.title, item.rawShareText),
+    title: displayTitle,
     summary: normalizeStoredSummary(item.summary, contentDomain),
     intent: savedIntent,
     whyThisCategory: whyThisDomain,
@@ -423,6 +438,7 @@ function normalizeSavedItem(item: SavedItem): SavedItem {
 function normalizePlanCard(card: PlanCard): PlanCard {
   return {
     ...card,
+    sourceTitle: card.sourceTitle || "来源收藏待补充",
     estimatedMinutes: Number.isFinite(card.estimatedMinutes) ? card.estimatedMinutes : 20,
     status: card.status === "doing" || card.status === "done" || card.status === "cancelled" ? card.status : "planned",
     reminderEnabled: Boolean(card.reminderEnabled)
@@ -453,20 +469,68 @@ function normalizeSmartAlbum(album: NonNullable<AppState["smartAlbums"]>[number]
   const priorityScore = raw.priorityScore ?? album.savedItemIds.length * 10 + album.keywords.length;
   const albumView = raw.albumView === "saved_intent" ? "saved_intent" : "content_domain";
   const contentDomain = normalizeCategoryValue(raw.contentDomain ?? album.category);
+  const savedIntent = albumView === "saved_intent" ? normalizeSavedIntent(raw.savedIntent ?? album.albumType) : raw.savedIntent ? normalizeSavedIntent(raw.savedIntent) : undefined;
+  const keywords = Array.isArray(album.keywords) ? album.keywords : [];
+  const savedItemIds = Array.isArray(album.savedItemIds) ? album.savedItemIds : [];
+  const recommendedItemIds = raw.recommendedItemIds ?? savedItemIds.slice(0, 3);
   return {
     ...album,
     albumView,
     contentDomain,
-    contentSubDomain: raw.contentSubDomain || album.keywords[0] || album.albumType || "主题整理",
-    savedIntent: albumView === "saved_intent" ? normalizeSavedIntent(raw.savedIntent ?? album.albumType) : raw.savedIntent ? normalizeSavedIntent(raw.savedIntent) : undefined,
+    contentSubDomain: raw.contentSubDomain || keywords[0] || album.albumType || "主题整理",
+    savedIntent,
     category: contentDomain,
     albumType: album.albumType || (albumView === "saved_intent" ? "intent_album" : "domain_album"),
-    recommendedItemIds: raw.recommendedItemIds ?? album.savedItemIds.slice(0, 3),
+    keywords,
+    savedItemIds,
+    recommendedItemIds,
     whyThisAlbum: album.whyThisAlbum || (albumView === "saved_intent" ? "这些收藏的用途相近，适合放在同一个用途视角里查看。" : "这些收藏讲的是相近主题，适合放在同一个主题视角里查看。"),
     whyStartHere: album.whyStartHere || "先从最近保存、信息更完整的 3 条开始。",
     suggestedFirstAction: album.suggestedFirstAction || "先挑一条真正想复活的收藏，再按用途生成行动卡。",
     priority: raw.priority === "high" || raw.priority === "medium" || raw.priority === "low" ? raw.priority : priorityScore >= 36 ? "high" : priorityScore >= 18 ? "medium" : "low",
-    priorityScore
+    priorityScore,
+    autoCollectEnabled: album.autoCollectEnabled ?? album.status === "confirmed",
+    mediumMatchRequiresApproval: album.mediumMatchRequiresApproval ?? true,
+    suggestedItemIds: album.suggestedItemIds ?? [],
+    manuallyAddedItemIds: album.manuallyAddedItemIds ?? [],
+    manuallyRemovedItemIds: album.manuallyRemovedItemIds ?? [],
+    matchProfile: album.matchProfile ?? {
+      contentDomain,
+      contentSubDomain: raw.contentSubDomain || keywords[0] || album.albumType || "主题整理",
+      savedIntent,
+      keywords,
+      entityValues: [],
+      positiveExamples: savedItemIds.slice(0, 3),
+      negativeExamples: []
+    },
+    schemaVersion: album.schemaVersion ?? 2
+  };
+}
+
+function normalizeImportBatch(batch: NonNullable<AppState["importBatches"]>[number]): NonNullable<AppState["importBatches"]>[number] {
+  return {
+    ...batch,
+    scanSummary: batch.scanSummary
+  };
+}
+
+function normalizeImportBatchItem(item: NonNullable<AppState["importBatchItems"]>[number]): NonNullable<AppState["importBatchItems"]>[number] {
+  const rawTitle = item.rawTitle || item.title || item.rawShareText || item.visibleText || "";
+  const cleanedTitle = cleanScannedTitle(item.cleanedTitle || rawTitle, item.rawShareText || item.visibleText || "");
+  const displayTitle = pickDisplayTitle({
+    userEditedTitle: item.userEditedTitle,
+    cleanedTitle,
+    rawTitle
+  });
+  return {
+    ...item,
+    rawTitle,
+    cleanedTitle,
+    displayTitle,
+    title: displayTitle,
+    rawShareText: cleanScannedText(item.rawShareText || ""),
+    visibleText: item.visibleText ? cleanScannedText(item.visibleText) : item.visibleText,
+    textNormalizationVersion: item.textNormalizationVersion ?? 2
   };
 }
 
@@ -484,6 +548,15 @@ function normalizeStoredTitle(title: string, fallback?: string): string {
   if (cleaned) return cleaned;
   const fallbackText = cleanLegacyText(fallback ?? "").replace(/https?:\/\/\S+/g, "").trim().slice(0, 20);
   return fallbackText || "待整理收藏";
+}
+
+function pickDisplayTitle(input: { userEditedTitle?: string; cleanedTitle?: string; rawTitle?: string }): string {
+  const edited = cleanLegacyText(input.userEditedTitle ?? "");
+  if (edited) return edited;
+  const cleaned = normalizeStoredTitle(input.cleanedTitle ?? "", input.rawTitle);
+  if (cleaned && cleaned !== "待整理收藏") return cleaned;
+  const raw = normalizeStoredTitle(input.rawTitle ?? "");
+  return raw && raw !== "待整理收藏" ? raw : "标题待补充";
 }
 
 function normalizeStoredSummary(summary: string, category: Category): string {
@@ -578,6 +651,26 @@ export interface ScannedTextMigrationReport {
   state: AppState;
 }
 
+export interface ScannedTextMigrationV3Change {
+  id: string;
+  type: "SavedItem" | "ImportBatchItem";
+  before: string;
+  after: string;
+  uncertain: boolean;
+}
+
+export interface ScannedTextMigrationV3Report {
+  checkedCount: number;
+  abnormalCount: number;
+  savedItemCount: number;
+  importBatchItemCount: number;
+  changedCount: number;
+  uncertainCount: number;
+  backupJson: string;
+  changes: ScannedTextMigrationV3Change[];
+  state: AppState;
+}
+
 export function migrateScannedTextV2(state: AppState): ScannedTextMigrationReport {
   const backupJson = JSON.stringify(state, null, 2);
   let migratedCount = 0;
@@ -621,6 +714,110 @@ export function migrateScannedTextV2(state: AppState): ScannedTextMigrationRepor
   };
 }
 
+export function migrateScannedTextV3(state: AppState): ScannedTextMigrationV3Report {
+  const backupJson = JSON.stringify(state, null, 2);
+  const changes: ScannedTextMigrationV3Change[] = [];
+  const now = new Date().toISOString();
+
+  const savedItems = (state.savedItems ?? []).map((item) => {
+    const before = item.displayTitle || item.cleanedTitle || item.title || item.rawTitle || "";
+    const rawTitle = cleanScannedText(item.rawTitle || item.title || item.rawShareText || "");
+    const cleanedTitle = cleanScannedTitle(item.cleanedTitle || rawTitle, item.rawShareText);
+    const displayTitle = pickDisplayTitle({ userEditedTitle: item.userEditedTitle, cleanedTitle, rawTitle });
+    const uncertain = isTextNormalizationUncertain(rawTitle, cleanedTitle, displayTitle);
+    if (before !== displayTitle || item.textNormalizationVersion !== 3) {
+      changes.push({ id: item.id, type: "SavedItem", before, after: displayTitle, uncertain });
+    }
+    const normalized = {
+      ...item,
+      rawTitle,
+      cleanedTitle,
+      displayTitle,
+      title: displayTitle,
+      rawShareText: cleanScannedText(item.rawShareText),
+      searchableText: buildSearchableText(
+        { sourceUrl: item.sourceUrl, rawShareText: cleanScannedText(item.rawShareText), title: displayTitle, userNote: item.userNote },
+        item.contentDomain,
+        item.contentSubDomain,
+        item.savedIntent,
+        item.keywords,
+        item.entities
+      ),
+      textNormalizationVersion: 3,
+      updatedAt: now
+    };
+    return normalized;
+  });
+
+  const importBatchItems = (state.importBatchItems ?? []).map((item) => {
+    const before = item.displayTitle || item.cleanedTitle || item.title || item.rawTitle || "";
+    const rawTitle = cleanScannedText(item.rawTitle || item.title || item.rawShareText || item.visibleText || "");
+    const cleanedTitle = cleanScannedTitle(item.cleanedTitle || rawTitle, item.rawShareText || item.visibleText || "");
+    const displayTitle = pickDisplayTitle({ userEditedTitle: item.userEditedTitle, cleanedTitle, rawTitle });
+    const uncertain = isTextNormalizationUncertain(rawTitle, cleanedTitle, displayTitle);
+    if (before !== displayTitle || item.textNormalizationVersion !== 3) {
+      changes.push({ id: item.id, type: "ImportBatchItem", before, after: displayTitle, uncertain });
+    }
+    return {
+      ...item,
+      rawTitle,
+      cleanedTitle,
+      displayTitle,
+      title: displayTitle,
+      rawShareText: cleanScannedText(item.rawShareText),
+      visibleText: item.visibleText ? cleanScannedText(item.visibleText) : item.visibleText,
+      textNormalizationVersion: 3
+    };
+  });
+
+  const savedItemById = new Map(savedItems.map((item) => [item.id, item]));
+  const smartAlbums = (state.smartAlbums ?? []).map((album) => ({
+    ...album,
+    updatedAt: changes.length ? now : album.updatedAt,
+    recommendedItemIds: album.recommendedItemIds.filter((id) => savedItemById.has(id)).slice(0, 3),
+    suggestedItemIds: (album.suggestedItemIds ?? []).filter((id) => savedItemById.has(id)),
+    savedItemIds: album.savedItemIds.filter((id) => savedItemById.has(id))
+  }));
+
+  const importBatches = (state.importBatches ?? []).map((batch) => {
+    const batchItems = importBatchItems.filter((item) => item.batchId === batch.id);
+    return {
+      ...batch,
+      scanSummary: {
+        ...batch.scanSummary,
+        totalFound: batch.scanSummary?.totalFound ?? batchItems.length,
+        selectedCount: batch.scanSummary?.selectedCount ?? batchItems.filter((item) => item.status === "imported").length,
+        missingTitleCount: batchItems.filter((item) => !item.displayTitle || item.displayTitle === "标题待补充").length,
+        missingLinkCount: batchItems.filter((item) => !item.sourceUrl).length,
+        duplicateCount: batch.duplicateCount,
+        lastScannedAt: batch.updatedAt,
+        sampleTitles: batchItems.map((item) => item.displayTitle || item.title).filter(Boolean).slice(0, 5)
+      }
+    };
+  });
+
+  const checkedCount = savedItems.length + importBatchItems.length;
+  const uncertainCount = changes.filter((change) => change.uncertain).length;
+  return {
+    checkedCount,
+    abnormalCount: changes.length,
+    savedItemCount: savedItems.length,
+    importBatchItemCount: importBatchItems.length,
+    changedCount: changes.length,
+    uncertainCount,
+    backupJson,
+    changes,
+    state: {
+      ...state,
+      schemaVersion: APP_SCHEMA_VERSION,
+      savedItems,
+      importBatchItems,
+      importBatches,
+      smartAlbums
+    }
+  };
+}
+
 function cleanScannedTitle(title: string, rawShareText: string): string {
   const source = title || rawShareText;
   const withoutUrl = cleanScannedText(source).replace(/https?:\/\/\S+/g, " ");
@@ -630,8 +827,8 @@ function cleanScannedTitle(title: string, rawShareText: string): string {
     .replace(/\s+[-—–]\s+[^|｜】]+(\s*[|｜]\s*小红书.*)?$/, "")
     .replace(/小红书\s*-\s*你的生活兴趣社区|你的生活兴趣社区/g, " ")
     .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 80);
+    .trim();
+  return truncateGraphemeSafe(candidate, 80);
 }
 
 function cleanScannedText(value: string): string {
@@ -646,6 +843,27 @@ function cleanScannedText(value: string): string {
     .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function truncateGraphemeSafe(value: string, maxLength: number): string {
+  if (value.length <= maxLength) return value;
+  const segmenter = typeof Intl !== "undefined" && "Segmenter" in Intl
+    ? new Intl.Segmenter("zh-CN", { granularity: "grapheme" })
+    : undefined;
+  if (!segmenter) return Array.from(value).slice(0, maxLength).join("");
+  let output = "";
+  for (const segment of segmenter.segment(value)) {
+    if ((output + segment.segment).length > maxLength) break;
+    output += segment.segment;
+  }
+  return output;
+}
+
+function isTextNormalizationUncertain(rawTitle: string, cleanedTitle: string, displayTitle: string): boolean {
+  if (!displayTitle || displayTitle === "标题待补充") return true;
+  if (/[\uFFFD]|锛|銆|鐨|鍏|馃|瑙|鏀|涔/.test(rawTitle + cleanedTitle)) return true;
+  if (rawTitle.length > 120 && cleanedTitle.length < 4) return true;
+  return false;
 }
 
 function isString(value: unknown): value is string {
