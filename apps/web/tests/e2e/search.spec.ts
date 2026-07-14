@@ -24,6 +24,29 @@ async function runSearch(page: import("@playwright/test").Page, query: string) {
 }
 
 test.describe("MVP search recall", () => {
+  test("restores /search?q after refresh and supports Dashboard search", async ({ page }) => {
+    const errors = collectConsoleErrors(page);
+    await resetDemoData(page);
+
+    await page.goto("/search?q=AI");
+    await expect(page.locator(".search-page-form input")).toHaveValue("AI");
+    await expect(page.getByTestId("search-result-card").first()).toBeVisible();
+    await page.reload();
+    await expect(page.locator(".search-page-form input")).toHaveValue("AI");
+    await expect(page.getByTestId("search-result-card").first()).toBeVisible();
+
+    await page.goto("/dashboard");
+    await page.getByTestId("dashboard-search-input").fill("AI");
+    await page.getByTestId("dashboard-search-submit").click();
+    await expect(page.getByTestId("dashboard-search-results")).toBeVisible();
+    await expect(page.getByTestId("dashboard-search-result").first()).toBeVisible();
+    await page.getByTestId("dashboard-view-all-search").click();
+    await expect(page).toHaveURL(/\/search\?q=AI/);
+    await expect(page.getByTestId("search-result-card").first()).toBeVisible();
+
+    await expectNoConsoleErrors(errors);
+  });
+
   test("finds saved items by key terms and shows match reasons", async ({ page }) => {
     const errors = collectConsoleErrors(page);
     await installWindowOpenSpy(page);
