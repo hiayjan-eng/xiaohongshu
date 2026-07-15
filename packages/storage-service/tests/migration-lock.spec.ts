@@ -46,8 +46,8 @@ export function runMigrationLockTests(harness: TestHarness): void {
 
   harness.test("Migration lock: Web Locks provider reports unavailable lock", async () => {
     const provider = new WebLocksMigrationLockProvider({
-      async request(_name, _options, callback) {
-        return callback(null) as Promise<void>;
+      async request<T>(_name: string, _options: unknown, callback: (lock: unknown | null) => T | Promise<T>): Promise<T> {
+        return callback(null);
       }
     });
     await expectStorageError(
@@ -61,9 +61,10 @@ export function runMigrationLockTests(harness: TestHarness): void {
   harness.test("Migration lock: Web Locks provider holds until release", async () => {
     let callbackCompleted = false;
     const provider = new WebLocksMigrationLockProvider({
-      async request(_name, _options, callback) {
-        await callback({ name: "lock" });
+      async request<T>(_name: string, _options: unknown, callback: (lock: unknown | null) => T | Promise<T>): Promise<T> {
+        const result = await callback({ name: "lock" });
         callbackCompleted = true;
+        return result;
       }
     }, () => new Date("2026-07-15T00:00:00.000Z"));
     const lock = await provider.acquire({ migrationId: "migration-001" });
