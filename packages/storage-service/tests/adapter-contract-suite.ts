@@ -26,6 +26,7 @@ export interface AdapterContractOptions {
   name: string;
   createAdapter: () => StorageAdapter;
   expectedCapabilities: StorageCapabilities;
+  preservesInsertionOrder?: boolean;
   cleanup?: (adapter: StorageAdapter) => Promise<void> | void;
 }
 
@@ -134,7 +135,11 @@ export function runStorageAdapterContractTests(harness: TestHarness, options: Ad
         makeSavedItem("saved-a", { title: "Alpha", updatedAt: "2026-07-15T01:00:00.000Z" }),
         makeSavedItem("saved-c", { title: "Gamma", updatedAt: "2026-07-15T03:00:00.000Z" })
       ]);
-      harness.deepEqual((await adapter.getAll("savedItems")).map((item) => item.id), ["saved-b", "saved-a", "saved-c"], "default getAll order");
+      harness.deepEqual(
+        (await adapter.getAll("savedItems")).map((item) => item.id),
+        options.preservesInsertionOrder === false ? ["saved-a", "saved-b", "saved-c"] : ["saved-b", "saved-a", "saved-c"],
+        "default getAll order"
+      );
       harness.deepEqual(
         (await adapter.getAll("savedItems", { orderBy: "updatedAt", direction: "desc", offset: 1, limit: 1 })).map((item) => item.id),
         ["saved-b"],
