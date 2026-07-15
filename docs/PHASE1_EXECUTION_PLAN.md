@@ -1,5 +1,18 @@
 # Phase 1 数据底座执行计划
 
+## Task 4 完成记录：Legacy raw backup 与 Snapshot 输入
+
+Task 4 已完成只读备份能力，范围只在 `packages/storage-service` 和测试/文档内。新增 `LegacyLocalStorageSnapshotReader`、`ReadonlyStorageLike`、`LEGACY_PRODUCT_STORAGE_KEYS`、`LegacyBackupEnvelope`、checksum、序列化、Blob 和文件名工具，以及 backup verification。它没有接入 Web 页面，没有创建迁移 UI，没有打开或写入 IndexedDB，也没有读取用户真实浏览器数据。
+
+Task 4 的输出会成为 Task 5 的输入：
+
+- `rawBackup`：保留旧 localStorage allowlist key 的原始字符串，用于零损失备份和回滚证据。
+- `normalizedSnapshot`：在 AppState 可解析时生成的标准 `StorageSnapshot`，用于迁移预览和 adapter 写入验证。
+- `report`：记录 included/excluded/unknown keys、source counts、normalized counts、duplicates、skipped records、broken references 和安全 issue。
+- `checksums`：raw 与 normalized 分开计算，算法为 SHA-256；不可用时记录 warning。
+
+Task 5 不应重新实现 legacy reader，而应基于 `LegacyBackupEnvelope` 实现迁移预览与验证器。Task 6 才允许执行真实迁移和回滚，Task 7 才允许把导出和升级入口放进设置页。
+
 Phase 1 不应该被作为一个大 Codex goal 一次性完成。它要拆成可以单独验收的小任务，每一步都要保护用户已有 localStorage 数据、扩展扫描链路和线上 Web MVP。除非任务明确允许，否则不修改扩展、不改分类、不改 UI 主流程、不接 Supabase、不部署 production。
 
 ## Task 1：存储盘点与 Adapter 接口定稿
