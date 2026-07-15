@@ -329,3 +329,36 @@ Task 2 新增 `runStorageAdapterContractTests()`。它不绑定 MemoryAdapter，
 ### 明确未做
 
 Task 2 没有创建 IndexedDB，没有调用 `indexedDB.open`，没有引入 Dexie / idb，没有切换 activeStorage，没有修改 `loadAppState` / `persistAppState`，没有迁移或读取用户真实 `localStorage`，也没有修改 Web 页面、路由、扩展、分类、行动卡或计划卡业务逻辑。
+## Task 3 补充：IndexedDbAdapter 已落地但未接入产品运行时
+
+Task 3 在 `packages/storage-service/src/indexeddb-adapter.ts` 中实现了 `IndexedDbAdapter`，它只作为底层存储能力和后续迁移执行器的依赖存在。当前 Web 启动流程、`activeStorage`、`loadAppState`、`persistAppState`、页面、扩展和导入协议都没有切到 IndexedDB，也没有读取或迁移用户真实浏览器数据。
+
+`IndexedDbAdapter` 的正式运行代码只使用浏览器原生 IndexedDB API：`globalThis.indexedDB`、`IDBDatabase`、`IDBTransaction`、`IDBObjectStore`、`IDBIndex`、`IDBKeyRange` 和 `IDBRequest`。本轮没有引入 Dexie、`idb` 或其他运行时封装库。单元测试使用 `fake-indexeddb` 作为 devDependency 来模拟浏览器 IndexedDB；它只存在于 `packages/storage-service` 的测试环境，不进入 production bundle，也不被 adapter 源码 import。
+
+数据库名称定稿为 `collection-revival-local`，schemaVersion 为 `1`。v1 创建 11 个 object stores：`savedItems`、`importBatches`、`importBatchItems`、`smartAlbums`、`actionCards`、`planCards`、`classificationCorrections`、`searchLogs`、`settings`、`migrationMetadata`、`backups`。除 `settings` 使用 keyPath `key` 外，其余 store 使用 keyPath `id`；所有 store 都显式禁止 `autoIncrement`。
+
+IndexedDbAdapter 的 capabilities 为：
+
+| capability | value | 说明 |
+|---|---:|---|
+| `transactions` | true | 使用原生 `IDBTransaction`，同一事务 wrapper 内的所有操作共享同一个 native transaction。 |
+| `indexes` | true | 按 `STORAGE_INDEXES` 和 `INDEXED_DB_INDEX_KEY_PATHS` 创建 v1 indexes。 |
+| `snapshots` | true | 支持全量和部分 store 的 JSON-safe Snapshot export。 |
+| `rollback` | true | 表示单个 readwrite transaction 和 staging import 失败不会污染主数据；完整迁移历史回滚仍属于 Task 6。 |
+| `persistence` | true | close 后 reopen 仍保留同一 databaseName 中的数据。 |
+| `bulkWrite` | true | `bulkPut` 使用单个 readwrite transaction，任一记录失败则整批回滚。 |
+| `queryRanges` | true | `equals`、`lowerBound`、`upperBound` 会映射到 `IDBKeyRange`。 |
+
+生命周期语义如下：`isAvailable()` 只检查 IndexedDB 和 IDBKeyRange 是否存在，不写入数据；`open()` 幂等，使用 `onupgradeneeded` 创建 v1 schema，`onblocked` 映射为 `STORAGE_LOCKED`，`VersionError` 映射为 `STORAGE_SCHEMA_MISMATCH`；打开成功后注册 `onversionchange`，旧连接收到版本变化会自动 close 并清空 adapter 内部 db 引用。`close()` 只关闭连接，不删除数据库。
+
+查询模型仍保持 Task 1 的最小边界：单 store、单 index；支持 `equals` 或范围查询、`limit`、`offset`、`direction`。不支持全文搜索、模糊搜索、embedding、向量数据库、多字段 AND/OR、联表查询或 SQL 字符串。无 `orderBy` 的 `getAll()` 使用 IndexedDB 原生 object store key 顺序；contract suite 通过 `preservesInsertionOrder` 区分 MemoryAdapter 的插入顺序和 IndexedDB 的主键顺序。
+
+`transaction(stores, mode, operation)` 创建一个 native `IDBTransaction`，事务 wrapper 的 `get/getAll/query/put/bulkPut/delete/clear` 都在这个 native transaction 中执行。`readonly` 禁止写入；访问未声明 store 会失败；operation 抛错时 adapter 调用 `abort()` 并等待事务失败，保证多 store readwrite 原子回滚。嵌套 transaction 不支持，外层事务会以 `STORAGE_TRANSACTION_FAILED` 结束。事务回调不能等待无关长时异步任务，否则原生 IndexedDB transaction 可能失活；这属于调用方约束，后续 repository 实现必须遵守。
+
+Snapshot export 使用 readonly 多 store transaction 尽量获得一致视图。默认导出全部 store，也可通过 `options.stores` 指定；`settings.internal = true` 默认排除，只有 `includeInternalSettings = true` 时才包含。Snapshot 是数据交换格式，不等于 IndexedDB 内部格式；本轮仍不实现正式 checksum，也不触发文件下载。
+
+Snapshot import 支持 `preview`、`merge`、`replace`、`staging`。其中 `preview` 不写数据库；`merge` 按 `preserveExisting` 决定同主键跳过或覆盖；`replace` 只清空 Snapshot 明确包含或 options 指定的 store；`staging` 先使用 MemoryAdapter 做结构和导入语义验证，验证通过后再使用一个 IndexedDB 多 store readwrite transaction 写入目标 store。Task 3 不创建额外 staging object stores，不修改 `activeStorage`，也不写迁移状态机。
+
+可复用测试入口已经扩展为同时覆盖 MemoryAdapter 和 IndexedDbAdapter。`runStorageAdapterContractTests()` 仍是底层适配器必须通过的通用契约；IndexedDbAdapter 额外补充 schema、keyPath、index、persistence、versionchange、blocked、VersionError、多 store transaction、Snapshot internal settings、staging 污染保护等专属测试。Task 3 当前 storage-service 单包测试结果为 88 tests / 468 assertions passed。
+
+Task 4 的边界保持不变：只做 raw localStorage snapshot 和备份导出，不调用会自动写 demo 的 `loadAppState`，不切 activeStorage。Task 5 再做 migration preview / validator，Task 6 才做迁移执行、断点恢复、多标签 writer lock 和正式回滚。
