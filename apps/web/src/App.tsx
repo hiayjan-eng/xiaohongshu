@@ -44,6 +44,7 @@ import { RewardConfetti } from "./components/RewardConfetti";
 import { ThemePicker } from "./components/ThemePicker";
 import { TodayWidgetPreview } from "./components/TodayWidgetPreview";
 import { RealTestView } from "./components/RealTestView";
+import { MigrationDataUpgradeEntry, MigrationDataUpgradePage } from "./features/storage-migration";
 import { ThemeProvider } from "./theme/ThemeProvider";
 import { getStoredThemeId, getThemePreset, THEME_STORAGE_KEY, type ThemePresetId } from "./theme/themePresets";
 import {
@@ -76,6 +77,7 @@ import {
 } from "@revival/shared-types";
 
 type ViewKey = "welcome" | "dashboard" | "import" | "old-import" | "search" | "pool" | "detail" | "plans" | "albums" | "insights" | "mobile" | "settings" | "real-test" | "qa";
+type SettingsSubRoute = "root" | "data-migration";
 
 const EXTENSION_BETA_VERSION = "0.2.2";
 const EXTENSION_ZIP_FILE_NAME = `collection-revival-extension-beta-v${EXTENSION_BETA_VERSION}.zip`;
@@ -194,6 +196,7 @@ const SEARCH_OPEN_MESSAGES = [
 export function App() {
   const [state, setState] = useState<AppState>(() => loadAppState(typeof window === "undefined" ? undefined : window.localStorage));
   const [activeView, setActiveView] = useState<ViewKey>(() => getInitialView());
+  const [settingsSubRoute, setSettingsSubRoute] = useState<SettingsSubRoute>(() => getInitialSettingsSubRoute());
   const [importInput, setImportInput] = useState<ShareInput>(emptyImport);
   const [lastImportResult, setLastImportResult] = useState<ImportSuccessResult | null>(null);
   const [importSessionCount, setImportSessionCount] = useState(0);
@@ -277,6 +280,7 @@ export function App() {
     const syncViewFromLocation = () => {
       const nextView = getInitialView();
       setActiveView(nextView);
+      setSettingsSubRoute(getInitialSettingsSubRoute());
       if (nextView === "search") {
         const query = getInitialSearchQuery();
         setSubmittedSearch(query);
@@ -386,6 +390,7 @@ export function App() {
     const results = searchSavedItems(clean, state.savedItems, state.actionCards, smartAlbums);
     setSubmittedSearch(clean);
     setGlobalQuery(clean);
+    setSettingsSubRoute("root");
     setActiveView("search");
     if (options.syncUrl !== false && typeof window !== "undefined") {
       window.history.pushState(null, "", `/search?q=${encodeURIComponent(clean)}`);
@@ -394,6 +399,33 @@ export function App() {
       ...current,
       searchLogs: [...current.searchLogs, createSearchLog(current.user.id, clean, results.length)]
     }));
+  }
+
+  function navigatePrimaryView(view: ViewKey) {
+    if (settingsSubRoute === "data-migration" && typeof window !== "undefined") {
+      const path = view === "welcome" ? "/" : `/${view}`;
+      window.history.pushState(null, "", path);
+    }
+    setSettingsSubRoute("root");
+    setActiveView(view);
+  }
+
+  function openDataMigration() {
+    if (typeof window !== "undefined") window.history.pushState(null, "", "/settings/data-migration");
+    setSettingsSubRoute("data-migration");
+    setActiveView("settings");
+  }
+
+  function returnToSettings() {
+    if (typeof window !== "undefined") window.history.pushState(null, "", "/settings");
+    setSettingsSubRoute("root");
+    setActiveView("settings");
+  }
+
+  function returnToImportFromMigration() {
+    if (typeof window !== "undefined") window.history.pushState(null, "", "/import");
+    setSettingsSubRoute("root");
+    setActiveView("import");
   }
 
   function runDashboardSearch(query: string) {
@@ -1321,7 +1353,7 @@ export function App() {
     <ThemeProvider themeId={themeId}>
     <div className="app-shell">
       <aside className="sidebar">
-        <button className="brand" onClick={() => setActiveView("welcome")}>
+        <button className="brand" onClick={() => navigatePrimaryView("welcome")}>
           <span className="brand-mark">复</span>
           <span>
             <strong>收藏复活</strong>
@@ -1333,7 +1365,7 @@ export function App() {
           {visibleNavItems.map((item) => {
             const Icon = item.icon;
             return (
-              <button key={item.key} className={activeView === item.key ? "nav-item active" : "nav-item"} onClick={() => setActiveView(item.key)}>
+              <button key={item.key} className={activeView === item.key ? "nav-item active" : "nav-item"} onClick={() => navigatePrimaryView(item.key)}>
                 <Icon size={18} />
                 <span>{item.label}</span>
               </button>
@@ -1362,7 +1394,7 @@ export function App() {
           </form>
 
           <div className="topbar-actions">
-            <button className="icon-text-button" onClick={() => setActiveView("import")}>
+            <button className="icon-text-button" onClick={() => navigatePrimaryView("import")}>
               <Share2 size={17} />
               导入一条
             </button>
@@ -1556,7 +1588,7 @@ export function App() {
             />
           )}
 
-          {activeView === "settings" && (
+          {activeView === "settings" && settingsSubRoute === "root" && (
             <SettingsView
               userName={state.user.name}
               recommendationLimit={recommendationLimit}
@@ -1578,6 +1610,14 @@ export function App() {
               developerMode={developerMode}
               setDeveloperMode={setDeveloperMode}
               openInternalTool={(view) => setActiveView(view)}
+              openDataMigration={openDataMigration}
+            />
+          )}
+
+          {activeView === "settings" && settingsSubRoute === "data-migration" && (
+            <MigrationDataUpgradePage
+              onBackToSettings={returnToSettings}
+              onReturnToImport={returnToImportFromMigration}
             />
           )}
 
@@ -3522,6 +3562,7 @@ function SettingsView(props: {
   developerMode: boolean;
   setDeveloperMode: (value: boolean) => void;
   openInternalTool: (view: "qa" | "real-test") => void;
+  openDataMigration: () => void;
 }) {
   const [devOpen, setDevOpen] = useState(false);
   function toggleDeveloperMode(value: boolean) {
@@ -3539,6 +3580,8 @@ function SettingsView(props: {
       </div>
 
       <ThemePicker selectedThemeId={props.themeId} onThemeChange={props.setThemeId} />
+
+      <MigrationDataUpgradeEntry onOpen={props.openDataMigration} />
 
       <section className="tool-panel single settings-list" data-testid="local-data-tools">
         <div className="settings-row">
@@ -4478,6 +4521,11 @@ function getInitialView(): ViewKey {
   const view = firstSegment as ViewKey;
   const supported: ViewKey[] = ["welcome", "dashboard", "import", "old-import", "search", "pool", "detail", "plans", "albums", "insights", "mobile", "settings", "real-test", "qa"];
   return supported.includes(view) ? view : "welcome";
+}
+
+function getInitialSettingsSubRoute(): SettingsSubRoute {
+  if (typeof window === "undefined") return "root";
+  return /^\/settings\/data-migration\/?$/.test(window.location.pathname) ? "data-migration" : "root";
 }
 
 function getInitialAlbumId(): string | undefined {
