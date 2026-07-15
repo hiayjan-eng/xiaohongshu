@@ -95,6 +95,28 @@ Phase 1 不应该被作为一个大 Codex goal 一次性完成。它要拆成可
 | 是否允许 deploy | 不允许。 |
 | 工作量 | M |
 
+### Task 5 执行补充
+
+Task 5 已落地在 `packages/storage-service/src/migration-preview.ts`，并通过 `packages/storage-service/tests/migration-preview.spec.ts` 接入 storage-service 测试 runner。它只消费 Task 4 的 `LegacyBackupEnvelope`，生成 `MigrationPreviewReport`、`MigrationPlan`、`MigrationReport` 和用户摘要，不写任何 adapter，也不接入页面。
+
+本任务实际导出的 API 为：
+
+- `validateMigrationSource`
+- `createMigrationPreview`
+- `createMigrationPreviewUserSummary`
+- `createMigrationReport`
+- `MigrationIssue` / `MigrationIssueCode` / `MigrationIssueSeverity`
+- `MigrationStorePreview`
+- `MigrationDuplicateGroup`
+- `MigrationBrokenReference`
+- `DataPreservationCheck`
+- `MigrationPlan`
+- `MigrationReport`
+
+本任务的测试新增 20 个 migration preview case，覆盖备份格式、checksum、count mismatch、重复主键、sourceItemId 和 normalized URL 重复、必需/可选引用断裂、用户备注/手动标题/sourceUrl/分类纠正保留、SmartAlbum/ActionCard/PlanCard 生命周期保留、目标库 identical skip、目标库 conflict、目标读取失败、大体量 fixture、无 normalized Snapshot、只读边界和敏感信息脱敏。当前 storage-service 单包测试结果为 128 tests / 640 assertions passed。
+
+Task 5 结束后仍然不允许执行真实迁移。Task 6 的输入应是 Task 4 的 envelope + Task 5 的 preview/plan；Task 6 必须先重新验证 preview 没有 blocking issue，再创建 writer lock 和 staging 写入流程。
+
 ## Task 6：迁移执行、断点恢复和回滚
 
 | 项目 | 内容 |
