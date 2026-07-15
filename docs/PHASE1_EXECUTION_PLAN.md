@@ -299,3 +299,13 @@ Task 3 已将 `IndexedDbAdapter` 落在 `packages/storage-service/src/indexeddb-
 ### 对后续任务的影响
 
 Task 4 现在可以基于稳定的 adapter contract 做只读 localStorage snapshot 和备份导出。Task 4 仍然不能调用会自动写 demo 数据的 `loadAppState`，也不能将 Snapshot 导入 IndexedDB。Task 5 可以复用 IndexedDbAdapter 和 MemoryAdapter 的 import/transaction 行为来做 migration preview 和引用校验。Task 6 才允许讨论真实迁移执行、activeStorage 切换、多标签 writer lock、失败回滚和设置页接入。
+
+## Task 6 执行补充：MigrationExecutor 已完成底层能力
+
+Task 6 当前完成的是 storage-service 内部执行器，不是产品运行时接入。新增源码范围为 `packages/storage-service/src/migration-executor.ts`、`migration-lock.ts`、`migration-executor-errors.ts` 以及对应测试。它没有修改 `apps/`、扩展、分类服务、ActionCard/PlanCard 业务逻辑、`loadAppState`、`persistAppState` 或部署配置。
+
+本任务完成的能力包括：显式用户确认门、单写入者锁、target adapter 可用性检查、目标业务 stores 空库保护、Memory staging 校验、backup 持久化、store 级 checkpoint、逐 store 写入和验证、失败后 resume、completed/idempotent 再执行、rollback、rollback failure 标记、取消信号、错误脱敏和进度回调。测试同时覆盖 MemoryAdapter 和 fake-indexeddb 注入的 IndexedDbAdapter smoke。
+
+当前仍然延后的能力包括：设置页迁移 UI、真实用户 localStorage 读取入口、下载按钮、activeStorage 切换、localStorage 启动 flag、多标签页 BroadcastChannel UI 锁定、迁移期间产品写操作锁定、生产 smoke 和部署。Task 7 才能把这些库能力放进设置页，并且必须继续保持“用户预览、备份、确认后才执行”的顺序。
+
+Task 6 验收测试新增 20 个左右的迁移执行相关用例，其中锁 5 个、执行器 15 个。storage-service 单包测试现在覆盖 MemoryAdapter、IndexedDbAdapter、Legacy Snapshot、Migration Preview、Migration Lock 和 Migration Executor。后续 Task 7 不应重新实现执行器，而应调用这些已测试的 API。

@@ -228,3 +228,15 @@ Phase 1 建议增加迁移锁设计，但不要依赖服务器：
 Task 3 的 `IndexedDbAdapter.importSnapshot({ mode: "staging" })` 已实现为底层 adapter 能力测试：先用 `MemoryAdapter` 验证 Snapshot 结构和导入语义，验证成功后再用一个 IndexedDB 多 store readwrite transaction 写入目标 stores。这个 staging 行为能证明“验证失败不会污染主数据库、写入失败会由原生 transaction 回滚”，但它还不是用户可见的数据迁移流程。
 
 真实迁移仍然需要后续 Task 4-6 完成以下内容：raw localStorage snapshot、不可变备份、checksum、MigrationReport、引用完整性验证、用户确认 UI、多标签 writer lock、activeStorage 切换、失败恢复和用户可理解的回滚入口。Task 3 没有读取 localStorage，没有写 `migrationMetadata` 状态机，没有修改 `collection-revival-active-storage`，也没有删除或清理任何旧数据。
+
+## Task 6 补充：执行、断点恢复和回滚的当前落地
+
+Task 6 已把迁移状态机中的执行段落落到 `packages/storage-service/src/migration-executor.ts`。当前实现仍然是库能力，不会在 Web 页面打开时运行，也不会切换 `activeStorage`。调用方必须先通过 Task 4 创建 `LegacyBackupEnvelope`，再通过 Task 5 创建可执行的 `MigrationPreviewReport/MigrationPlan`，最后显式传入 `userConfirmed = true` 才能执行。
+
+执行流程现在拆成几个可恢复阶段：获取单写入者锁、检查 target adapter、校验 plan/envelope/checksum、检查目标业务 stores 为空、用 MemoryAdapter 做 staging 校验、写入 `backups`、写入 `migrationMetadata` checkpoint、按固定顺序写入业务 stores、逐 store 验证数量和 checksum、最终全量验证并标记 completed。固定顺序为 `settings -> savedItems -> importBatches -> importBatchItems -> smartAlbums -> actionCards -> planCards -> classificationCorrections -> searchLogs`，`migrationMetadata` 和 `backups` 只保存执行证据，不作为业务数据迁移目标。
+
+断点恢复基于 `migrationMetadata` 中的 store checkpoint。已验证的 store 会重新比对 checksum；写入后失败但 checksum 匹配的 store 会被标记为 verified；pending 或 failed store 会继续写入。如果目标 store 中存在与 checkpoint 不一致的数据，恢复会以 `MIGRATION_RESUME_CONFLICT` 停止，避免覆盖用户或测试过程中出现的未知写入。
+
+回滚只在 `activeStorageSwitched = false` 时允许。它按业务 store 逆序清空本次迁移写入的数据，并保留 `backups` 与 `migrationMetadata`，方便后续导出报告或人工排查。回滚不是删除旧 localStorage，也不是把 IndexedDB 切回 localStorage；真正的 activeStorage 标识切换和设置页恢复入口仍留到后续 Task。
+
+单写入者锁当前提供两个实现：`MemoryMigrationLockProvider` 用于单元测试和库级验证，`WebLocksMigrationLockProvider` 用于后续浏览器环境接入时的独占语义。Task 6 没有实现 localStorage 锁、BroadcastChannel UI 通知或多标签页设置页锁定，这些属于接入层任务。

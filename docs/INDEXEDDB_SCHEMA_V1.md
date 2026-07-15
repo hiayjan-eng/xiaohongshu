@@ -267,3 +267,9 @@ v1 object stores、keyPath 和索引如下，以 `contracts.ts` 的 `STORAGE_ENT
 `onupgradeneeded` 只负责创建 v1 stores 和 indexes，不读取 localStorage，不写入业务记录，也不执行数据迁移。已存在 store 时，adapter 会在升级 transaction 中取得该 store 并补齐缺失 index；不会盲目删除或重建已有 store。后续真实迁移和 schema upgrade 需要在独立任务中设计版本分支，不能直接在 Task 3 的 v1 schema 内隐式处理。
 
 仍未创建的结构保持不变：`albumMemberships`、`scanSessions`、`searchIndexes`、`embeddings`、`users`、`devices`、`syncQueue`、Supabase 表。扩展的 `chrome.storage.local` 扫描断点、popup 状态、bridge 状态和进度状态不进入 Web IndexedDB v1 schema。
+
+## Task 6 补充：migrationMetadata 与 backups 的执行期扩展
+
+Task 6 没有新增 v1 object store，也没有改变 keyPath 或 index。迁移执行器会在既有 `migrationMetadata` store 中保存 `MigrationExecutionMetadataRecord`，它在基础 `MigrationMetadata` 之上增加执行期字段：`executionStatus`、`previewId`、`backupRecordId`、`sourceSnapshotChecksum`、`activeStorageSwitched`、`rollbackAvailable`、`resumeCount`、`checkpoints`、`writtenCounts`、`verifiedCounts`、`expectedChecksums`、`targetChecksums` 和 `lastCheckpointAt`。这些字段都是 JSON-safe，写入前会清理 `undefined`。
+
+`backups` store 仍使用 keyPath `id`。Task 6 写入的备份记录保留标准 `StorageBackup.snapshot`，并以扩展字段保存 `rawBackup`、`checksums` 和读取报告，目的是让回滚和后续审计能看到 Task 4 的原始证据链。它不代表已切换 activeStorage，也不会删除旧 localStorage。
