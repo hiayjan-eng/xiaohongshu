@@ -162,3 +162,26 @@ Phase 1 不应该被作为一个大 Codex goal 一次性完成。它要拆成可
 ## 推荐第一实施任务
 
 建议先做 Task 1。它的价值是把接口、store 边界、迁移报告类型和测试目标一次性定住，且不会触碰用户真实数据和业务页面。等 Task 1 通过后，再进入 MemoryAdapter 和 IndexedDbAdapter，实现风险会小很多。
+
+## Task 1 执行后补充
+
+Task 1 的实际落地范围被收在 `packages/storage-service` 的契约层：
+
+- 新增 `contracts.ts`：定义 `StorageKind`、`StorageEntityName`、`StorageRecordMap`、查询模型、事务模型、capabilities、snapshot、import options、activeStorage、migration status、health report 和最终 `StorageAdapter`。
+- 新增 `errors.ts`：定义 `StorageErrorCode`、`StorageError`、安全错误序列化和 `STORAGE_NOT_SUPPORTED` helper。
+- 新增 `repositories.ts`：定义 repository 边界草图，不实现业务 repository。
+- 更新 `index.ts`：继续导出旧实体方法 Adapter，同时导出新契约；`LocalStorageAdapter` 保持旧行为，新增 kind/capabilities/healthCheck；未实现的通用方法抛 `STORAGE_NOT_SUPPORTED`。
+- 更新 storage-service package 脚本：新增 `test`，使用 TypeScript 进行契约级测试，不引入新运行时依赖。
+
+本任务明确没有做：
+
+- 没有创建 IndexedDB 数据库。
+- 没有调用 `indexedDB.open`。
+- 没有引入 Dexie、idb 或其他 IndexedDB 运行时依赖。
+- 没有实现 MemoryAdapter。
+- 没有实现 IndexedDbAdapter。
+- 没有执行数据迁移。
+- 没有修改 `loadAppState`、`persistAppState` 或 `App.tsx`。
+- 没有修改扩展、Bridge、扫描 selector、进度条、暂停继续、断点恢复和导入协议。
+
+后续 Task 2 应从 MemoryAdapter 开始，目标是验证 `StorageAdapter` 契约能在无浏览器持久化的环境中完整跑通 CRUD、bulkPut、query、snapshot/importSnapshot 的最小语义。Task 2 仍不应修改页面或扩展。
