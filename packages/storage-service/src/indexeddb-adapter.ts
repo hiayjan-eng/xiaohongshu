@@ -21,13 +21,13 @@ import {
   type StorageTransactionMode
 } from "./contracts";
 import { StorageError, type StorageErrorCode } from "./errors";
+import { assertJsonSafe as assertSharedJsonSafe, cloneJsonSafe as cloneSharedJsonSafe } from "./json-utils";
 import { createMemoryAdapter, getRecordPrimaryKey } from "./memory-adapter";
 
 export const DEFAULT_INDEXED_DB_NAME = "collection-revival-local";
 export const DEFAULT_INDEXED_DB_SCHEMA_VERSION = 1;
 
 const STORAGE_SNAPSHOT_FORMAT_VERSION = 1;
-const DANGEROUS_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
 type IndexedDbFactory = IDBFactory;
 type KeyRangeFactory = typeof IDBKeyRange;
@@ -733,48 +733,11 @@ function assertIndexAllowed<K extends StorageEntityName>(store: K, index: unknow
 }
 
 function assertJsonSafe(value: unknown, seen = new WeakSet<object>()): void {
-  if (value === null) return;
-  const kind = typeof value;
-  if (kind === "string" || kind === "number" || kind === "boolean") return;
-  if (kind === "undefined" || kind === "function" || kind === "symbol" || kind === "bigint") {
-    throw storageError("STORAGE_VALIDATION_FAILED", "Storage records must be JSON-safe.", true);
-  }
-  if (kind !== "object") {
-    throw storageError("STORAGE_VALIDATION_FAILED", "Storage records must be JSON-safe.", true);
-  }
-
-  const objectValue = value as object;
-  if (seen.has(objectValue)) {
-    throw storageError("STORAGE_VALIDATION_FAILED", "Storage records cannot contain circular references.", true);
-  }
-  seen.add(objectValue);
-
-  if (Array.isArray(value)) {
-    value.forEach((entry) => assertJsonSafe(entry, seen));
-    seen.delete(objectValue);
-    return;
-  }
-
-  const prototype = Object.getPrototypeOf(value);
-  if (prototype !== Object.prototype && prototype !== null) {
-    throw storageError("STORAGE_VALIDATION_FAILED", "Storage records must be plain JSON objects.", true);
-  }
-
-  for (const key of Object.keys(value as Record<string, unknown>)) {
-    if (DANGEROUS_KEYS.has(key)) {
-      throw storageError("STORAGE_VALIDATION_FAILED", "Storage records contain a blocked key.", true);
-    }
-    assertJsonSafe((value as Record<string, unknown>)[key], seen);
-  }
-  seen.delete(objectValue);
+  assertSharedJsonSafe(value, { adapter: "indexedDB", code: "STORAGE_VALIDATION_FAILED", recoverable: true }, seen);
 }
 
 function cloneJsonSafe<T>(value: T): T {
-  assertJsonSafe(value);
-  if (typeof globalThis.structuredClone === "function") {
-    return globalThis.structuredClone(value);
-  }
-  return JSON.parse(JSON.stringify(value)) as T;
+  return cloneSharedJsonSafe(value, { adapter: "indexedDB", code: "STORAGE_VALIDATION_FAILED", recoverable: true });
 }
 
 function mapIdbError(fallbackCode: StorageErrorCode, error: unknown, store?: StorageEntityName, fallbackMessage = "IndexedDB operation failed."): StorageError {
