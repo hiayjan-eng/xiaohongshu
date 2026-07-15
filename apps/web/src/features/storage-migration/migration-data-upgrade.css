@@ -646,6 +646,10 @@
 }
 
 @media (max-width: 640px) {
+  .main:has(.migration-upgrade-page) .topbar {
+    display: none;
+  }
+
   .migration-settings-entry__heading {
     grid-template-columns: auto minmax(0, 1fr);
   }
