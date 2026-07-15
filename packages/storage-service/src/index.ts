@@ -24,6 +24,7 @@ import { createStorageNotSupportedError, StorageError, type StorageErrorCode } f
 export * from "./contracts";
 export * from "./errors";
 export * from "./indexeddb-adapter";
+export * from "./legacy-localstorage-snapshot";
 export * from "./memory-adapter";
 export * from "./repositories";
 
