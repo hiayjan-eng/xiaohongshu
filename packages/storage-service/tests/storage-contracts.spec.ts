@@ -13,6 +13,7 @@ import {
   type StorageBulkWriteError,
   type StorageCapabilities,
   type StorageEntityName,
+  type StorageErrorCode,
   type StorageHealthReport,
   type StorageImportMode,
   type StorageImportResult,
@@ -24,7 +25,7 @@ import {
 } from "../src/index";
 
 const allStores: readonly StorageEntityName[] = STORAGE_ENTITY_NAMES;
-const expectedStores: readonly StorageEntityName[] = [
+const expectedStores = [
   "savedItems",
   "importBatches",
   "importBatchItems",
@@ -36,10 +37,10 @@ const expectedStores: readonly StorageEntityName[] = [
   "settings",
   "migrationMetadata",
   "backups"
-];
+] as const satisfies readonly StorageEntityName[];
 
-const _storeListIsExactLength: 11 = allStores.length;
-const _expectedListIsExactLength: 11 = expectedStores.length;
+const _storeListIsTyped: readonly StorageEntityName[] = allStores;
+const _expectedListIsTyped: readonly StorageEntityName[] = expectedStores;
 
 type ResolvedRecordMap = { [K in StorageEntityName]: StorageRecordMap[K] };
 type SavedItemRecord = ResolvedRecordMap["savedItems"];
@@ -97,8 +98,8 @@ const error = new StorageError({
 
 const _errorIsError: Error = error;
 const serializedError = error.toJSON();
-const _safeErrorCode: "STORAGE_NOT_SUPPORTED" = serializedError.code;
-const _safeErrorStore: "savedItems" | undefined = serializedError.store;
+const _safeErrorCode: StorageErrorCode = serializedError.code;
+const _safeErrorStore: StorageEntityName | undefined = serializedError.store;
 
 const setting: StoredSetting = {
   id: "setting_developerMode",
