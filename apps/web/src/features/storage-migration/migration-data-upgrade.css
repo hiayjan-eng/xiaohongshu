@@ -266,7 +266,7 @@
   display: flex;
   gap: 12px;
   align-items: center;
-  margin: 0 0 20px;
+  margin: 14px 0 0;
   padding: 14px;
   border-radius: 8px;
   background: var(--color-surface-soft);
@@ -297,6 +297,7 @@
   flex-wrap: wrap;
   gap: 14px;
   align-items: center;
+  margin-top: 20px;
 }
 
 .migration-primary-action > span {
