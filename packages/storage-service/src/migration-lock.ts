@@ -15,7 +15,11 @@ export interface MigrationLockHandle {
   release(): Promise<void>;
 }
 
+export type MigrationLockProviderKind = "memory" | "web-locks";
+
 export interface MigrationLockProvider {
+  readonly kind: MigrationLockProviderKind;
+  isAvailable?(): boolean;
   acquire(options: MigrationLockAcquireOptions): Promise<MigrationLockHandle>;
 }
 
@@ -25,6 +29,7 @@ interface MemoryLockState {
 }
 
 export class MemoryMigrationLockProvider implements MigrationLockProvider {
+  readonly kind: MigrationLockProviderKind = "memory";
   private readonly locks = new Map<string, MemoryLockState>();
   private readonly now: () => Date;
 
@@ -68,6 +73,10 @@ export class MemoryMigrationLockProvider implements MigrationLockProvider {
   isLocked(name = MIGRATION_WRITER_LOCK_NAME): boolean {
     return this.locks.has(name);
   }
+
+  isAvailable(): boolean {
+    return true;
+  }
 }
 
 export interface LockManagerLike {
@@ -79,7 +88,13 @@ export interface LockManagerLike {
 }
 
 export class WebLocksMigrationLockProvider implements MigrationLockProvider {
+  readonly kind: MigrationLockProviderKind = "web-locks";
+
   constructor(private readonly locks: LockManagerLike, private readonly now: () => Date = () => new Date()) {}
+
+  isAvailable(): boolean {
+    return Boolean(this.locks && typeof this.locks.request === "function");
+  }
 
   async acquire(options: MigrationLockAcquireOptions): Promise<MigrationLockHandle> {
     assertNotAborted(options.signal);
