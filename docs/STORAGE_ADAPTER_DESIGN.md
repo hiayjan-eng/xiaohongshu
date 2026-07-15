@@ -164,3 +164,121 @@ flowchart TD
 5. 最后接入设置页迁移 UI 和 activeStorage 切换。
 
 这样可以把“存储能力是否可靠”和“页面业务是否接入”分开验收。
+
+## Task 1 定稿：StorageAdapter 契约
+
+本轮已经在 `packages/storage-service` 中定稿契约类型，但没有实现 IndexedDB、MemoryAdapter 或真实迁移。最终接口以 `packages/storage-service/src/contracts.ts` 为准，现有 `LocalStorageAdapter` 仅补充 `kind`、`capabilities`、`healthCheck` 和不支持能力的标准错误；旧的实体方法仍保留，现有页面运行行为不变。
+
+最终 Store 名称为：
+
+```ts
+export type StorageEntityName =
+  | "savedItems"
+  | "importBatches"
+  | "importBatchItems"
+  | "smartAlbums"
+  | "actionCards"
+  | "planCards"
+  | "classificationCorrections"
+  | "searchLogs"
+  | "settings"
+  | "migrationMetadata"
+  | "backups";
+```
+
+`StorageRecordMap` 是 Store 与记录类型的唯一映射。业务实体全部引用 `@revival/shared-types`，storage-service 不复制 `SavedItem`、`SmartAlbum`、`ActionCard`、`PlanCard`、`ImportBatch` 等字段定义。只有 `StoredSetting`、`MigrationMetadata`、`StorageBackup` 这三个存储层实体定义在 storage-service 内，因为它们是 Phase 1 数据底座自身需要的契约。
+
+最终 `StorageAdapter` 包含：
+
+- `kind`
+- `capabilities`
+- `open`
+- `close`
+- `isAvailable`
+- `get`
+- `getAll`
+- `query`
+- `put`
+- `bulkPut`
+- `delete`
+- `clear`
+- `transaction`
+- `exportSnapshot`
+- `importSnapshot`
+- `getSchemaVersion`
+- `healthCheck`
+
+这些方法只表达通用持久化能力，不包含 AI 分类、搜索排序、React hook、UI toast、页面跳转、扩展通信、Supabase Auth、业务专辑匹配或行动卡生成。
+
+## Task 1 定稿：查询模型限制
+
+查询模型只支持单 Store、单 index 的最小范围查询：
+
+- `equals`
+- `lowerBound`
+- `upperBound`
+- `includeLower`
+- `includeUpper`
+- `limit`
+- `offset`
+- `direction`
+
+明确不支持：
+
+- 全文搜索
+- 模糊搜索
+- embedding 查询
+- 向量数据库
+- 多字段复杂 AND / OR
+- 联表查询
+- SQL 字符串
+- 云端分页协议
+- 智能专辑语义匹配
+
+全文和语义搜索继续由现有 `packages/search-service` 与分类/专辑 service 负责，StorageAdapter 只提供结构化读写和按索引取数。
+
+## Task 1 定稿：事务与 capabilities
+
+`StorageTransactionMode` 只包含 `readonly` 和 `readwrite`。事务回调只能使用同一个 `StorageTransaction` 上下文，不访问 UI、不访问外部网络、不调用另一个 Adapter。Adapter 如果不支持真正事务，必须通过 `capabilities.transactions = false` 暴露，并在调用 `transaction` 时抛出 `STORAGE_NOT_SUPPORTED`。
+
+当前能力状态：
+
+| Adapter | 当前状态 |
+|---|---|
+| `LocalStorageAdapter` | legacy 兼容实现。当前只保证旧实体方法继续工作；通用接口中的事务、索引查询、snapshot、rollback 还未实现，调用时返回 `STORAGE_NOT_SUPPORTED`。Task 4 才会实现只读 raw snapshot。 |
+| `IndexedDbAdapter` | 仅有目标能力常量，未实现。Task 3 开始实现。 |
+| `MemoryAdapter` | 仅有目标能力常量，未实现。Task 2 开始实现。 |
+| `SupabaseAdapter` | 继续 blocked，占位但不可用，不引入 SDK，不做网络请求。 |
+
+## Task 1 定稿：错误、Snapshot 与 activeStorage
+
+统一错误模型为 `StorageError`，错误代码定义在 `STORAGE_ERROR_CODES`。错误对象包含 `code`、`adapter`、`store`、`recoverable` 和可选 `cause`。错误消息会做安全处理，避免输出完整 URL、token、API key、Cookie、用户备注或收藏正文。
+
+`StorageSnapshot` 是数据交换格式，不等于 IndexedDB 内部格式。它必须 JSON-safe，日期用 ISO string，`Set` / `Map` 后续实现时必须转成数组或普通对象。`records` 中缺失某个 Store 表示“未包含”，不表示“清空”。
+
+`StorageImportMode` 包含：
+
+- `preview`
+- `replace`
+- `merge`
+- `staging`
+
+Phase 1 正式迁移只能走 `staging`，不能直接 replace 用户真实数据。
+
+`ActiveStorageMetadata` 只允许 `localStorage` 与 `indexedDB`。activeStorage 标识不进入整个 AppState 大对象，后续应使用独立最小启动元数据；切换 IndexedDB 前必须完成 migration verification，失败时继续使用 LocalStorageAdapter。
+
+## Task 1 定稿：Repository 边界
+
+本轮新增的是 repository 接口草图，不实现 repository。后续页面不得直接调用 Adapter，更不得直接调用 localStorage。Adapter 负责通用持久化、事务、snapshot 和底层错误标准化；Repository 负责业务语义查询、实体校验、引用关系、派生字段、用户手动修改保护、专辑成员语义、行动卡和计划卡关系。
+
+已定稿接口草图：
+
+- `SavedItemRepository`
+- `ImportRepository`
+- `SmartAlbumRepository`
+- `ActionCardRepository`
+- `PlanCardRepository`
+- `ClassificationCorrectionRepository`
+- `SettingsRepository`
+
+扩展的 `chrome.storage.local`、扫描 checkpoint、popup state、bridge state、progress state、小红书 DOM 临时数据、Cookie、登录凭证和 API Key 都不属于 Web StorageAdapter 边界。
