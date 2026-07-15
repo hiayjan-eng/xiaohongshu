@@ -19,6 +19,7 @@
     "@revival/recommendation-service": "workspace:*",
     "@revival/search-service": "workspace:*",
     "@revival/shared-types": "workspace:*",
+    "@revival/storage-service": "workspace:*",
     "@vitejs/plugin-react": "^4.3.1",
     "lucide-react": "^0.468.0",
     "react": "^18.3.1",
