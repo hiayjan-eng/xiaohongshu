@@ -12,9 +12,24 @@ import {
 } from "./contracts";
 import { StorageError } from "./errors";
 import { canonicalJsonStringify, cloneJsonSafe } from "./json-utils";
-import type { LegacyBackupEnvelope } from "./legacy-localstorage-snapshot";
-import { MemoryMigrationLockProvider, type MigrationLockHandle, type MigrationLockProvider } from "./migration-lock";
-import type { MigrationPlan, MigrationPreviewReport, MigrationRecordOperation } from "./migration-preview";
+import {
+  computeSha256,
+  parseLegacyBackup,
+  serializeLegacyBackup,
+  verifyLegacyBackupEnvelope,
+  type LegacyBackupEnvelope
+} from "./legacy-localstorage-snapshot";
+import {
+  MemoryMigrationLockProvider,
+  type MigrationLockHandle,
+  type MigrationLockProvider
+} from "./migration-lock";
+import {
+  validateMigratedSnapshotIntegrity,
+  type MigrationPlan,
+  type MigrationPreviewReport,
+  type MigrationRecordOperation
+} from "./migration-preview";
 import { createMemoryAdapter, getRecordPrimaryKey } from "./memory-adapter";
 import { MigrationExecutionError, type MigrationExecutionErrorCode, toMigrationExecutionError } from "./migration-executor-errors";
 
@@ -101,6 +116,8 @@ export interface MigrationExecutionInspection {
 export interface MigrationExecutionOptions {
   targetAdapter: StorageAdapter;
   lockProvider?: MigrationLockProvider;
+  expectedTargetSchemaVersion?: number;
+  unsafeAllowProcessLocalLockForTests?: boolean;
   now?: () => Date;
   onProgress?: (progress: MigrationExecutionProgress) => void;
   faultInjector?: MigrationExecutionFaultInjector;
@@ -124,11 +141,15 @@ export interface MigrationRollbackInput {
 }
 
 export interface MigrationExecutionFaultInjector {
+  afterBackupWriteBeforeReadBack?: (context: MigrationFaultContext) => Promise<void> | void;
+  beforeBackupVerification?: (context: MigrationFaultContext) => Promise<void> | void;
+  afterBackupVerification?: (context: MigrationFaultContext) => Promise<void> | void;
   afterPersistBackup?: (context: MigrationFaultContext) => Promise<void> | void;
   beforeStoreWrite?: (context: MigrationFaultContext & { store: StorageEntityName }) => Promise<void> | void;
   afterStoreWrite?: (context: MigrationFaultContext & { store: StorageEntityName }) => Promise<void> | void;
   beforeStoreVerify?: (context: MigrationFaultContext & { store: StorageEntityName }) => Promise<void> | void;
   beforeFinalVerify?: (context: MigrationFaultContext) => Promise<void> | void;
+  mutateTargetBeforeFinalVerification?: (context: MigrationFaultContext) => Promise<void> | void;
   beforeRollbackStore?: (context: MigrationFaultContext & { store: StorageEntityName }) => Promise<void> | void;
 }
 
@@ -141,6 +162,8 @@ export interface MigrationExecutionMetadataRecord extends MigrationMetadata {
   executionStatus: MigrationExecutionStatus;
   previewId: string;
   backupRecordId?: string;
+  backupChecksum?: string;
+  backupByteLength?: number;
   sourceSnapshotChecksum?: string;
   activeStorageSwitched: false;
   rollbackAvailable: boolean;
@@ -170,16 +193,37 @@ const EXECUTION_METADATA_ID_PREFIX = "migration-execution:";
 const BACKUP_RECORD_ID_PREFIX = "legacy-backup:";
 const SKIPPED_EXECUTION_STORES = new Set<StorageEntityName>(["migrationMetadata", "backups"]);
 
+interface MigrationBackupRecord extends StorageBackup {
+  backupId: string;
+  sourceBackupId: string;
+  migrationId: string;
+  serializedEnvelope: string;
+  byteLength: number;
+  immutable: true;
+  verifiedAt?: string;
+  rawChecksum?: string;
+  normalizedChecksum?: string;
+  rawBackup?: LegacyBackupEnvelope["rawBackup"];
+  checksums?: LegacyBackupEnvelope["checksums"];
+  report?: LegacyBackupEnvelope["report"];
+}
+
 export class MigrationExecutor {
   private readonly targetAdapter: StorageAdapter;
   private readonly lockProvider: MigrationLockProvider;
+  private readonly lockProviderWasExplicit: boolean;
+  private readonly expectedTargetSchemaVersion?: number;
+  private readonly unsafeAllowProcessLocalLockForTests: boolean;
   private readonly now: () => Date;
   private readonly onProgress?: (progress: MigrationExecutionProgress) => void;
   private readonly faultInjector?: MigrationExecutionFaultInjector;
 
   constructor(options: MigrationExecutionOptions) {
     this.targetAdapter = options.targetAdapter;
+    this.lockProviderWasExplicit = Boolean(options.lockProvider);
     this.lockProvider = options.lockProvider ?? new MemoryMigrationLockProvider();
+    this.expectedTargetSchemaVersion = options.expectedTargetSchemaVersion;
+    this.unsafeAllowProcessLocalLockForTests = Boolean(options.unsafeAllowProcessLocalLockForTests);
     this.now = options.now ?? (() => new Date());
     this.onProgress = options.onProgress;
     this.faultInjector = options.faultInjector;
@@ -191,26 +235,27 @@ export class MigrationExecutor {
     let lock: MigrationLockHandle | undefined;
     try {
       this.assertNotAborted(input.signal);
+      this.assertLockProviderSafe();
       lock = await this.acquireLock(migrationId, input.signal);
-      await this.ensureTargetReady();
+      const actualTargetSchemaVersion = await this.ensureTargetReady();
       const existing = await this.readMetadata(migrationId);
       if (existing?.executionStatus === "completed") {
         await this.verifyAllStores(input.envelope.normalizedSnapshot, existing);
         return this.toResult(existing, "completed", true);
       }
-      this.validateInitialInput(input);
+      this.validateInitialInput(input, actualTargetSchemaVersion);
+      await this.assertNoOtherOpenMigrations(migrationId);
       await this.assertTargetEmpty(plan);
       await this.validateStagingSnapshot(input.envelope.normalizedSnapshot!, plan);
 
       const startedAt = this.isoNow();
-      let metadata = this.createInitialMetadata(input, startedAt);
-      await this.writeMetadata(metadata);
+      let metadata = await this.createInitialMetadata(input, startedAt);
       this.emitProgress(metadata, "preflight");
 
-      metadata = await this.persistBackup(input.envelope, metadata);
+      metadata = await this.persistBackup(input.envelope, metadata, plan);
       await this.faultInjector?.afterPersistBackup?.({ migrationId, phase: "backup_persisted" });
       metadata = await this.writeStores(input.envelope.normalizedSnapshot!, plan, metadata, input.signal);
-      metadata = await this.verifyFinal(input.envelope.normalizedSnapshot!, metadata);
+      metadata = await this.verifyFinal(input.envelope, input.envelope.normalizedSnapshot!, metadata);
       metadata = this.completeMetadata(metadata);
       await this.writeMetadata(metadata);
       return this.toResult(metadata, "completed", false);
@@ -232,10 +277,10 @@ export class MigrationExecutor {
     let lock: MigrationLockHandle | undefined;
     try {
       this.assertNotAborted(input.signal);
+      this.assertLockProviderSafe();
       lock = await this.acquireLock(input.migrationId, input.signal);
-      await this.ensureTargetReady();
-      this.validateInitialInput(input);
-      await this.validateStagingSnapshot(input.envelope.normalizedSnapshot!, plan);
+      const actualTargetSchemaVersion = await this.ensureTargetReady();
+      this.validateInitialInput(input, actualTargetSchemaVersion);
       let metadata = await this.readMetadataOrThrow(input.migrationId);
       if (metadata.executionStatus === "completed") {
         await this.verifyAllStores(input.envelope.normalizedSnapshot, metadata);
@@ -249,6 +294,8 @@ export class MigrationExecutor {
         });
       }
       this.assertPlanMatchesMetadata(plan, metadata);
+      await this.verifyPersistedBackupForResume(input.envelope, plan, metadata);
+      await this.validateStagingSnapshot(input.envelope.normalizedSnapshot!, plan);
       metadata = {
         ...metadata,
         status: "migrating",
@@ -260,7 +307,7 @@ export class MigrationExecutor {
 
       metadata = await this.reconcileCheckpoints(input.envelope.normalizedSnapshot!, metadata);
       metadata = await this.writeStores(input.envelope.normalizedSnapshot!, plan, metadata, input.signal);
-      metadata = await this.verifyFinal(input.envelope.normalizedSnapshot!, metadata);
+      metadata = await this.verifyFinal(input.envelope, input.envelope.normalizedSnapshot!, metadata);
       metadata = this.completeMetadata(metadata);
       await this.writeMetadata(metadata);
       return this.toResult(metadata, "completed", false);
@@ -281,6 +328,7 @@ export class MigrationExecutor {
     let lock: MigrationLockHandle | undefined;
     try {
       this.assertNotAborted(input.signal);
+      this.assertLockProviderSafe();
       lock = await this.acquireLock(input.migrationId, input.signal);
       await this.ensureTargetReady();
       let metadata = await this.readMetadataOrThrow(input.migrationId);
@@ -370,7 +418,21 @@ export class MigrationExecutor {
     return this.lockProvider.acquire({ migrationId, signal });
   }
 
-  private async ensureTargetReady(): Promise<void> {
+  private assertLockProviderSafe(): void {
+    if (this.targetAdapter.kind !== "indexedDB") return;
+    if (this.lockProvider.kind === "web-locks" && this.lockProvider.isAvailable?.() !== false) return;
+    if (this.unsafeAllowProcessLocalLockForTests && this.lockProvider.kind === "memory") return;
+    throw new MigrationExecutionError({
+      code: "MIGRATION_LOCK_UNAVAILABLE",
+      message: this.lockProviderWasExplicit
+        ? "IndexedDB migration requires a Web Locks migration provider."
+        : "IndexedDB migration requires an explicit Web Locks migration provider.",
+      recoverable: true,
+      adapter: this.targetAdapter.kind
+    });
+  }
+
+  private async ensureTargetReady(): Promise<number> {
     if (this.targetAdapter.kind !== "indexedDB" && this.targetAdapter.kind !== "memory") {
       throw new MigrationExecutionError({
         code: "MIGRATION_UNSUPPORTED_TARGET",
@@ -398,10 +460,12 @@ export class MigrationExecutor {
         adapter: this.targetAdapter.kind
       });
     }
+    return await this.targetAdapter.getSchemaVersion();
   }
 
-  private validateInitialInput(input: MigrationExecutionInput): void {
+  private validateInitialInput(input: MigrationExecutionInput, actualTargetSchemaVersion: number): void {
     const plan = input.plan ?? input.preview.plan;
+    const expectedTargetSchemaVersion = this.expectedTargetSchemaVersion ?? plan.targetSchemaVersion;
     if (!input.userConfirmed) {
       throw new MigrationExecutionError({
         code: "MIGRATION_USER_CONFIRMATION_REQUIRED",
@@ -413,6 +477,25 @@ export class MigrationExecutor {
       throw new MigrationExecutionError({
         code: "MIGRATION_PLAN_MISMATCH",
         message: "Migration preview and plan ids do not match.",
+        recoverable: false
+      });
+    }
+    if (
+      actualTargetSchemaVersion !== expectedTargetSchemaVersion ||
+      plan.targetSchemaVersion !== expectedTargetSchemaVersion ||
+      input.preview.targetSchemaVersion !== expectedTargetSchemaVersion
+    ) {
+      throw new MigrationExecutionError({
+        code: "MIGRATION_TARGET_SCHEMA_MISMATCH",
+        message: "Migration target schemaVersion does not match the approved plan.",
+        recoverable: false,
+        adapter: this.targetAdapter.kind
+      });
+    }
+    if (input.preview.sourceSchemaVersion !== plan.sourceSchemaVersion) {
+      throw new MigrationExecutionError({
+        code: "MIGRATION_PLAN_MISMATCH",
+        message: "Migration preview and plan source schemaVersion do not match.",
         recoverable: false
       });
     }
@@ -460,6 +543,21 @@ export class MigrationExecutor {
     }
   }
 
+  private async assertNoOtherOpenMigrations(migrationId: string): Promise<void> {
+    const metadataRecords = await this.targetAdapter.getAll("migrationMetadata");
+    for (const record of metadataRecords) {
+      const candidate = record as MigrationExecutionMetadataRecord;
+      if (candidate.id === metadataId(migrationId)) continue;
+      if (candidate.executionStatus === "rolled_back" || candidate.status === "rolled_back") continue;
+      throw new MigrationExecutionError({
+        code: "MIGRATION_ACTIVE_SESSION_EXISTS",
+        message: "Another migration metadata record must be resolved before starting a new migration.",
+        recoverable: true,
+        adapter: this.targetAdapter.kind
+      });
+    }
+  }
+
   private async assertTargetEmpty(plan: MigrationPlan): Promise<void> {
     if (!plan.targetMustBeEmpty) return;
     for (const store of this.executionStoresFromPlan(plan)) {
@@ -484,20 +582,21 @@ export class MigrationExecutor {
     await staging.importSnapshot(snapshot, { mode: "staging", stores });
   }
 
-  private createInitialMetadata(input: MigrationExecutionInput, startedAt: string): MigrationExecutionMetadataRecord {
+  private async createInitialMetadata(input: MigrationExecutionInput, startedAt: string): Promise<MigrationExecutionMetadataRecord> {
     const plan = input.plan ?? input.preview.plan;
     const snapshot = input.envelope.normalizedSnapshot!;
-    const checkpoints = this.executionStoresFromPlan(plan).map((store) => {
+    const checkpoints: MigrationStoreCheckpoint[] = [];
+    for (const store of this.executionStoresFromPlan(plan)) {
       const records = recordsForStore(store, snapshot, plan);
-      return {
+      checkpoints.push({
         store,
         status: "pending" as const,
         expectedCount: records.length,
         writtenCount: 0,
         verifiedCount: 0,
-        expectedChecksum: computeStoreChecksum(store, records)
-      };
-    });
+        expectedChecksum: await computeStoreChecksum(store, records)
+      });
+    }
 
     return {
       id: metadataId(plan.migrationId),
@@ -524,7 +623,7 @@ export class MigrationExecutor {
     };
   }
 
-  private async persistBackup(envelope: LegacyBackupEnvelope, metadata: MigrationExecutionMetadataRecord): Promise<MigrationExecutionMetadataRecord> {
+  private async persistBackup(envelope: LegacyBackupEnvelope, metadata: MigrationExecutionMetadataRecord, plan: MigrationPlan): Promise<MigrationExecutionMetadataRecord> {
     const snapshot = envelope.normalizedSnapshot;
     if (!snapshot) {
       throw new MigrationExecutionError({
@@ -533,40 +632,241 @@ export class MigrationExecutor {
         recoverable: true
       });
     }
+    await this.assertEnvelopeStrictlyVerified(envelope);
+    const serializedEnvelope = serializeLegacyBackup(envelope);
+    const byteLength = getUtf8ByteLength(serializedEnvelope);
+    const backupChecksum = await this.computeSha256OrThrow(serializedEnvelope, "MIGRATION_BACKUP_PERSIST_FAILED");
     const backupRecordId = `${BACKUP_RECORD_ID_PREFIX}${envelope.backupId}`;
-    const backup: StorageBackup & Record<string, unknown> = {
+    const backup: MigrationBackupRecord = {
       id: backupRecordId,
       sourceStorage: "localStorage",
       sourceSchemaVersion: snapshot.sourceSchemaVersion,
       createdAt: envelope.createdAt,
-      checksum: envelope.checksums?.raw ?? envelope.checksums?.normalized ?? snapshot.checksum,
+      checksum: backupChecksum,
       formatVersion: envelope.formatVersion,
       snapshot,
-      notes: "Legacy raw backup is preserved inside this migration backup envelope for rollback inspection.",
+      notes: "Immutable legacy backup envelope persisted before migration execution.",
+      backupId: envelope.backupId,
+      sourceBackupId: envelope.backupId,
+      migrationId: plan.migrationId,
+      serializedEnvelope,
+      byteLength,
+      immutable: true,
+      rawChecksum: envelope.checksums?.raw,
+      normalizedChecksum: envelope.checksums?.normalized ?? snapshot.checksum,
       rawBackup: envelope.rawBackup,
       checksums: envelope.checksums,
       report: envelope.report
     };
 
-    await this.targetAdapter.transaction(["backups", "migrationMetadata"], "readwrite", async (tx) => {
+    let backupConflict = false;
+    await this.targetAdapter.transaction(["backups"], "readwrite", async (tx) => {
+      const existing = await tx.get("backups", backupRecordId);
+      if (existing) {
+        backupConflict = !isSameImmutableBackup(existing, backup);
+        return;
+      }
       await tx.put("backups", stripUndefinedDeep(backup) as StorageRecordMap["backups"]);
-      await tx.put("migrationMetadata", {
-        ...stripUndefinedDeep(metadata),
-        status: "migrating",
-        executionStatus: "backup_persisted",
-        backupRecordId,
-        lastCheckpointAt: this.isoNow()
-      } as StorageRecordMap["migrationMetadata"]);
     });
+    if (backupConflict) {
+      throw new MigrationExecutionError({
+        code: "MIGRATION_RESUME_CONFLICT",
+        message: "An existing migration backup uses the same id but different immutable content.",
+        recoverable: false,
+        adapter: this.targetAdapter.kind
+      });
+    }
+
+    await this.faultInjector?.afterBackupWriteBeforeReadBack?.({ migrationId: plan.migrationId, phase: "backup_persisted" });
+    const verifiedBackup = await this.readBackAndVerifyBackup(envelope, plan, backupRecordId, backupChecksum, byteLength);
+    await this.targetAdapter.transaction(["backups"], "readwrite", async (tx) => {
+      const existing = await tx.get("backups", backupRecordId);
+      this.assertExistingBackupReusable(existing, backup);
+      await tx.put("backups", {
+        ...stripUndefinedDeep(existing as MigrationBackupRecord),
+        verifiedAt: this.isoNow()
+      } as StorageRecordMap["backups"]);
+    });
+    await this.readBackAndVerifyBackup(envelope, plan, backupRecordId, backupChecksum, byteLength, true);
 
     const updated = {
       ...metadata,
       executionStatus: "backup_persisted" as const,
       backupRecordId,
+      backupChecksum: verifiedBackup.checksum,
+      backupByteLength: byteLength,
       lastCheckpointAt: this.isoNow()
     };
+    await this.writeMetadata(updated);
     this.emitProgress(updated, "backup_persisted");
     return updated;
+  }
+
+  private async assertEnvelopeStrictlyVerified(envelope: LegacyBackupEnvelope): Promise<void> {
+    let verification;
+    try {
+      verification = await verifyLegacyBackupEnvelope(envelope);
+    } catch (error) {
+      throw new MigrationExecutionError({
+        code: "MIGRATION_BACKUP_PERSIST_FAILED",
+        message: "Legacy backup envelope verification failed before persistence.",
+        recoverable: true,
+        cause: error
+      });
+    }
+    if (!verification.valid || verification.rawChecksumValid !== true || (envelope.normalizedSnapshot && verification.normalizedChecksumValid !== true)) {
+      const checksumUnavailable = verification.issues.some((issue) => issue.code === "CHECKSUM_UNAVAILABLE");
+      throw new MigrationExecutionError({
+        code: checksumUnavailable ? "MIGRATION_CRYPTO_UNAVAILABLE" : "MIGRATION_BACKUP_PERSIST_FAILED",
+        message: "Legacy backup envelope did not pass strict checksum verification.",
+        recoverable: true
+      });
+    }
+  }
+
+  private assertExistingBackupReusable(existing: StorageRecordMap["backups"] | undefined, expected: MigrationBackupRecord): void {
+    if (!existing) {
+      throw new MigrationExecutionError({
+        code: "MIGRATION_BACKUP_PERSIST_FAILED",
+        message: "Migration backup record was not found after write.",
+        recoverable: true
+      });
+    }
+    const candidate = existing as MigrationBackupRecord;
+    if (
+      candidate.id !== expected.id ||
+      candidate.backupId !== expected.backupId ||
+      candidate.sourceBackupId !== expected.sourceBackupId ||
+      candidate.migrationId !== expected.migrationId ||
+      candidate.checksum !== expected.checksum ||
+      candidate.byteLength !== expected.byteLength ||
+      candidate.serializedEnvelope !== expected.serializedEnvelope ||
+      candidate.immutable !== true
+    ) {
+      throw new MigrationExecutionError({
+        code: "MIGRATION_RESUME_CONFLICT",
+        message: "An existing migration backup uses the same id but different immutable content.",
+        recoverable: false,
+        adapter: this.targetAdapter.kind
+      });
+    }
+  }
+
+  private async readBackAndVerifyBackup(
+    envelope: LegacyBackupEnvelope,
+    plan: MigrationPlan,
+    backupRecordId: string,
+    expectedChecksum: string,
+    expectedByteLength: number,
+    requireVerifiedAt = false
+  ): Promise<MigrationBackupRecord> {
+    const record = await this.targetAdapter.get("backups", backupRecordId);
+    if (!record) {
+      throw new MigrationExecutionError({
+        code: "MIGRATION_BACKUP_PERSIST_FAILED",
+        message: "Migration backup read-back failed.",
+        recoverable: true,
+        adapter: this.targetAdapter.kind
+      });
+    }
+    const backup = record as MigrationBackupRecord;
+    if (
+      backup.id !== backupRecordId ||
+      backup.backupId !== envelope.backupId ||
+      backup.sourceBackupId !== envelope.backupId ||
+      backup.migrationId !== plan.migrationId ||
+      backup.immutable !== true ||
+      typeof backup.serializedEnvelope !== "string" ||
+      backup.byteLength !== expectedByteLength ||
+      backup.checksum !== expectedChecksum ||
+      (requireVerifiedAt && typeof backup.verifiedAt !== "string")
+    ) {
+      throw new MigrationExecutionError({
+        code: "MIGRATION_BACKUP_PERSIST_FAILED",
+        message: "Migration backup read-back metadata did not match the write intent.",
+        recoverable: true,
+        adapter: this.targetAdapter.kind
+      });
+    }
+    await this.faultInjector?.beforeBackupVerification?.({ migrationId: plan.migrationId, phase: "backup_persisted" });
+    const readBackChecksum = await this.computeSha256OrThrow(backup.serializedEnvelope, "MIGRATION_BACKUP_PERSIST_FAILED");
+    if (readBackChecksum !== expectedChecksum) {
+      throw new MigrationExecutionError({
+        code: "MIGRATION_BACKUP_PERSIST_FAILED",
+        message: "Migration backup read-back checksum did not match.",
+        recoverable: true,
+        adapter: this.targetAdapter.kind
+      });
+    }
+    let parsed: LegacyBackupEnvelope;
+    try {
+      parsed = parseLegacyBackup(backup.serializedEnvelope);
+    } catch (error) {
+      throw new MigrationExecutionError({
+        code: "MIGRATION_BACKUP_PERSIST_FAILED",
+        message: "Migration backup read-back could not be parsed.",
+        recoverable: true,
+        adapter: this.targetAdapter.kind,
+        cause: error
+      });
+    }
+    if (serializeLegacyBackup(parsed) !== backup.serializedEnvelope) {
+      throw new MigrationExecutionError({
+        code: "MIGRATION_BACKUP_PERSIST_FAILED",
+        message: "Migration backup read-back serialization is not stable.",
+        recoverable: true,
+        adapter: this.targetAdapter.kind
+      });
+    }
+    if (parsed.backupId !== envelope.backupId || parsed.checksums?.normalized !== envelope.checksums?.normalized) {
+      throw new MigrationExecutionError({
+        code: "MIGRATION_BACKUP_PERSIST_FAILED",
+        message: "Migration backup read-back envelope does not match the execution source.",
+        recoverable: true,
+        adapter: this.targetAdapter.kind
+      });
+    }
+    await this.assertEnvelopeStrictlyVerified(parsed);
+    await this.faultInjector?.afterBackupVerification?.({ migrationId: plan.migrationId, phase: "backup_persisted" });
+    return backup;
+  }
+
+  private async verifyPersistedBackupForResume(
+    envelope: LegacyBackupEnvelope,
+    plan: MigrationPlan,
+    metadata: MigrationExecutionMetadataRecord
+  ): Promise<void> {
+    if (!metadata.backupRecordId || !metadata.backupChecksum || !metadata.backupByteLength) {
+      throw new MigrationExecutionError({
+        code: "MIGRATION_RESUME_CONFLICT",
+        message: "Migration metadata is missing backup verification fields.",
+        recoverable: false,
+        adapter: this.targetAdapter.kind
+      });
+    }
+    const backup = await this.readBackAndVerifyBackup(envelope, plan, metadata.backupRecordId, metadata.backupChecksum, metadata.backupByteLength);
+    if (backup.checksum !== metadata.backupChecksum || backup.normalizedChecksum !== metadata.sourceSnapshotChecksum) {
+      throw new MigrationExecutionError({
+        code: "MIGRATION_RESUME_CONFLICT",
+        message: "Migration backup and checkpoint metadata checksums do not match.",
+        recoverable: false,
+        adapter: this.targetAdapter.kind
+      });
+    }
+  }
+
+  private async computeSha256OrThrow(value: string, code: MigrationExecutionErrorCode): Promise<string> {
+    try {
+      return await computeSha256(value);
+    } catch (error) {
+      throw new MigrationExecutionError({
+        code: error instanceof StorageError && error.code === "STORAGE_EXPORT_FAILED" ? "MIGRATION_CRYPTO_UNAVAILABLE" : code,
+        message: "SHA-256 is unavailable for migration verification.",
+        recoverable: true,
+        adapter: this.targetAdapter.kind,
+        cause: error
+      });
+    }
   }
 
   private async writeStores(
@@ -634,8 +934,8 @@ export class MigrationExecutor {
 
     const expectedRecords = recordsForStore(store, snapshot, plan);
     const targetRecords = await this.targetAdapter.getAll(store);
-    const expectedChecksum = computeStoreChecksum(store, expectedRecords);
-    const targetChecksum = computeStoreChecksum(store, targetRecords as never);
+    const expectedChecksum = await computeStoreChecksum(store, expectedRecords);
+    const targetChecksum = await computeStoreChecksum(store, targetRecords as never);
     if (targetRecords.length !== expectedRecords.length || targetChecksum !== expectedChecksum) {
       throw new MigrationExecutionError({
         code: "MIGRATION_VERIFY_FAILED",
@@ -660,7 +960,7 @@ export class MigrationExecutor {
     return current;
   }
 
-  private async verifyFinal(snapshot: StorageSnapshot, metadata: MigrationExecutionMetadataRecord): Promise<MigrationExecutionMetadataRecord> {
+  private async verifyFinal(envelope: LegacyBackupEnvelope, snapshot: StorageSnapshot, metadata: MigrationExecutionMetadataRecord): Promise<MigrationExecutionMetadataRecord> {
     await this.faultInjector?.beforeFinalVerify?.({ migrationId: metadata.id.replace(EXECUTION_METADATA_ID_PREFIX, ""), phase: "verifying_all" });
     let current: MigrationExecutionMetadataRecord = {
       ...metadata,
@@ -670,6 +970,8 @@ export class MigrationExecutor {
     };
     await this.writeMetadata(current);
     this.emitProgress(current, "verifying_all");
+    await this.faultInjector?.mutateTargetBeforeFinalVerification?.({ migrationId: metadata.id.replace(EXECUTION_METADATA_ID_PREFIX, ""), phase: "verifying_all" });
+    await this.verifyFinalSemanticIntegrity(envelope, current);
     await this.verifyAllStores(snapshot, current);
     return current;
   }
@@ -685,8 +987,8 @@ export class MigrationExecutor {
     for (const checkpoint of metadata.checkpoints) {
       const expected = (snapshot.records[checkpoint.store] ?? []) as StorageRecordMap[typeof checkpoint.store][];
       const targetRecords = await this.targetAdapter.getAll(checkpoint.store);
-      const expectedChecksum = checkpoint.expectedChecksum ?? computeStoreChecksum(checkpoint.store, expected);
-      const targetChecksum = computeStoreChecksum(checkpoint.store, targetRecords as never);
+      const expectedChecksum = checkpoint.expectedChecksum ?? await computeStoreChecksum(checkpoint.store, expected);
+      const targetChecksum = await computeStoreChecksum(checkpoint.store, targetRecords as never);
       if (targetRecords.length !== checkpoint.expectedCount || targetChecksum !== expectedChecksum) {
         throw new MigrationExecutionError({
           code: "MIGRATION_VERIFY_FAILED",
@@ -699,12 +1001,51 @@ export class MigrationExecutor {
     }
   }
 
+  private async verifyFinalSemanticIntegrity(envelope: LegacyBackupEnvelope, metadata: MigrationExecutionMetadataRecord): Promise<void> {
+    const records: StorageSnapshot["records"] = {};
+    const counts: StorageSnapshot["counts"] = {};
+    for (const checkpoint of metadata.checkpoints) {
+      const targetRecords = await this.targetAdapter.getAll(checkpoint.store);
+      records[checkpoint.store] = targetRecords as never;
+      counts[checkpoint.store] = targetRecords.length;
+    }
+    const targetSnapshot: StorageSnapshot = {
+      formatVersion: envelope.normalizedSnapshot?.formatVersion ?? 1,
+      sourceStorage: this.targetAdapter.kind,
+      sourceSchemaVersion: metadata.targetSchemaVersion,
+      createdAt: this.isoNow(),
+      counts,
+      records,
+      metadata: {
+        migrationId: metadata.id.replace(EXECUTION_METADATA_ID_PREFIX, ""),
+        includedStores: metadata.checkpoints.map((checkpoint) => checkpoint.store)
+      }
+    };
+    const result = validateMigratedSnapshotIntegrity(envelope, targetSnapshot, {
+      now: this.now,
+      createMigrationId: () => metadata.id.replace(EXECUTION_METADATA_ID_PREFIX, ""),
+      targetSchemaVersion: metadata.targetSchemaVersion
+    });
+    if (!result.valid) {
+      const issue = result.issues.find((candidate) => candidate.severity === "blocking") ??
+        result.issues.find((candidate) => candidate.requiresManualReview);
+      throw new MigrationExecutionError({
+        code: "MIGRATION_VERIFY_FAILED",
+        message: issue ? `Final semantic verification failed: ${issue.code}.` : "Final semantic verification failed.",
+        recoverable: true,
+        adapter: this.targetAdapter.kind,
+        store: issue?.store,
+        recordId: issue?.recordId
+      });
+    }
+  }
+
   private async reconcileCheckpoints(snapshot: StorageSnapshot, metadata: MigrationExecutionMetadataRecord): Promise<MigrationExecutionMetadataRecord> {
     let current = metadata;
     for (const checkpoint of metadata.checkpoints) {
       if (checkpoint.status === "verified") {
         const records = await this.targetAdapter.getAll(checkpoint.store);
-        const checksum = computeStoreChecksum(checkpoint.store, records as never);
+        const checksum = await computeStoreChecksum(checkpoint.store, records as never);
         if (records.length !== checkpoint.expectedCount || checksum !== checkpoint.expectedChecksum) {
           throw new MigrationExecutionError({
             code: "MIGRATION_RESUME_CONFLICT",
@@ -721,8 +1062,8 @@ export class MigrationExecutor {
         continue;
       }
       const expected = (snapshot.records[checkpoint.store] ?? []) as StorageRecordMap[typeof checkpoint.store][];
-      const existingChecksum = computeStoreChecksum(checkpoint.store, existing as never);
-      const expectedChecksum = computeStoreChecksum(checkpoint.store, expected);
+      const existingChecksum = await computeStoreChecksum(checkpoint.store, existing as never);
+      const expectedChecksum = await computeStoreChecksum(checkpoint.store, expected);
       if (existing.length === expected.length && existingChecksum === expectedChecksum) {
         current = this.updateCheckpoint(current, checkpoint.store, {
           status: "verified",
@@ -934,15 +1275,25 @@ export function metadataId(migrationId: string): string {
   return `${EXECUTION_METADATA_ID_PREFIX}${migrationId}`;
 }
 
-export function computeStoreChecksum<K extends StorageEntityName>(store: K, records: StorageRecordMap[K][]): string {
+export async function computeStoreChecksum<K extends StorageEntityName>(store: K, records: StorageRecordMap[K][]): Promise<string> {
   const sorted = [...records].sort((a, b) =>
     String(getRecordPrimaryKey(store, a)).localeCompare(String(getRecordPrimaryKey(store, b)), "en", { numeric: true })
   );
-  return fingerprint(canonicalJsonStringify(sorted, {
+  const payload = canonicalJsonStringify({ store, records: sorted }, {
     adapter: "memory",
     code: "STORAGE_VALIDATION_FAILED",
     recoverable: true
-  }));
+  });
+  try {
+    return await computeSha256(payload);
+  } catch (error) {
+    throw new MigrationExecutionError({
+      code: error instanceof StorageError && error.code === "STORAGE_EXPORT_FAILED" ? "MIGRATION_CRYPTO_UNAVAILABLE" : "MIGRATION_VERIFY_FAILED",
+      message: "SHA-256 is unavailable for migration store verification.",
+      recoverable: true,
+      cause: error
+    });
+  }
 }
 
 function recordsForStore<K extends StorageEntityName>(store: K, snapshot: StorageSnapshot, plan: MigrationPlan): StorageRecordMap[K][] {
@@ -968,15 +1319,6 @@ function assertBulkWriteSucceeded(store: StorageEntityName, result: StorageBulkW
   }
 }
 
-function fingerprint(value: string): string {
-  let hash = 2166136261;
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return (hash >>> 0).toString(16).padStart(8, "0");
-}
-
 function stripUndefinedDeep<T>(value: T): T {
   if (Array.isArray(value)) {
     return value.map((entry) => stripUndefinedDeep(entry)) as T;
@@ -991,4 +1333,11 @@ function stripUndefinedDeep<T>(value: T): T {
     return output as T;
   }
   return value;
+}
+
+function getUtf8ByteLength(value: string): number {
+  if (typeof TextEncoder !== "undefined") {
+    return new TextEncoder().encode(value).length;
+  }
+  return value.length;
 }
