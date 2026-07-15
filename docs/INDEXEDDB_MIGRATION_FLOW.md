@@ -190,3 +190,8 @@ Phase 1 建议增加迁移锁设计，但不要依赖服务器：
 ## 文本修复与迁移分离
 
 旧扫描文本修复是数据质量操作，存储迁移是数据位置操作。Phase 1 迁移只搬运已有字段并校验，不自动运行 `migrateScannedTextV3` 或任何标题清洗修复。用户可以在迁移完成后单独进入“修复旧扫描文本”预览，导出备份并手动应用。
+## Task 3 补充：staging import 只是底层验证，不等于真实迁移
+
+Task 3 的 `IndexedDbAdapter.importSnapshot({ mode: "staging" })` 已实现为底层 adapter 能力测试：先用 `MemoryAdapter` 验证 Snapshot 结构和导入语义，验证成功后再用一个 IndexedDB 多 store readwrite transaction 写入目标 stores。这个 staging 行为能证明“验证失败不会污染主数据库、写入失败会由原生 transaction 回滚”，但它还不是用户可见的数据迁移流程。
+
+真实迁移仍然需要后续 Task 4-6 完成以下内容：raw localStorage snapshot、不可变备份、checksum、MigrationReport、引用完整性验证、用户确认 UI、多标签 writer lock、activeStorage 切换、失败恢复和用户可理解的回滚入口。Task 3 没有读取 localStorage，没有写 `migrationMetadata` 状态机，没有修改 `collection-revival-active-storage`，也没有删除或清理任何旧数据。
