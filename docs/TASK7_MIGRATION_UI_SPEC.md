@@ -281,6 +281,8 @@ Technical details may be shown in a collapsed section with safe error code, stor
 
 ## Page Refresh and Recovery
 
+Task 7A keeps the backup envelope, preview, plan, and download-trigger state in memory only. Refreshing or leaving `/settings/data-migration` returns the page to `idle`; it does not rerun inspection, persist a session, open IndexedDB, or claim that a downloaded file was saved. The IndexedDB recovery behavior below belongs to Task 7C after a real execution has been introduced.
+
 After refresh:
 
 - Do not rely on in-memory envelope.
@@ -296,9 +298,9 @@ After refresh:
 
 Desktop:
 
-- Wizard max width: 760-880px.
+- Task 7A wizard max width: 960px, with a minimum usable desktop content width of 760px when the viewport permits it.
 - Step navigation visible.
-- Summary cards can use two columns.
+- The four primary summary values may use four columns; supporting groups use at most two columns.
 - Main action area must remain obvious.
 
 Mobile:
@@ -321,6 +323,10 @@ Accessibility:
 ### Task 7A: Read-Only Check and Preview
 
 Includes Settings entry, read-only snapshot, migration preview, report summary, backup download, and blocked/manual-review states. It does not open IndexedDB and does not execute migration.
+
+Implemented on `/settings/data-migration` with three visible steps only: `检查数据`, `查看结果`, and `保存备份`. The page uses a single reducer state machine (`idle`, `inspecting`, `preview_ready`, `review_required`, `blocked`, `backup_ready`, `backup_downloaded`, and `inspection_failed`). The controller is inert until the user explicitly starts inspection, receives a narrow `ReadonlyStorageLike`, and holds its envelope and preview only in memory.
+
+Task 7A downloads the Task 4 `LegacyBackupEnvelope` through `serializeLegacyBackup`, `createLegacyBackupBlob`, and `createLegacyBackupFilename`. The browser-only click helper creates and revokes an object URL; it does not upload, persist, or reinterpret the envelope. A blocked normalized snapshot may still expose the raw backup when the raw capture succeeded.
 
 ### Task 7B: Execution Confirmation and Progress
 
