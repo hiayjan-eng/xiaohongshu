@@ -1,5 +1,20 @@
 # Storage Adapter 设计
 
+## Task 4 实施更新：Legacy localStorage Snapshot 与备份导出
+
+Task 4 没有把 IndexedDB 接入产品运行时，也没有修改 `LocalStorageAdapter` 的当前业务行为。新增能力集中在 `packages/storage-service/src/legacy-localstorage-snapshot.ts`，用于后续迁移前的只读备份输入：
+
+- `ReadonlyStorageLike` 只包含 `length`、`key(index)`、`getItem(key)`，不暴露 `setItem`、`removeItem`、`clear`。
+- `LegacyLocalStorageSnapshotReader` 必须通过构造参数接收 storage，不在模块加载或构造函数里自动访问 `window.localStorage`。
+- `LEGACY_PRODUCT_STORAGE_KEYS` 是显式 allowlist；默认包含主 AppState、主题、成就，默认排除 `developerMode`、真实试用、QA 写入探针和 unknown keys。
+- Raw backup 保存 allowlist key 的原始字符串，不先 parse 再 stringify；AppState JSON 损坏时仍可生成 raw backup。
+- Normalized `StorageSnapshot` 只在 AppState 可解析时生成，映射 `savedItems`、`importBatches`、`importBatchItems`、`smartAlbums`、`actionCards`、`planCards`、`classificationCorrections`、`searchLogs` 和 `settings`。
+- Snapshot reader 不调用 `loadAppState`、`persistAppState`、文本修复、分类、AI、IndexedDB 或扩展 storage。
+- `computeSha256` 使用 Web Crypto 的 SHA-256；不可用时只记录 `CHECKSUM_UNAVAILABLE`，不会降级为弱 hash。
+- `serializeLegacyBackup`、`parseLegacyBackup`、`createLegacyBackupBlob` 和 `createLegacyBackupFilename` 是纯工具，不触发下载、不创建 object URL、不写文件系统。
+
+Raw backup 和标准 `StorageSnapshot` 的边界必须保持清楚：raw backup 是零损失留存旧 key/value 字符串的证据链，`StorageSnapshot` 是后续 Task 5/Task 6 用来验证和写入目标 adapter 的标准数据交换格式。Task 4 不负责引用完整性阻断、URL 去重策略、迁移预览 UI、activeStorage 切换或回滚执行。
+
 当前 `packages/storage-service` 已经有 `StorageAdapter`、`LocalStorageAdapter` 和被阻塞的 `SupabaseAdapter`，但它仍然是按实体方法封装，并且底层继续读写一个整体 AppState JSON。Phase 1 需要把它升级成真正的本地数据访问层，同时避免一轮内重写所有页面和业务 service。
 
 设计目标是：UI 不再直接调用 localStorage；页面通过 repository / service 层访问数据；旧 localStorage 只作为迁移源和回滚源；IndexedDB 成为 Phase 1 主存储；Supabase 继续占位，直到真实项目、Auth 和 RLS 都准备好。
