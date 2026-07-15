@@ -343,10 +343,10 @@ export class LegacyLocalStorageSnapshotReader {
       createdAt,
       source: "legacy-localStorage",
       rawBackup,
-      normalizedSnapshot,
       checksums,
       report,
-      appVersion: options.appVersion
+      ...(normalizedSnapshot ? { normalizedSnapshot } : {}),
+      ...(options.appVersion ? { appVersion: options.appVersion } : {})
     };
   }
 }
@@ -648,14 +648,14 @@ function createNormalizedStorageSnapshot(
     sourceStorage: "localStorage",
     sourceSchemaVersion,
     createdAt,
-    appVersion: options.appVersion,
     counts,
     records,
+    ...(options.appVersion ? { appVersion: options.appVersion } : {}),
     metadata: {
-      sourceAppVersion: options.appVersion,
       userInitiated: true,
-      notes: options.notes,
-      includedStores: Object.keys(records) as StorageEntityName[]
+      includedStores: Object.keys(records) as StorageEntityName[],
+      ...(options.appVersion ? { sourceAppVersion: options.appVersion } : {}),
+      ...(options.notes ? { notes: options.notes } : {})
     }
   };
 }
@@ -682,7 +682,20 @@ function collectStoreRecords<K extends StorageEntityName>(
   value.forEach((record, index) => {
     const prepared = prepareLegacyRecord(store, record, context, index);
     if (!prepared) return;
-    const id = getLegacyPrimaryKey(store, prepared);
+    let id: StoragePrimaryKey;
+    try {
+      id = getLegacyPrimaryKey(store, prepared);
+    } catch {
+      context.skippedCounts[store] = (context.skippedCounts[store] ?? 0) + 1;
+      context.issues.push(createIssue({
+        code: "INVALID_RECORD",
+        severity: "warning",
+        store,
+        message: `Legacy ${store} record at index ${index} is missing a valid primary key.`,
+        recoverable: true
+      }));
+      return;
+    }
     if (seen.has(id)) {
       context.duplicateCounts[store] = (context.duplicateCounts[store] ?? 0) + 1;
       context.skippedCounts[store] = (context.skippedCounts[store] ?? 0) + 1;
@@ -703,7 +716,20 @@ function collectStoreRecords<K extends StorageEntityName>(
 }
 
 function collectImportBatchItems(state: Record<string, unknown>, context: MapContext): ImportBatchItem[] {
-  const topLevel = collectStoreRecords("importBatchItems", state.importBatchItems, context);
+  const combined: unknown[] = [];
+  if (state.importBatchItems !== undefined) {
+    if (!Array.isArray(state.importBatchItems)) {
+      context.issues.push(createIssue({
+        code: "INVALID_COLLECTION",
+        severity: "error",
+        store: "importBatchItems",
+        message: "Legacy importBatchItems collection is not an array.",
+        recoverable: true
+      }));
+    } else {
+      combined.push(...state.importBatchItems);
+    }
+  }
   const nested: unknown[] = [];
   if (Array.isArray(state.importBatches)) {
     for (const batch of state.importBatches) {
@@ -713,12 +739,9 @@ function collectImportBatchItems(state: Record<string, unknown>, context: MapCon
       }
     }
   }
-  if (nested.length === 0) return topLevel;
-  const combined = [...topLevel, ...nested];
-  return collectStoreRecords("importBatchItems", combined, {
-    ...context,
-    sourceCounts: { ...context.sourceCounts, importBatchItems: combined.length }
-  });
+  combined.push(...nested);
+  if (combined.length === 0) return [];
+  return collectStoreRecords("importBatchItems", combined, context);
 }
 
 function prepareLegacyRecord<K extends StorageEntityName>(
