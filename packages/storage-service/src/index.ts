@@ -1,11 +1,36 @@
 import type { ActionCard, ImportBatch, ImportBatchItem, Plan, RealUserTestRecord, SavedItem, SearchLog, SmartAlbum, Task } from "@revival/shared-types";
+import {
+  LOCAL_STORAGE_CONTRACT_CAPABILITIES,
+  SUPABASE_BLOCKED_CAPABILITIES,
+  type StorageAdapter,
+  type StorageBulkWriteResult,
+  type StorageCapabilities,
+  type StorageEntityName,
+  type StorageHealthReport,
+  type StorageImportOptions,
+  type StorageImportResult,
+  type StorageKind,
+  type StoragePrimaryKey,
+  type StorageQuery,
+  type StorageQueryOptions,
+  type StorageRecordMap,
+  type StorageSnapshot,
+  type StorageSnapshotOptions,
+  type StorageTransaction,
+  type StorageTransactionMode
+} from "./contracts";
+import { createStorageNotSupportedError, StorageError, type StorageErrorCode } from "./errors";
+
+export * from "./contracts";
+export * from "./errors";
+export * from "./repositories";
 
 export interface AchievementRecord {
   id: string;
   unlockedAt: string;
 }
 
-export interface StorageAdapter {
+export interface LegacyEntityStorageAdapter {
   getSavedItems(): Promise<SavedItem[]>;
   saveSavedItem(item: SavedItem): Promise<void>;
   getActionCards(): Promise<ActionCard[]>;
@@ -66,16 +91,27 @@ export function getStorageRuntimeStatus(env: Record<string, unknown> = {}): Stor
   };
 }
 
-export function createLocalStorageAdapter(storage: Storage, appStateKey: string, achievementKey: string): StorageAdapter {
+export function createLocalStorageAdapter(storage: Storage, appStateKey: string, achievementKey: string): LocalStorageAdapter {
   return new LocalStorageAdapter(storage, appStateKey, achievementKey);
 }
 
-export function createSupabaseAdapter(config: SupabaseAdapterConfig): StorageAdapter {
+export function createSupabaseAdapter(config: SupabaseAdapterConfig): SupabaseAdapter {
   return new SupabaseAdapter(config);
 }
 
-export class LocalStorageAdapter implements StorageAdapter {
+export class LocalStorageAdapter implements LegacyEntityStorageAdapter, StorageAdapter {
+  readonly kind: StorageKind = "localStorage";
+  readonly capabilities: StorageCapabilities = LOCAL_STORAGE_CONTRACT_CAPABILITIES;
+
   constructor(private readonly storage: Storage, private readonly appStateKey: string, private readonly achievementKey: string) {}
+
+  async open(): Promise<void> {}
+
+  async close(): Promise<void> {}
+
+  async isAvailable(): Promise<boolean> {
+    return Boolean(this.storage);
+  }
 
   async getSavedItems(): Promise<SavedItem[]> {
     return this.readState().savedItems ?? [];
@@ -177,6 +213,75 @@ export class LocalStorageAdapter implements StorageAdapter {
     this.storage.setItem(this.achievementKey, JSON.stringify({ ...current, [achievement.id]: achievement.unlockedAt }));
   }
 
+  async get<K extends StorageEntityName>(store: K, id: StoragePrimaryKey): Promise<StorageRecordMap[K] | undefined> {
+    throw unsupported(this.kind, "get", store);
+  }
+
+  async getAll<K extends StorageEntityName>(store: K, options?: StorageQueryOptions<K>): Promise<StorageRecordMap[K][]> {
+    throw unsupported(this.kind, "getAll", store);
+  }
+
+  async query<K extends StorageEntityName>(store: K, query: StorageQuery<K>): Promise<StorageRecordMap[K][]> {
+    throw unsupported(this.kind, "query", store);
+  }
+
+  async put<K extends StorageEntityName>(store: K, value: StorageRecordMap[K]): Promise<void> {
+    throw unsupported(this.kind, "put", store);
+  }
+
+  async bulkPut<K extends StorageEntityName>(store: K, values: StorageRecordMap[K][]): Promise<StorageBulkWriteResult> {
+    throw unsupported(this.kind, "bulkPut", store);
+  }
+
+  async delete<K extends StorageEntityName>(store: K, id: StoragePrimaryKey): Promise<void> {
+    throw unsupported(this.kind, "delete", store);
+  }
+
+  async clear<K extends StorageEntityName>(store: K): Promise<void> {
+    throw unsupported(this.kind, "clear", store);
+  }
+
+  async transaction<T>(stores: StorageEntityName[], mode: StorageTransactionMode, operation: (tx: StorageTransaction) => Promise<T>): Promise<T> {
+    throw unsupported(this.kind, "transaction");
+  }
+
+  async exportSnapshot(options?: StorageSnapshotOptions): Promise<StorageSnapshot> {
+    throw unsupported(this.kind, "exportSnapshot");
+  }
+
+  async importSnapshot(snapshot: StorageSnapshot, options: StorageImportOptions): Promise<StorageImportResult> {
+    throw unsupported(this.kind, "importSnapshot");
+  }
+
+  async getSchemaVersion(): Promise<number> {
+    const state = this.readState();
+    return typeof state.schemaVersion === "number" ? state.schemaVersion : 1;
+  }
+
+  async healthCheck(): Promise<StorageHealthReport> {
+    const warnings: string[] = [];
+    let available = true;
+    let schemaVersion: number | undefined;
+    try {
+      schemaVersion = await this.getSchemaVersion();
+    } catch (error) {
+      available = false;
+      warnings.push("LocalStorageAdapter could not parse the current AppState.");
+    }
+
+    return {
+      adapter: this.kind,
+      available,
+      opened: true,
+      schemaVersion,
+      writable: undefined,
+      quotaWarning: undefined,
+      capabilities: this.capabilities,
+      warnings,
+      checkedAt: new Date().toISOString()
+    };
+  }
+
   private readState(): Record<string, any> {
     return JSON.parse(this.storage.getItem(this.appStateKey) || "{}") as Record<string, any>;
   }
@@ -186,8 +291,15 @@ export class LocalStorageAdapter implements StorageAdapter {
   }
 }
 
-export class SupabaseAdapter implements StorageAdapter {
+export class SupabaseAdapter implements LegacyEntityStorageAdapter, StorageAdapter {
+  readonly kind: StorageKind = "supabase";
+  readonly capabilities: StorageCapabilities = SUPABASE_BLOCKED_CAPABILITIES;
+
   constructor(readonly config?: SupabaseAdapterConfig) {}
+
+  async open(): Promise<void> { throw unsupported(this.kind, "open"); }
+  async close(): Promise<void> {}
+  async isAvailable(): Promise<boolean> { return false; }
 
   async getSavedItems(): Promise<SavedItem[]> { throwBlockedSupabase(); }
   async saveSavedItem(): Promise<void> { throwBlockedSupabase(); }
@@ -209,10 +321,41 @@ export class SupabaseAdapter implements StorageAdapter {
   async saveRealUserTestRecord(): Promise<void> { throwBlockedSupabase(); }
   async getAchievements(): Promise<AchievementRecord[]> { throwBlockedSupabase(); }
   async saveAchievement(): Promise<void> { throwBlockedSupabase(); }
+
+  async get<K extends StorageEntityName>(store: K, id: StoragePrimaryKey): Promise<StorageRecordMap[K] | undefined> { throw unsupported(this.kind, "get", store); }
+  async getAll<K extends StorageEntityName>(store: K, options?: StorageQueryOptions<K>): Promise<StorageRecordMap[K][]> { throw unsupported(this.kind, "getAll", store); }
+  async query<K extends StorageEntityName>(store: K, query: StorageQuery<K>): Promise<StorageRecordMap[K][]> { throw unsupported(this.kind, "query", store); }
+  async put<K extends StorageEntityName>(store: K, value: StorageRecordMap[K]): Promise<void> { throw unsupported(this.kind, "put", store); }
+  async bulkPut<K extends StorageEntityName>(store: K, values: StorageRecordMap[K][]): Promise<StorageBulkWriteResult> { throw unsupported(this.kind, "bulkPut", store); }
+  async delete<K extends StorageEntityName>(store: K, id: StoragePrimaryKey): Promise<void> { throw unsupported(this.kind, "delete", store); }
+  async clear<K extends StorageEntityName>(store: K): Promise<void> { throw unsupported(this.kind, "clear", store); }
+  async transaction<T>(stores: StorageEntityName[], mode: StorageTransactionMode, operation: (tx: StorageTransaction) => Promise<T>): Promise<T> { throw unsupported(this.kind, "transaction"); }
+  async exportSnapshot(options?: StorageSnapshotOptions): Promise<StorageSnapshot> { throw unsupported(this.kind, "exportSnapshot"); }
+  async importSnapshot(snapshot: StorageSnapshot, options: StorageImportOptions): Promise<StorageImportResult> { throw unsupported(this.kind, "importSnapshot"); }
+  async getSchemaVersion(): Promise<number> { throw unsupported(this.kind, "getSchemaVersion"); }
+  async healthCheck(): Promise<StorageHealthReport> {
+    return {
+      adapter: this.kind,
+      available: false,
+      opened: false,
+      capabilities: this.capabilities,
+      warnings: ["SupabaseAdapter remains blocked until credentials, auth, migrations, and Row Level Security are verified."],
+      checkedAt: new Date().toISOString()
+    };
+  }
 }
 
 function throwBlockedSupabase(): never {
-  throw new Error(SUPABASE_BLOCKED_MESSAGE);
+  throw new StorageError({
+    adapter: "supabase",
+    code: "STORAGE_NOT_SUPPORTED",
+    message: SUPABASE_BLOCKED_MESSAGE,
+    recoverable: true
+  });
+}
+
+function unsupported(adapter: StorageKind, operation: string, store?: StorageEntityName): StorageError {
+  return createStorageNotSupportedError(adapter, operation, store);
 }
 
 function upsertById<T extends { id: string }>(items: T[], item: T): T[] {
