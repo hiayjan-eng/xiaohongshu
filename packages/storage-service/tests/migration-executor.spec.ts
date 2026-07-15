@@ -1,7 +1,13 @@
 import {
+  IDBKeyRange as FakeIDBKeyRange,
+  indexedDB as fakeIndexedDB
+} from "fake-indexeddb";
+import {
   MemoryMigrationLockProvider,
+  createIndexedDbAdapter,
   createMigrationExecutor,
   computeStoreChecksum,
+  deleteIndexedDbDatabase,
   metadataId,
   type MigrationExecutionMetadataRecord,
   type StorageEntityName
@@ -10,7 +16,7 @@ import { makeSavedItem } from "./fixtures";
 import { createMigrationExecutionFixture, makeExecutionState } from "./migration-executor-fixtures";
 import { expectStorageError, TestHarness } from "./test-harness";
 
-const CASE_COUNT = 14;
+const CASE_COUNT = 15;
 
 export function runMigrationExecutorTests(harness: TestHarness): void {
   harness.test("MigrationExecutor: executes an approved plan into target storage", async () => {
@@ -33,6 +39,26 @@ export function runMigrationExecutorTests(harness: TestHarness): void {
     harness.assert(result.checkpoints.every((checkpoint) => checkpoint.status === "verified"), "all checkpoints verified");
   });
 
+  harness.test("MigrationExecutor: executes against IndexedDbAdapter without product runtime wiring", async () => {
+    const { envelope, preview } = await createMigrationExecutionFixture({ migrationId: "migration_indexeddb_execution" });
+    const databaseName = `collection-revival-migration-executor-${Date.now()}`;
+    const target = createIndexedDbAdapter({
+      databaseName,
+      indexedDBFactory: fakeIndexedDB,
+      keyRangeFactory: FakeIDBKeyRange
+    });
+    try {
+      const executor = createMigrationExecutor({ targetAdapter: target });
+      const result = await executor.execute({ envelope, preview, userConfirmed: true });
+      harness.equal(result.status, "completed", "indexeddb migration status");
+      harness.equal((await target.getAll("savedItems")).length, 1, "indexeddb saved item");
+      harness.equal((await target.getAll("migrationMetadata")).length, 1, "indexeddb metadata");
+    } finally {
+      await target.close();
+      await deleteIndexedDbDatabase(databaseName, fakeIndexedDB);
+    }
+  });
+
   harness.test("MigrationExecutor: refuses to execute without explicit user confirmation", async () => {
     const { envelope, preview, target } = await createMigrationExecutionFixture();
     const executor = createMigrationExecutor({ targetAdapter: target });
@@ -47,7 +73,7 @@ export function runMigrationExecutorTests(harness: TestHarness): void {
 
   harness.test("MigrationExecutor: refuses blocked preview plans", async () => {
     const state = makeExecutionState({
-      savedItems: [makeSavedItem("saved-001"), makeSavedItem("saved-001", { title: "duplicate" })]
+      savedItems: [{ ...makeSavedItem("saved-001"), id: "" }]
     });
     const { envelope, preview, target } = await createMigrationExecutionFixture({ state });
     const executor = createMigrationExecutor({ targetAdapter: target });
