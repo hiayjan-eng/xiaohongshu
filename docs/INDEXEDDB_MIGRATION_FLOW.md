@@ -1,5 +1,22 @@
 # IndexedDB 零丢失迁移流程
 
+## Task 5 实施更新：迁移预览与验证器
+
+Task 5 已在 `packages/storage-service/src/migration-preview.ts` 落地为纯只读能力，输入是 Task 4 生成的 `LegacyBackupEnvelope`。它不会调用 `loadAppState`，不会读取真实浏览器 `localStorage`，不会打开或写入正式 IndexedDB，也不会修改 `activeStorage`。这一层只回答一个问题：这份旧数据是否可以安全进入后续迁移执行。
+
+新增的核心 API：
+
+- `validateMigrationSource(envelope)`：校验 envelope、raw backup、normalized Snapshot、checksum 和基础版本。
+- `createMigrationPreview(envelope, options)`：生成结构化 `MigrationPreviewReport`、`MigrationPlan`、issue 列表、重复组、断裂引用和数据保留检查。
+- `createMigrationPreviewUserSummary(report)`：把技术预览转换成后续设置页可展示的用户摘要。
+- `createMigrationReport(report)`：把 preview 压缩成可保存、可导出的迁移报告摘要。
+
+Task 5 的 issue 分为 `blocking`、`warning` 和 `info`。`blocking` 会阻止进入 Task 6 迁移执行，例如 checksum 不一致、缺 normalized Snapshot、重复主键、必需引用断裂、用户备注/手动标题/sourceUrl/分类纠正未保留。`warning` 需要用户确认，例如同源重复、可选引用断裂、目标库同编号冲突、已归档/已确认专辑状态或计划状态异常。`info` 只说明预期行为，例如搜索索引会重建、内部测试 key 默认排除、目标库已有完全相同记录会跳过。
+
+`MigrationPlan` 只生成计划，不执行写入。每条记录的操作会被标记为 `create`、`skip`、`conflict` 或 `manual_review`；Task 5 不使用 `update` 覆盖目标记录。目标 `StorageAdapter` 如果传入，只会被 `getAll` 只读比较，用来识别目标空库、完全相同记录和同主键冲突。任何目标读取失败都会变成手动确认 issue，而不是继续假装可迁移。
+
+Task 5 明确不做这些事：不执行 migration state machine，不创建 writer lock，不做断点恢复，不写 `migrationMetadata`，不下载备份，不显示 UI，不自动修复旧扫描文本，不重新分类，不重新生成 SmartAlbum、ActionCard 或 PlanCard。Task 6 才能消费 `MigrationPlan` 执行 staging 写入、迁移锁、断点恢复、校验后切换和回滚。
+
 ## Task 4 实施更新：备份输入阶段
 
 Task 4 已补齐迁移流程的“只读输入”能力，但仍未开始迁移。迁移状态机里的 `snapshot_created` 现在应理解为：通过 `LegacyLocalStorageSnapshotReader` 读取显式 allowlist key，生成 `LegacyBackupEnvelope`，其中同时包含 raw backup、可选 normalized `StorageSnapshot`、SHA-256 checksum 和结构化 read report。
