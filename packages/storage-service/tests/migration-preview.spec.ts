@@ -111,8 +111,8 @@ export function runMigrationPreviewTests(harness: TestHarness): void {
   harness.test("Migration preview: detects source identity and normalized URL duplicates", async () => {
     const state = makeLegacyAppState({
       savedItems: [
-        makeSavedItem("saved-001", { sourceItemId: "source-same", sourceUrl: "https://example.test/item?a=1&b=2" }),
-        makeSavedItem("saved-002", { sourceItemId: "source-same", sourceUrl: "https://example.test/item?b=2&a=1" })
+        withLegacySourceItemId(makeSavedItem("saved-001", { sourceUrl: "https://example.test/item?a=1&b=2" }), "source-same"),
+        withLegacySourceItemId(makeSavedItem("saved-002", { sourceUrl: "https://example.test/item?b=2&a=1" }), "source-same")
       ]
     });
     const report = await createPreview(await createEnvelopeFromState(state));
@@ -138,7 +138,13 @@ export function runMigrationPreviewTests(harness: TestHarness): void {
   });
 
   harness.test("Migration preview: detects preservation failures for user fields", async () => {
-    const envelope = await createEnvelope();
+    const envelope = await createEnvelopeFromState(makeLegacyAppState({
+      savedItems: [
+        makeSavedItem("saved-001", {
+          userEditedTitle: "manual title"
+        } as never)
+      ]
+    }));
     const invalid = cloneEnvelope(envelope);
     invalid.normalizedSnapshot!.records.savedItems![0] = {
       ...invalid.normalizedSnapshot!.records.savedItems![0]!,
@@ -306,15 +312,16 @@ export function runMigrationPreviewTests(harness: TestHarness): void {
     invalid.normalizedSnapshot!.records.savedItems = [
       makeSavedItem("saved-sensitive", {
         sourceUrl: "https://www.xiaohongshu.com/discovery/item/abc?xsec_token=very-secret",
-        userNote: "private note should not appear",
-        sourceItemId: "same"
+        userNote: "private note should not appear"
       }),
       makeSavedItem("saved-sensitive-2", {
         sourceUrl: "https://www.xiaohongshu.com/discovery/item/abc?xsec_token=another-secret",
-        userNote: "another private note",
-        sourceItemId: "same"
+        userNote: "another private note"
       })
     ];
+    invalid.normalizedSnapshot!.records.savedItems = invalid.normalizedSnapshot!.records.savedItems.map((item) =>
+      withLegacySourceItemId(item, "same")
+    );
     invalid.normalizedSnapshot!.counts.savedItems = 2;
     const report = await createPreview(invalid);
     const text = JSON.stringify(report.issues);
@@ -358,4 +365,8 @@ function cloneEnvelope(envelope: LegacyBackupEnvelope): LegacyBackupEnvelope {
 
 function hasIssue(issues: Array<{ code: MigrationIssueCode }>, code: MigrationIssueCode): boolean {
   return issues.some((issue) => issue.code === code);
+}
+
+function withLegacySourceItemId<T extends ReturnType<typeof makeSavedItem>>(item: T, sourceItemId: string): T {
+  return { ...item, sourceItemId } as T;
 }
