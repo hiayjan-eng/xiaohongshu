@@ -86,10 +86,20 @@ export class WebLocksMigrationLockProvider implements MigrationLockProvider {
     const name = options.name ?? MIGRATION_WRITER_LOCK_NAME;
     let releaseHold = (): void => undefined;
     let released = false;
-    let requestSettledWithoutLock = false;
 
     const hold = new Promise<void>((resolve) => {
       releaseHold = resolve;
+    });
+
+    let resolveHandle = (handle: MigrationLockHandle): void => {
+      void handle;
+    };
+    let rejectHandle = (error: unknown): void => {
+      void error;
+    };
+    const acquired = new Promise<MigrationLockHandle>((resolve, reject) => {
+      resolveHandle = resolve;
+      rejectHandle = reject;
     });
 
     const requestPromise = this.locks.request(
@@ -97,36 +107,31 @@ export class WebLocksMigrationLockProvider implements MigrationLockProvider {
       { mode: "exclusive", ifAvailable: true, signal: options.signal },
       async (lock) => {
         if (!lock) {
-          requestSettledWithoutLock = true;
+          rejectHandle(new MigrationExecutionError({
+            code: "MIGRATION_LOCK_UNAVAILABLE",
+            message: "Web Locks could not acquire the migration writer lock.",
+            recoverable: true
+          }));
           return;
         }
+        resolveHandle({
+          name,
+          migrationId: options.migrationId,
+          acquiredAt: this.now().toISOString(),
+          release: async () => {
+            if (released) return;
+            released = true;
+            releaseHold();
+            await requestPromise.catch(() => undefined);
+          }
+        });
         await hold;
       }
     );
 
-    await Promise.resolve();
-    if (requestSettledWithoutLock) {
-      throw new MigrationExecutionError({
-        code: "MIGRATION_LOCK_UNAVAILABLE",
-        message: "Web Locks could not acquire the migration writer lock.",
-        recoverable: true
-      });
-    }
-
-    const handle: MigrationLockHandle = {
-      name,
-      migrationId: options.migrationId,
-      acquiredAt: this.now().toISOString(),
-      release: async () => {
-        if (released) return;
-        released = true;
-        releaseHold();
-        await requestPromise.catch(() => undefined);
-      }
-    };
-
+    requestPromise.catch((error) => rejectHandle(error));
     requestPromise.catch(() => undefined);
-    return handle;
+    return acquired;
   }
 }
 
