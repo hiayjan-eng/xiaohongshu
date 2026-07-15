@@ -81,6 +81,17 @@ Stop conditions:
 
 Effort: M.
 
+Implementation result:
+
+- Added the formal Settings -> Data Management entry and the stable `/settings/data-migration` route.
+- Added a feature-local controller, reducer, inspection, preview, and backup components without restructuring the rest of `App.tsx`.
+- The controller reads only the Task 4 allowlist after an explicit click. It does not call `loadAppState`, `persistAppState`, `MigrationExecutor`, Web Locks, or any storage adapter.
+- The Task 7A page writes no localStorage keys and never calls `indexedDB.open`; its result is intentionally lost on refresh.
+- Preview presents preserved, regenerated, excluded, and review-required groups. Private notes, full URLs, tokens, raw JSON, and stack traces are not rendered.
+- Raw backup download uses the Task 4 envelope serializer, Blob factory, and filename helper. Object URLs are revoked in a `finally` block and the UI only claims that download was triggered.
+- Automated coverage includes controller/reducer contracts, normal/manual-review/blocked/empty/invalid flows, download boundaries, direct route refresh, localStorage zero-write checks, IndexedDB zero-access checks, responsive layouts, and real browser screenshots.
+- Task 7B may extend this controller only after explicit confirmation UI is designed. Its production path must construct `WebLocksMigrationLockProvider`, must not enable a process-local test lock, and must still stop before active storage activation.
+
 ## Task 7B: Execution Confirmation and Progress
 
 Goal: allow migration execution only after backup download, four confirmations, Web Locks availability, and explicit target adapter creation. Completion state remains not activated.
