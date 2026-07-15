@@ -732,17 +732,7 @@ export class MigrationExecutor {
         recoverable: true
       });
     }
-    const candidate = existing as MigrationBackupRecord;
-    if (
-      candidate.id !== expected.id ||
-      candidate.backupId !== expected.backupId ||
-      candidate.sourceBackupId !== expected.sourceBackupId ||
-      candidate.migrationId !== expected.migrationId ||
-      candidate.checksum !== expected.checksum ||
-      candidate.byteLength !== expected.byteLength ||
-      candidate.serializedEnvelope !== expected.serializedEnvelope ||
-      candidate.immutable !== true
-    ) {
+    if (!isSameImmutableBackup(existing, expected)) {
       throw new MigrationExecutionError({
         code: "MIGRATION_RESUME_CONFLICT",
         message: "An existing migration backup uses the same id but different immutable content.",
@@ -1340,4 +1330,16 @@ function getUtf8ByteLength(value: string): number {
     return new TextEncoder().encode(value).length;
   }
   return value.length;
+}
+
+function isSameImmutableBackup(existing: StorageRecordMap["backups"], expected: MigrationBackupRecord): boolean {
+  const candidate = existing as MigrationBackupRecord;
+  return candidate.id === expected.id &&
+    candidate.backupId === expected.backupId &&
+    candidate.sourceBackupId === expected.sourceBackupId &&
+    candidate.migrationId === expected.migrationId &&
+    candidate.checksum === expected.checksum &&
+    candidate.byteLength === expected.byteLength &&
+    candidate.serializedEnvelope === expected.serializedEnvelope &&
+    candidate.immutable === true;
 }
