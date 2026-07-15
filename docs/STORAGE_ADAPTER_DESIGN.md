@@ -405,3 +405,22 @@ Task 6 在 `packages/storage-service` 内新增迁移执行层，但它没有接
 写入边界是：允许写入 target adapter 的 `backups`、`migrationMetadata` 和计划中的业务 stores；禁止写旧 localStorage、禁止写 `chrome.storage.local`、禁止切换 `activeStorage`。初次执行要求目标业务 stores 为空；失败恢复时根据 checkpoint、数量和 checksum 判断哪些 store 可跳过、验证或继续写入。`backups` store 保存 normalized Snapshot，并把 raw backup 作为扩展字段保留给后续检查。
 
 Task 6 的 rollback 只在 `activeStorageSwitched = false` 时允许。它会清空本次迁移写入的业务 stores，保留 `backups` 和 `migrationMetadata` 作为审计证据。真正的 activeStorage 切换、设置页入口、多标签页 UI 锁定和生产数据迁移仍属于后续任务。
+## Task 6.1 Migration Executor Hardening
+
+Task 6.1 closes the executor gaps found in `docs/TASK6_ACCEPTANCE_AUDIT.md` while keeping the same storage boundary: no Web runtime wiring, no localStorage mutation, no `chrome.storage.local`, no activeStorage switch, and no UI.
+
+The hardened execution contract is:
+
+- Backup persistence uses `verifyLegacyBackupEnvelope`, `serializeLegacyBackup`, SHA-256, and a `backups` readwrite transaction.
+- Backup records store `serializedEnvelope`, `byteLength`, SHA-256 `checksum`, `immutable=true`, `sourceBackupId`, `migrationId`, `rawBackup`, `checksums`, `report`, and `verifiedAt`.
+- Backup records are immutable. Same id + same serialized envelope can be reused. Same id + different immutable content throws `MIGRATION_RESUME_CONFLICT` and never overwrites the old backup.
+- Backup write success is not enough. The executor independently reads the backup back, recalculates SHA-256, parses the serialized envelope, verifies the parsed envelope, and only then writes execution metadata.
+- Store checkpoint checksums now use SHA-256 over canonical JSON `{ store, records }`, where records are sorted by Store primary key. Web Crypto absence throws `MIGRATION_CRYPTO_UNAVAILABLE`; there is no weak hash fallback.
+- IndexedDB targets require a Web Locks provider by default. `MemoryMigrationLockProvider` remains valid for MemoryAdapter and explicitly marked test paths only.
+- Preflight compares preview target schemaVersion, plan target schemaVersion, expected target schemaVersion, and actual adapter schemaVersion before any backup or business write.
+- New executions scan all `migrationMetadata`; any other non-`rolled_back` migration blocks with `MIGRATION_ACTIVE_SESSION_EXISTS`.
+- Final verification now combines Task 5 semantic validation with physical count + SHA-256 verification.
+- Resume rereads and reverifies the persisted backup instead of trusting metadata alone.
+- Rollback after `rollback_failed` can be retried; backup and metadata are preserved.
+
+Task 7B must inject `WebLocksMigrationLockProvider` and must not enable any test-only lock option.
