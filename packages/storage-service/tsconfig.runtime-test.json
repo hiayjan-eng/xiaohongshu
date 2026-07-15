@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "node_modules/.cache/storage-service-test",
+    "rootDir": "../..",
+    "module": "CommonJS",
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false,
+    "isolatedModules": false
+  },
+  "include": ["src/**/*.ts", "tests/**/*.ts"]
+}
