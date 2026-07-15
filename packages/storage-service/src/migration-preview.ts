@@ -263,6 +263,13 @@ export interface MigrationPreviewReport {
   plan: MigrationPlan;
 }
 
+export interface MigrationTargetIntegrityResult {
+  valid: boolean;
+  issues: MigrationIssue[];
+  preservationChecks: DataPreservationCheck[];
+  brokenReferences: MigrationBrokenReference[];
+}
+
 export interface MigrationReport {
   reportVersion: number;
   migrationId: string;
@@ -494,6 +501,27 @@ export async function createMigrationPreview(envelope: LegacyBackupEnvelope, opt
     duplicateGroups: sortDuplicateGroups(context.duplicateGroups),
     brokenReferences: sortBrokenReferences(context.brokenReferences),
     plan
+  };
+}
+
+export function validateMigratedSnapshotIntegrity(
+  envelope: LegacyBackupEnvelope,
+  targetSnapshot: StorageSnapshot,
+  options: Pick<MigrationPreviewOptions, "now" | "createMigrationId" | "targetSchemaVersion" | "detailLimit"> = {}
+): MigrationTargetIntegrityResult {
+  const generatedAt = (options.now ?? (() => new Date()))().toISOString();
+  const context = createValidationContext(options.createMigrationId?.() ?? "migration_final_verification", generatedAt, options.detailLimit);
+  validateSnapshotBasics(context, targetSnapshot, options.targetSchemaVersion ?? DEFAULT_TARGET_SCHEMA_VERSION);
+  validateSnapshotStores(context, targetSnapshot);
+  validateReferences(context, targetSnapshot);
+  validatePreservation(context, envelope, targetSnapshot);
+  const failedPreservation = context.preservationChecks.some((check) => check.status === "failed");
+  const blockingIssue = context.issues.some((issue) => issue.severity === "blocking");
+  return {
+    valid: !failedPreservation && !blockingIssue,
+    issues: sortIssues(context.issues),
+    preservationChecks: sortPreservationChecks(context.preservationChecks),
+    brokenReferences: sortBrokenReferences(context.brokenReferences)
   };
 }
 
