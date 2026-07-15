@@ -30,13 +30,11 @@ export function MigrationInspectionStep({ inspecting, progress, onInspect }: Mig
         </div>
       </div>
 
-      <div className="migration-inspection-grid" aria-label="检查项目">
-        {INSPECTION_ITEMS.map((item, index) => (
-          <span key={item}>
-            {index % 3 === 0 ? <Database size={16} /> : index % 3 === 1 ? <FileJson size={16} /> : <CheckCircle2 size={16} />}
-            {item}
-          </span>
-        ))}
+      <div className="migration-primary-action">
+        <button className="primary-button" type="button" onClick={onInspect} disabled={inspecting} data-testid="start-migration-inspection">
+          {inspecting ? "正在检查…" : "开始检查"}
+        </button>
+        <span><ShieldCheck size={16} aria-hidden="true" /> 数据只在当前浏览器中处理，不会上传服务器。</span>
       </div>
 
       {inspecting && progress && (
@@ -49,12 +47,15 @@ export function MigrationInspectionStep({ inspecting, progress, onInspect }: Mig
         </div>
       )}
 
-      <div className="migration-primary-action">
-        <button className="primary-button" type="button" onClick={onInspect} disabled={inspecting} data-testid="start-migration-inspection">
-          {inspecting ? "正在检查…" : "开始检查"}
-        </button>
-        <span><ShieldCheck size={16} aria-hidden="true" /> 数据只在当前浏览器中处理，不会上传服务器。</span>
+      <div className="migration-inspection-grid" aria-label="检查项目">
+        {INSPECTION_ITEMS.map((item, index) => (
+          <span key={item}>
+            {index % 3 === 0 ? <Database size={16} /> : index % 3 === 1 ? <FileJson size={16} /> : <CheckCircle2 size={16} />}
+            {item}
+          </span>
+        ))}
       </div>
+
     </section>
   );
 }
