@@ -271,6 +271,7 @@ export function makeRecordForStore<K extends StorageEntityName>(store: K, suffix
     case "backups":
       return makeBackup(id) as StorageRecordMap[K];
   }
+  throw new Error(`Unsupported fixture store: ${String(store)}`);
 }
 
 export function makeAllStoreRecords(): { [K in StorageEntityName]: StorageRecordMap[K] } {
