@@ -43,6 +43,9 @@ importers:
       '@revival/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types
+      '@revival/storage-service':
+        specifier: workspace:*
+        version: link:../../packages/storage-service
       '@vitejs/plugin-react':
         specifier: ^4.3.1
         version: 4.7.0(vite@5.4.21)
