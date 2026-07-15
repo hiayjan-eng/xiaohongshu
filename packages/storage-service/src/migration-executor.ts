@@ -549,9 +549,9 @@ export class MigrationExecutor {
     };
 
     await this.targetAdapter.transaction(["backups", "migrationMetadata"], "readwrite", async (tx) => {
-      await tx.put("backups", backup as StorageRecordMap["backups"]);
+      await tx.put("backups", stripUndefinedDeep(backup) as StorageRecordMap["backups"]);
       await tx.put("migrationMetadata", {
-        ...metadata,
+        ...stripUndefinedDeep(metadata),
         status: "migrating",
         executionStatus: "backup_persisted",
         backupRecordId,
@@ -622,7 +622,7 @@ export class MigrationExecutor {
     metadata: MigrationExecutionMetadataRecord,
     store: StorageEntityName
   ): Promise<MigrationExecutionMetadataRecord> {
-    let current = {
+    let current: MigrationExecutionMetadataRecord = {
       ...metadata,
       status: "verifying" as const,
       executionStatus: "verifying_store" as const,
@@ -662,7 +662,7 @@ export class MigrationExecutor {
 
   private async verifyFinal(snapshot: StorageSnapshot, metadata: MigrationExecutionMetadataRecord): Promise<MigrationExecutionMetadataRecord> {
     await this.faultInjector?.beforeFinalVerify?.({ migrationId: metadata.id.replace(EXECUTION_METADATA_ID_PREFIX, ""), phase: "verifying_all" });
-    let current = {
+    let current: MigrationExecutionMetadataRecord = {
       ...metadata,
       status: "verifying" as const,
       executionStatus: "verifying_all" as const,
@@ -814,7 +814,7 @@ export class MigrationExecutor {
   }
 
   private async writeMetadata(metadata: MigrationExecutionMetadataRecord): Promise<void> {
-    await this.targetAdapter.put("migrationMetadata", cloneJsonSafe(metadata, {
+    await this.targetAdapter.put("migrationMetadata", cloneJsonSafe(stripUndefinedDeep(metadata), {
       adapter: this.targetAdapter.kind,
       code: "STORAGE_VALIDATION_FAILED",
       recoverable: true
@@ -975,4 +975,20 @@ function fingerprint(value: string): string {
     hash = Math.imul(hash, 16777619);
   }
   return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+function stripUndefinedDeep<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value.map((entry) => stripUndefinedDeep(entry)) as T;
+  }
+  if (value && typeof value === "object") {
+    const output: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+      if (entry !== undefined) {
+        output[key] = stripUndefinedDeep(entry);
+      }
+    }
+    return output as T;
+  }
+  return value;
 }
