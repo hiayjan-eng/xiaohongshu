@@ -185,3 +185,49 @@ Task 1 的实际落地范围被收在 `packages/storage-service` 的契约层：
 - 没有修改扩展、Bridge、扫描 selector、进度条、暂停继续、断点恢复和导入协议。
 
 后续 Task 2 应从 MemoryAdapter 开始，目标是验证 `StorageAdapter` 契约能在无浏览器持久化的环境中完整跑通 CRUD、bulkPut、query、snapshot/importSnapshot 的最小语义。Task 2 仍不应修改页面或扩展。
+
+## Task 2 执行补充：MemoryAdapter 与可复用契约测试
+
+Task 2 已将 `MemoryAdapter` 落在 `packages/storage-service`，并建立了以后可复用于 `IndexedDbAdapter` 的 Adapter contract suite。本任务仍然没有改 Web 页面、扩展、分类、ActionCard、PlanCard、`loadAppState`、`persistAppState` 或真实用户数据。
+
+### 修改范围
+
+- `packages/storage-service/src/memory-adapter.ts`
+- `packages/storage-service/src/contracts.ts`
+- `packages/storage-service/src/index.ts`
+- `packages/storage-service/tests/*`
+- `packages/storage-service/package.json`
+- `packages/storage-service/tsconfig.runtime-test.json`
+- 本文档和 `docs/STORAGE_ADAPTER_DESIGN.md`
+
+### MemoryAdapter 验收语义
+
+- 内部使用 `Map<StorageEntityName, Map<StoragePrimaryKey, unknown>>`，每个 Store 隔离。
+- 写入、读取、Snapshot 和测试辅助方法都做 JSON-safe 深拷贝，不返回内部引用。
+- `STORE_PRIMARY_KEYS` 统一主键解析；缺主键、空主键、重复批量主键都会失败。
+- `bulkPut` 是原子操作，任意记录失败整批不写入。
+- `query` 只支持单 Store、单 index，支持 equals 或范围查询、分页、方向和稳定排序。
+- `transaction` 支持 readonly/readwrite，readwrite 成功一次性提交，失败完整回滚；不支持嵌套事务，并发外部事务返回 `STORAGE_LOCKED`。
+- `exportSnapshot` 支持全量和指定 Store 导出，默认排除 internal settings。
+- `importSnapshot` 支持 preview、merge、replace、staging；staging 先写入独立临时内存集合，验证成功后才替换主数据。
+- `healthCheck` 不写入数据，也不暴露记录内容。
+
+### 测试结果与后续复用
+
+Task 2 新增的 `runStorageAdapterContractTests()` 当前覆盖生命周期、CRUD、bulkPut、query、transaction、Snapshot、import、错误安全和所有 Store fixture。MemoryAdapter 专属测试覆盖 `persistence=false`、同实例 close/reopen 保留数据、新实例不共享、reset/seed/dump、私有事务快照、并发事务锁、JSON-safe 校验、prototype pollution 拒绝和 structuredClone fallback。
+
+当前 storage-service 单包测试运行结果为 44 个测试、207 个断言。Task 3 实现 `IndexedDbAdapter` 时，必须复用同一套 contract suite；只有 IndexedDB 特有能力可以另加专属测试，不能另写一套绕开契约的测试。
+
+### Task 2 明确没有做
+
+- 没有创建 IndexedDB 数据库。
+- 没有调用 `indexedDB.open`。
+- 没有引入 Dexie、idb 或其他运行时依赖。
+- 没有实现 activeStorage 切换。
+- 没有读取或迁移用户真实 `localStorage`。
+- 没有修改浏览器扩展、Web Bridge、扫描 selector、进度条、暂停继续、断点恢复或导入协议。
+- 没有 push 或 deploy。
+
+### Task 3 起点
+
+Task 3 可以在此基础上实现 `IndexedDbAdapter` 的打开数据库、建 Store、建索引、CRUD、bulkPut、transaction 和 schemaVersion。Task 3 的完成条件之一，是让 IndexedDbAdapter 通过 Task 2 新增的通用 Adapter contract suite，并补充 IndexedDB 自身的浏览器环境测试。

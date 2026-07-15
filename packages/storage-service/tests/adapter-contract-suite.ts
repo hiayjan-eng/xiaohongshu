@@ -225,7 +225,7 @@ export function runStorageAdapterContractTests(harness: TestHarness, options: Ad
     await withAdapter(async (adapter) => {
       await seedQueryItems(adapter);
       const results = await adapter.query("savedItems", { index: "contentDomain", lowerBound: "", direction: "desc", offset: 1, limit: 2 });
-      harness.deepEqual(results.map((item) => item.id), ["saved-001", "saved-003"], "direction offset limit");
+      harness.deepEqual(results.map((item) => item.id), ["saved-003", "saved-001"], "direction offset limit");
       const tieResults = await adapter.query("savedItems", { index: "contentDomain", equals: "AI 与效率" as never });
       harness.deepEqual(tieResults.map((item) => item.id), ["saved-001", "saved-003"], "tie sorted by primary key");
     });

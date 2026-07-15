@@ -91,7 +91,7 @@ export function runMemoryAdapterSpecificTests(harness: TestHarness): void {
     await expectStorageError(
       harness,
       () => adapter.transaction(["savedItems"], "readwrite", async () => undefined),
-      "STORAGE_NOT_SUPPORTED",
+      "STORAGE_LOCKED",
       "concurrent transaction"
     );
     release();
