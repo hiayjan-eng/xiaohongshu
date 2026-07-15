@@ -126,7 +126,7 @@ export interface StorageIndexMap {
   planCards: "id" | "savedItemId" | "actionCardId" | "plannedDate" | "status";
   classificationCorrections: "id" | "savedItemId" | "createdAt";
   searchLogs: "id" | "createdAt";
-  settings: "id" | "key";
+  settings: "id" | "key" | "category" | "internal" | "updatedAt";
   migrationMetadata: "id" | "status" | "createdAt";
   backups: "id" | "createdAt" | "sourceStorage" | "sourceSchemaVersion";
 }
@@ -143,7 +143,7 @@ export const STORAGE_INDEXES: { readonly [K in StorageEntityName]: readonly Stor
   planCards: ["id", "savedItemId", "actionCardId", "plannedDate", "status"],
   classificationCorrections: ["id", "savedItemId", "createdAt"],
   searchLogs: ["id", "createdAt"],
-  settings: ["id", "key"],
+  settings: ["id", "key", "category", "internal", "updatedAt"],
   migrationMetadata: ["id", "status", "createdAt"],
   backups: ["id", "createdAt", "sourceStorage", "sourceSchemaVersion"]
 };
