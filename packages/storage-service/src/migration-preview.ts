@@ -1076,13 +1076,21 @@ function compareById<K extends StorageEntityName>(
     if (normalized.length > 0) addPreservationCheck(context, store, "collection", "records", "cannot_verify");
     return;
   }
-  const normalizedById = new Map(normalized.map((record) => [String(getPrimaryKey(store, record)), record as unknown as Record<string, unknown>]));
+  const normalizedById = new Map<string, Record<string, unknown>>();
+  for (const record of normalized) {
+    try {
+      normalizedById.set(String(getPrimaryKey(store, record)), record as unknown as Record<string, unknown>);
+    } catch {
+      // Invalid normalized records are reported by validateRecord; preservation checks
+      // should keep producing a preview instead of throwing.
+    }
+  }
   for (const rawRecord of rawValue) {
     if (!isPlainRecord(rawRecord) || (typeof rawRecord.id !== "string" && typeof rawRecord.id !== "number")) continue;
     const recordId = rawRecord.id;
     const target = normalizedById.get(String(recordId));
     if (!target) {
-      addPreservationCheck(context, store, recordId, "record", "cannot_verify");
+      addPreservationCheck(context, store, recordId, "record", "failed", Object.values(codes)[0]);
       continue;
     }
     for (const field of fields) {
