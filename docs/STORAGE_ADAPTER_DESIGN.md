@@ -395,3 +395,13 @@ Snapshot import 支持 `preview`、`merge`、`replace`、`staging`。其中 `pre
 可复用测试入口已经扩展为同时覆盖 MemoryAdapter 和 IndexedDbAdapter。`runStorageAdapterContractTests()` 仍是底层适配器必须通过的通用契约；IndexedDbAdapter 额外补充 schema、keyPath、index、persistence、versionchange、blocked、VersionError、多 store transaction、Snapshot internal settings、staging 污染保护等专属测试。Task 3 当前 storage-service 单包测试结果为 88 tests / 468 assertions passed。
 
 Task 4 的边界保持不变：只做 raw localStorage snapshot 和备份导出，不调用会自动写 demo 的 `loadAppState`，不切 activeStorage。Task 5 再做 migration preview / validator，Task 6 才做迁移执行、断点恢复、多标签 writer lock 和正式回滚。
+
+## Task 6 补充：MigrationExecutor 仍是库能力
+
+Task 6 在 `packages/storage-service` 内新增迁移执行层，但它没有接入 Web 启动流程，也没有改变默认存储。新增能力包括 `MigrationExecutor`、`MemoryMigrationLockProvider`、`WebLocksMigrationLockProvider`、`MigrationExecutionMetadataRecord` 和 `MigrationExecutionError`。执行器只消费 Task 4 的 `LegacyBackupEnvelope` 与 Task 5 的 `MigrationPreviewReport/MigrationPlan`，并要求调用方传入 `userConfirmed = true`，所以不会在页面打开时静默迁移。
+
+执行器不会自己读取 `localStorage`，不会调用 `loadAppState`、`persistAppState`、`LegacyLocalStorageSnapshotReader` 或 `createBrowserReadonlyStorage`，也不会实例化正式 IndexedDB。它只写入显式传入的 target adapter；当前测试覆盖了 MemoryAdapter 和 fake-indexeddb 注入的 IndexedDbAdapter。
+
+写入边界是：允许写入 target adapter 的 `backups`、`migrationMetadata` 和计划中的业务 stores；禁止写旧 localStorage、禁止写 `chrome.storage.local`、禁止切换 `activeStorage`。初次执行要求目标业务 stores 为空；失败恢复时根据 checkpoint、数量和 checksum 判断哪些 store 可跳过、验证或继续写入。`backups` store 保存 normalized Snapshot，并把 raw backup 作为扩展字段保留给后续检查。
+
+Task 6 的 rollback 只在 `activeStorageSwitched = false` 时允许。它会清空本次迁移写入的业务 stores，保留 `backups` 和 `migrationMetadata` 作为审计证据。真正的 activeStorage 切换、设置页入口、多标签页 UI 锁定和生产数据迁移仍属于后续任务。
