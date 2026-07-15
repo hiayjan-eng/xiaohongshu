@@ -26,6 +26,7 @@ export * from "./errors";
 export * from "./indexeddb-adapter";
 export * from "./legacy-localstorage-snapshot";
 export * from "./memory-adapter";
+export * from "./migration-preview";
 export * from "./repositories";
 
 export interface AchievementRecord {
