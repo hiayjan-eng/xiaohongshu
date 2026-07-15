@@ -29,6 +29,20 @@ export const STORAGE_ENTITY_NAMES = [
 export type StorageEntityName = (typeof STORAGE_ENTITY_NAMES)[number];
 export type StoragePrimaryKey = string | number;
 
+export const STORE_PRIMARY_KEYS = {
+  savedItems: "id",
+  importBatches: "id",
+  importBatchItems: "id",
+  smartAlbums: "id",
+  actionCards: "id",
+  planCards: "id",
+  classificationCorrections: "id",
+  searchLogs: "id",
+  settings: "key",
+  migrationMetadata: "id",
+  backups: "id"
+} as const satisfies Record<StorageEntityName, string>;
+
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
 
@@ -211,7 +225,7 @@ export const INDEXED_DB_TARGET_CAPABILITIES: StorageCapabilities = {
 };
 
 export const MEMORY_TARGET_CAPABILITIES: StorageCapabilities = {
-  transactions: false,
+  transactions: true,
   indexes: true,
   snapshots: true,
   rollback: true,
