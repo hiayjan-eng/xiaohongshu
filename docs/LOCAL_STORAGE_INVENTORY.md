@@ -1,5 +1,20 @@
 # localStorage 使用盘点
 
+## Task 4 实施更新：真实 key 与备份边界
+
+本轮只通过仓库代码审计确认 Web `localStorage` 结构，没有读取用户真实浏览器数据。Task 4 已在 `packages/storage-service` 内实现只读 `LegacyLocalStorageSnapshotReader`，它通过显式注入的 `ReadonlyStorageLike` 读取 allowlist key，不调用 `loadAppState`，因此不会触发缺失/损坏状态下的 demo fallback，也不会写入、删除或修复任何旧数据。
+
+| key | 用途 | 数据格式 | 是否默认备份 | 是否进入标准 Snapshot | 是否可重建 | 风险 |
+|---|---|---|---|---|---|---|
+| `collection-revival-system:v1` | Web 主产品状态 | `AppState` JSON，包含 `savedItems`、`importBatches`、`importBatchItems`、`smartAlbums`、`actionCards`、`planCards`、`classificationCorrections`、`searchLogs` 等 | 是 | 是，映射到对应 StorageSnapshot stores | 部分派生字段可重建，但用户备注、手动标题、分类纠正、批次历史、计划状态不可重建 | `loadAppState` 在缺失或 JSON 损坏时会写 demo，因此备份和迁移必须绕开它直接读 raw string |
+| `collection-revival-theme` | 用户主题选择 | 主题 preset id 字符串 | 是 | 是，映射为 `settings.theme` | 可回到默认主题，但用户选择会丢 | 独立于主 AppState，容易漏备份 |
+| `collection-revival-achievements` | 成就解锁记录 | `{ [achievementId]: unlockedAt }` JSON | 是 | 是，映射为 `settings.achievements` | 不能完整恢复原始解锁时间 | JSON 损坏时 raw backup 仍保留，normalized setting 会跳过并报告 |
+| `developerMode` | 内部开发入口开关 | `"true"` / `"false"` | 否，`includeInternal=true` 时才读 | 仅 opt-in 时映射为 internal setting | 可重建为默认 false | 不进入普通用户默认备份 |
+| `collection-revival-real-user-tests:v1` | 真实试用记录 | `RealUserTestRecord[]` JSON | 否 | Task 4 不映射到 normalized Snapshot | 评价内容不可重建，但按当前边界仍归为测试/反馈数据 | 只有 opt-in raw backup 才读取，避免普通备份混入测试内容 |
+| `collection-revival-system:qa-write-test` | QA 写入探针 | 临时字符串，写后即删 | 否 | 否 | 可重建 | 无业务价值 |
+
+默认备份只包含主 AppState、主题和成就。unknown key 只记录 key 名，不读取 value；看起来像 API key、cookie、token、secret 的 key 即使 opt-in 也不会读取。扩展的 `chrome.storage.local` 断点、进度和 bridge 状态不属于 Web StorageAdapter，也不进入 Task 4 raw backup。
+
 本盘点只基于仓库代码，不读取、不修改用户真实浏览器数据。当前 Web 端核心状态仍然通过一个大对象写入 `localStorage`，扩展侧则通过 `chrome.storage.local` 保存扫描运行状态和断点。Phase 1 的关键不是简单替换 API，而是先保护这些真实数据，再把 Web 主状态迁移到可扩展的 IndexedDB。
 
 ## localStorage key 总览
