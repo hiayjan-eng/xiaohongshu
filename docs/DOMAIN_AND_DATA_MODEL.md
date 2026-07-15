@@ -11,6 +11,21 @@
 
 原则是原始数据尽量保留，派生数据可以重算，用户手动数据不可被自动覆盖。当前代码已有 `APP_SCHEMA_VERSION = 3` 和 `STORAGE_KEY = collection-revival-system:v1`，后续迁移必须继续显式记录 schemaVersion。
 
+## Task 5 补充：迁移预览模型
+
+Task 5 新增的模型不属于业务页面实体，也不会进入当前 production 运行时。它们是 Phase 1 数据底座迁移前的审计模型，用来保护用户真实 localStorage 数据：
+
+- `MigrationIssue`：迁移预览中的结构化问题，包含 `code`、`severity`、`scope`、`store`、`recordId`、`field`、`message`、`userMessage`、`recoverable` 和 `requiresManualReview`。`severity` 分为 `blocking`、`warning`、`info`。
+- `MigrationStorePreview`：每个 store 的数量、无效记录、重复主键、同源重复、断裂引用、人工确认数量和计划写入数量。
+- `DataPreservationCheck`：验证用户不可丢失字段是否被 normalized Snapshot 原样保留，例如 `userNote`、`userEditedTitle`、`sourceUrl`、分类纠正、专辑状态、行动卡内容和计划状态。
+- `MigrationDuplicateGroup`：记录同一 `sourceItemId`、normalized URL 或主键相关的重复组，只保存 fingerprint 和 record id，不暴露完整 URL token。
+- `MigrationBrokenReference`：记录跨实体断裂引用及其是否必需。
+- `MigrationPlan`：只读计划，记录每条数据在 Task 6 中应 `create`、`skip`、`conflict` 或进入 `manual_review`。Task 5 不执行这些操作。
+- `MigrationPreviewReport`：完整预览报告，是后续设置页 UI 和 Task 6 executor 的输入。
+- `MigrationReport`：从 preview 压缩出的可保存报告摘要，用于记录本轮是否 blocked、是否 review_required，以及 source/planned counts。
+
+这些模型坚持“预览和执行分离”。Task 5 可以比较目标 adapter 中已有数据，但只能用只读 `getAll`，不能写入、覆盖或清空任何 store。Task 6 才能在用户确认后进入 writer lock、staging 写入、校验和回滚流程。
+
 ## 2. SavedItem
 
 当前状态：`packages/shared-types/src/index.ts` 已包含 SavedItem，并支持内容主题、收藏用途、置信度、证据、清洗标题和搜索字段。
