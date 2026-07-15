@@ -273,3 +273,21 @@ v1 object stores、keyPath 和索引如下，以 `contracts.ts` 的 `STORAGE_ENT
 Task 6 没有新增 v1 object store，也没有改变 keyPath 或 index。迁移执行器会在既有 `migrationMetadata` store 中保存 `MigrationExecutionMetadataRecord`，它在基础 `MigrationMetadata` 之上增加执行期字段：`executionStatus`、`previewId`、`backupRecordId`、`sourceSnapshotChecksum`、`activeStorageSwitched`、`rollbackAvailable`、`resumeCount`、`checkpoints`、`writtenCounts`、`verifiedCounts`、`expectedChecksums`、`targetChecksums` 和 `lastCheckpointAt`。这些字段都是 JSON-safe，写入前会清理 `undefined`。
 
 `backups` store 仍使用 keyPath `id`。Task 6 写入的备份记录保留标准 `StorageBackup.snapshot`，并以扩展字段保存 `rawBackup`、`checksums` 和读取报告，目的是让回滚和后续审计能看到 Task 4 的原始证据链。它不代表已切换 activeStorage，也不会删除旧 localStorage。
+## Task 6.1 Backup Record Extensions
+
+The `backups` object store still uses keyPath `id`, but Task 6.1 treats records as immutable migration evidence. A migration backup record keeps the standard `StorageBackup` fields and adds:
+
+- `backupId`
+- `sourceBackupId`
+- `migrationId`
+- `serializedEnvelope`
+- `byteLength`
+- `immutable: true`
+- `verifiedAt`
+- `rawChecksum`
+- `normalizedChecksum`
+- `rawBackup`
+- `checksums`
+- `report`
+
+The primary checksum on the backup record is the SHA-256 of `serializedEnvelope`. The executor compares existing backup records inside a `backups` readwrite transaction. Same id and same immutable content may be reused; same id with different serialized content, checksum, byte length, migration id, or backup id blocks execution. The executor does not add extension data, browser bridge state, cookies, API keys, or chrome.storage.local content to this store.
