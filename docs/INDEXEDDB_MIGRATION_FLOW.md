@@ -1,5 +1,21 @@
 # IndexedDB 零丢失迁移流程
 
+## Task 4 实施更新：备份输入阶段
+
+Task 4 已补齐迁移流程的“只读输入”能力，但仍未开始迁移。迁移状态机里的 `snapshot_created` 现在应理解为：通过 `LegacyLocalStorageSnapshotReader` 读取显式 allowlist key，生成 `LegacyBackupEnvelope`，其中同时包含 raw backup、可选 normalized `StorageSnapshot`、SHA-256 checksum 和结构化 read report。
+
+这一阶段的约束如下：
+
+- 不调用 `loadAppState`，因为它在主 key 缺失或 JSON 解析失败时会写入 demo 数据。
+- 不自动修复旧扫描文本，不重新分类，不重新生成专辑、行动卡或计划卡。
+- 不写 IndexedDB，不写 localStorage，不写 `backups` store，也不修改 `activeStorage`。
+- raw backup 即使 AppState JSON 损坏也能生成；normalized Snapshot 只有在 AppState 可解析且基础结构可映射时才存在。
+- checksum 分 raw 与 normalized 两类，使用 canonical JSON 和 Web Crypto SHA-256；checksum 不可用时保留 backup，并记录 warning。
+- unknown localStorage key 只记录 key 名，不读取 value；敏感 key 永远排除。
+- 扩展 `chrome.storage.local` 的 scan checkpoint、progress、bridge state 不进入 Web backup。
+
+Task 5 会消费 Task 4 的 raw backup 和 normalized Snapshot，完成迁移预览与验证器，包括引用完整性、重复处理、迁移可执行性、blocking error / warning 分级和 MigrationReport。Task 6 才执行真实写入、断点恢复、迁移锁和回滚；Task 7 才把导出按钮和迁移入口接入设置页 UI。
+
 迁移的首要原则是：不能在用户打开页面时静默执行，不能删除旧 localStorage，不能覆盖用户手动整理结果。Phase 1 迁移只负责把当前浏览器里的 Web 数据从 localStorage 安全搬到 IndexedDB，并为失败回滚提供证据链。扩展断点仍留在 `chrome.storage.local`，文本修复仍是独立操作。
 
 ## 迁移状态机
