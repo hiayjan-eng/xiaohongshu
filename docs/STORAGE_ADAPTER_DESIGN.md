@@ -15,6 +15,24 @@ Task 4 没有把 IndexedDB 接入产品运行时，也没有修改 `LocalStorage
 
 Raw backup 和标准 `StorageSnapshot` 的边界必须保持清楚：raw backup 是零损失留存旧 key/value 字符串的证据链，`StorageSnapshot` 是后续 Task 5/Task 6 用来验证和写入目标 adapter 的标准数据交换格式。Task 4 不负责引用完整性阻断、URL 去重策略、迁移预览 UI、activeStorage 切换或回滚执行。
 
+## Task 5 实施更新：Migration Preview 层
+
+Task 5 在 storage-service 内新增 `migration-preview.ts`。它不是新的 adapter，也不替代 `MemoryAdapter` 或 `IndexedDbAdapter`；它位于 backup/snapshot 与后续 migration executor 之间，负责把 Task 4 的 `LegacyBackupEnvelope` 转成可审查的迁移预览和计划。
+
+职责边界：
+
+- 读取输入：只接收已构造好的 `LegacyBackupEnvelope`，不直接访问浏览器 `localStorage`。
+- 源校验：验证 envelope 格式、raw/normalized checksum、snapshot 版本、counts、store 名称和 JSON-safe 结构。
+- 记录校验：按 store 检查主键、日期、状态、必要数组、必要文本字段和 JSON-safe 结构。
+- 冲突分析：识别重复主键、`sourceItemId` 重复、normalized URL 重复、目标 adapter 中完全相同记录和同主键冲突。
+- 引用校验：检查 `ImportBatchItem -> ImportBatch/SavedItem`、`SmartAlbum -> SavedItem`、`ActionCard -> SavedItem`、`PlanCard -> SavedItem/ActionCard`、`ClassificationCorrection -> SavedItem`。
+- 保留校验：保护用户备注、手动标题、sourceUrl、分类字段、分类纠正、专辑状态和手动成员、行动卡内容、计划卡状态、主题和成就设置。
+- 计划生成：为每条记录生成 `create`、`skip`、`conflict` 或 `manual_review` 操作。Task 5 不生成覆盖式 `update`。
+
+`MigrationIssue` 使用 `blocking`、`warning`、`info` 三档。`blocking` 表示 Task 6 不能执行；`warning` 表示必须展示给用户确认；`info` 用于解释可重建数据或默认排除数据。issue message 会做安全清洗，不输出完整 token URL、用户备注、收藏正文、Cookie、API Key 或凭证。
+
+`MigrationPreviewReport` 是 UI 和 Task 6 的共同输入，但它仍然只是预览。Task 5 不创建 writer lock，不写 `migrationMetadata`，不执行 `IndexedDbAdapter.importSnapshot`，不切换 `activeStorage`，不创建下载，也不修改任何业务页面。后续 Task 6 必须重新读取并校验 report/plan，不能盲信旧 preview。
+
 当前 `packages/storage-service` 已经有 `StorageAdapter`、`LocalStorageAdapter` 和被阻塞的 `SupabaseAdapter`，但它仍然是按实体方法封装，并且底层继续读写一个整体 AppState JSON。Phase 1 需要把它升级成真正的本地数据访问层，同时避免一轮内重写所有页面和业务 service。
 
 设计目标是：UI 不再直接调用 localStorage；页面通过 repository / service 层访问数据；旧 localStorage 只作为迁移源和回滚源；IndexedDB 成为 Phase 1 主存储；Supabase 继续占位，直到真实项目、Auth 和 RLS 都准备好。
