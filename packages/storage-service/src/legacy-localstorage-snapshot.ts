@@ -219,7 +219,7 @@ export class LegacyLocalStorageSnapshotReader {
     const createdAt = this.now().toISOString();
     const issues: LegacySnapshotIssue[] = [];
     const discoveredKeys = discoverStorageKeys(this.storage, issues);
-    const knownKeySet = new Set(LEGACY_PRODUCT_STORAGE_KEYS.map((definition) => definition.key));
+    const knownKeySet = new Set<string>(LEGACY_PRODUCT_STORAGE_KEYS.map((definition) => definition.key));
     const unknownKeys = discoveredKeys.filter((key) => !knownKeySet.has(key));
     const rawRecords: Record<string, string | null> = {};
     const includedKeys: string[] = [];
@@ -762,7 +762,7 @@ function prepareLegacyRecord<K extends StorageEntityName>(
     return undefined;
   }
   try {
-    return cloneJsonSafe(record, storageJsonOptions("STORAGE_VALIDATION_FAILED")) as StorageRecordMap[K];
+    return cloneJsonSafe(record, storageJsonOptions("STORAGE_VALIDATION_FAILED")) as unknown as StorageRecordMap[K];
   } catch {
     context.skippedCounts[store] = (context.skippedCounts[store] ?? 0) + 1;
     context.issues.push(createIssue({
@@ -864,7 +864,7 @@ function addRecords<K extends StorageEntityName>(
 ): void {
   counts[store] = values.length;
   if (values.length > 0) {
-    records[store] = values;
+    (records as Record<string, unknown>)[store] = values;
   }
 }
 
@@ -1006,7 +1006,7 @@ function validateSnapshotStructure(snapshot: StorageSnapshot, issues: LegacySnap
 
 function getLegacyPrimaryKey<K extends StorageEntityName>(store: K, value: StorageRecordMap[K]): StoragePrimaryKey {
   const keyField = STORE_PRIMARY_KEYS[store];
-  const id = (value as Record<string, unknown>)[keyField];
+  const id = (value as unknown as Record<string, unknown>)[keyField];
   if ((typeof id !== "string" && typeof id !== "number") || id === "") {
     throw new StorageError({
       adapter: "localStorage",
