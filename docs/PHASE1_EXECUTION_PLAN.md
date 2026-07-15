@@ -231,3 +231,36 @@ Task 2 新增的 `runStorageAdapterContractTests()` 当前覆盖生命周期、C
 ### Task 3 起点
 
 Task 3 可以在此基础上实现 `IndexedDbAdapter` 的打开数据库、建 Store、建索引、CRUD、bulkPut、transaction 和 schemaVersion。Task 3 的完成条件之一，是让 IndexedDbAdapter 通过 Task 2 新增的通用 Adapter contract suite，并补充 IndexedDB 自身的浏览器环境测试。
+## Task 3 执行补充：IndexedDbAdapter 和 contract suite 复用
+
+Task 3 已将 `IndexedDbAdapter` 落在 `packages/storage-service/src/indexeddb-adapter.ts`。本任务只验证底层 adapter 能力，没有修改 `apps/`、页面、扩展、分类、ActionCard、PlanCard、`loadAppState`、`persistAppState` 或 activeStorage。它也没有读取、写入或迁移用户真实 localStorage。
+
+本轮新增 `fake-indexeddb` 作为 `@revival/storage-service` 的 devDependency，用于 Node 单元测试中模拟浏览器 IndexedDB。它不是运行时依赖，正式 adapter 源码不 import 它，也没有引入 Dexie、`idb` 或其他 IndexedDB 封装库。
+
+### Task 3 实际完成范围
+
+- `IndexedDbAdapter` 实现 `StorageAdapter` 契约，`kind = "indexedDB"`。
+- 数据库名称定稿为 `collection-revival-local`，schemaVersion 为 `1`。
+- 创建 11 个 v1 object stores，并按 `STORE_PRIMARY_KEYS` 设置 keyPath。
+- 为每个 store 创建 `STORAGE_INDEXES` 声明的 indexes，具体 keyPath 见 `INDEXED_DB_INDEX_KEY_PATHS`。
+- `open()` 支持 `onupgradeneeded`、`onblocked`、`onversionchange` 和 schemaVersion 错误映射。
+- `close()` 只关闭连接，不删除数据库；同名 database reopen 后数据保留。
+- CRUD、`bulkPut`、单索引 `query`、多 store transaction、Snapshot export、`preview/merge/replace/staging` import 均已实现。
+- `bulkPut` 和 readwrite transaction 使用原子语义，失败不会产生半写入。
+- `staging` import 使用 MemoryAdapter 做预验证，再用单个 IndexedDB 多 store readwrite transaction 写入目标 store；不创建额外 staging stores，不切 activeStorage。
+- `runStorageAdapterContractTests()` 已复用于 IndexedDbAdapter，并保留 MemoryAdapter 测试。
+- IndexedDB 专属测试覆盖 schema、keyPath、index、persistence、database isolation、versionchange、blocked、VersionError、bulk rollback、multi-store rollback、healthCheck、internal settings、staging pollution protection。
+
+### Task 3 明确没有做
+
+- 没有把产品默认存储切到 IndexedDB。
+- 没有修改 Web 页面、路由、UI 或扩展。
+- 没有执行 localStorage snapshot、备份、迁移或回滚。
+- 没有双写 localStorage 和 IndexedDB。
+- 没有创建迁移 UI。
+- 没有接 Supabase、登录、云同步、真实 AI、App 或 PWA。
+- 没有部署 production。
+
+### 对后续任务的影响
+
+Task 4 现在可以基于稳定的 adapter contract 做只读 localStorage snapshot 和备份导出。Task 4 仍然不能调用会自动写 demo 数据的 `loadAppState`，也不能将 Snapshot 导入 IndexedDB。Task 5 可以复用 IndexedDbAdapter 和 MemoryAdapter 的 import/transaction 行为来做 migration preview 和引用校验。Task 6 才允许讨论真实迁移执行、activeStorage 切换、多标签 writer lock、失败回滚和设置页接入。
