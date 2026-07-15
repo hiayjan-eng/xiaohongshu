@@ -240,3 +240,30 @@ Task 6 已把迁移状态机中的执行段落落到 `packages/storage-service/s
 回滚只在 `activeStorageSwitched = false` 时允许。它按业务 store 逆序清空本次迁移写入的数据，并保留 `backups` 与 `migrationMetadata`，方便后续导出报告或人工排查。回滚不是删除旧 localStorage，也不是把 IndexedDB 切回 localStorage；真正的 activeStorage 标识切换和设置页恢复入口仍留到后续 Task。
 
 单写入者锁当前提供两个实现：`MemoryMigrationLockProvider` 用于单元测试和库级验证，`WebLocksMigrationLockProvider` 用于后续浏览器环境接入时的独占语义。Task 6 没有实现 localStorage 锁、BroadcastChannel UI 通知或多标签页设置页锁定，这些属于接入层任务。
+## Task 6.1 Hardened Execution Flow
+
+Task 6.1 keeps execution as a library capability only. It still does not run on page load, does not read real user localStorage by itself, does not mutate legacy localStorage, and does not switch `activeStorage`.
+
+The execution order is now locked to:
+
+1. Acquire the migration writer lock.
+2. Open and health-check the explicit target adapter.
+3. Compare target schemaVersion across preview, plan, expected option, and actual adapter.
+4. Scan all `migrationMetadata` and block if another unresolved migration exists.
+5. Confirm target business stores are empty.
+6. Validate the normalized snapshot through staging.
+7. Strictly verify the legacy backup envelope.
+8. Serialize the envelope and compute SHA-256.
+9. Create or reuse an immutable backup in a single `backups` readwrite transaction.
+10. Read the backup back, recompute SHA-256, parse it, and verify the parsed envelope.
+11. Mark backup `verifiedAt`.
+12. Write execution metadata.
+13. Write business stores in fixed order.
+14. Verify each store by count and SHA-256.
+15. Run final semantic verification for references and user-preserved fields.
+16. Run final physical verification.
+17. Mark completed without switching `activeStorage`.
+
+Resume rereads the persisted backup, verifies immutable fields, byte length, serialized envelope SHA-256, parsed envelope, and source checksum alignment before continuing from checkpoints. Rollback can be retried after `rollback_failed`; already-cleared stores remain empty, remaining stores continue clearing, and backup/metadata are retained.
+
+Task 7B must use Web Locks for IndexedDB. If Web Locks are unavailable, the UI must block migration instead of falling back to memory or localStorage locks.
