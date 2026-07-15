@@ -58,6 +58,10 @@ The page is covered at 1440x900, 1280x800, 768x1024, 390x844, and 360x800. It ha
 - Total Task 7A tests: 21.
 - Existing Web E2E baseline: 39 tests; Task 7A raises the full suite to 60 tests.
 
+The first full run had one timeout in the pre-existing mobile dashboard action-card helper while the other 59 tests passed. The failed test passed when rerun alone, and the required second full `pnpm check` completed with all 60 tests passing. No dashboard or ActionCard code was changed for this flaky result.
+
+An additional live-browser check loaded `/settings/data-migration` directly with HTTP 200, found the initial primary action, confirmed no horizontal overflow at 1440px, completed an inspection, and verified that refresh returned to `idle` without console or failed-resource errors.
+
 Screenshot output directory:
 
 `apps/web/test-results/task7a-migration-preview/`
