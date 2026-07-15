@@ -11,5 +11,8 @@
   },
   "dependencies": {
     "@revival/shared-types": "workspace:*"
+  },
+  "devDependencies": {
+    "fake-indexeddb": "^6.2.5"
   }
 }
