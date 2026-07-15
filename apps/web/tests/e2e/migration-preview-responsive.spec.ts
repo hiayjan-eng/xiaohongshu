@@ -11,9 +11,12 @@ for (const viewport of [
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
     await page.goto("/settings/data-migration");
     await expect(page.getByRole("heading", { name: "升级本地数据存储" })).toBeVisible();
-    await expect(page.getByTestId("start-migration-inspection")).toBeVisible();
+    const startButton = page.getByTestId("start-migration-inspection");
+    await expect(startButton).toBeVisible();
+    const startButtonBox = await startButton.boundingBox();
+    expect(startButtonBox && startButtonBox.y + startButtonBox.height <= viewport.height).toBe(true);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 2)).toBe(true);
-    await page.getByTestId("start-migration-inspection").click();
+    await startButton.click();
     await expect(page.getByTestId("migration-preview-step")).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 2)).toBe(true);
     await page.getByTestId("open-backup-step").click();
