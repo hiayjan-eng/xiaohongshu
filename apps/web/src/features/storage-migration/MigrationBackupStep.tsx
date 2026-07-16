@@ -3,13 +3,23 @@ import type { PreparedLegacyBackupDownload, MigrationUiError } from "./migration
 
 interface MigrationBackupStepProps {
   downloaded: boolean;
+  canContinue: boolean;
   filename?: string;
   error?: MigrationUiError;
   onDownload: () => void;
   onBackToPreview: () => void;
+  onContinue: () => void;
 }
 
-export function MigrationBackupStep({ downloaded, filename, error, onDownload, onBackToPreview }: MigrationBackupStepProps) {
+export function MigrationBackupStep({
+  downloaded,
+  canContinue,
+  filename,
+  error,
+  onDownload,
+  onBackToPreview,
+  onContinue
+}: MigrationBackupStepProps) {
   return (
     <section className="migration-stage-card migration-backup" data-testid="migration-backup-step">
       <div className="migration-stage-heading">
@@ -49,7 +59,25 @@ export function MigrationBackupStep({ downloaded, filename, error, onDownload, o
         <button className="migration-text-button" type="button" onClick={onBackToPreview}><RotateCcw size={16} />返回检查结果</button>
       </div>
 
-      <p className="migration-next-stage-note">下一阶段将在完成执行安全接入后开放。目前不会写入新存储。</p>
+      <div className="migration-confirmation-gate">
+        <button
+          className="primary-button"
+          type="button"
+          onClick={onContinue}
+          disabled={!downloaded || !canContinue}
+          aria-describedby="migration-backup-gate-reason"
+          data-testid="continue-to-migration-confirmation"
+        >
+          继续：最后确认
+        </button>
+        <p id="migration-backup-gate-reason">
+          {!downloaded
+            ? "请先下载并保存原始备份。"
+            : canContinue
+              ? "请先确认浏览器下载列表中已经出现备份文件。"
+              : "当前检查结果仍需处理，暂时不能开始升级。"}
+        </p>
+      </div>
     </section>
   );
 }
