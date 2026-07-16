@@ -33,7 +33,13 @@ export function migrationPreviewReducer(
       return { ...initialMigrationPreviewUiState, status: "inspection_failed", safeError: action.error, technicalErrorCode: action.error.code };
     case "OPEN_BACKUP":
       if (!isPreviewStatus(state.status) || !state.data?.rawBackupAvailable) return state;
-      return { ...state, status: "backup_ready", currentStep: 3, previewStatus: state.status, downloadError: undefined };
+      return {
+        ...state,
+        status: state.filename ? "backup_downloaded" : "backup_ready",
+        currentStep: 3,
+        previewStatus: state.status,
+        downloadError: undefined
+      };
     case "BACK_TO_PREVIEW":
       if ((state.status !== "backup_ready" && state.status !== "backup_downloaded") || !state.previewStatus) return state;
       return { ...state, status: state.previewStatus, currentStep: 2, downloadError: undefined };
