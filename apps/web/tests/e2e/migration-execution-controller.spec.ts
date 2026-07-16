@@ -18,7 +18,12 @@ import {
   type MigrationControllerLifecycleEvent
 } from "../../src/features/storage-migration/migration-flow-controller";
 import type { MigrationExecutionRuntime } from "../../src/features/storage-migration/migration-execution-runtime";
+import {
+  MIGRATION_TARGET_DATABASE_NAME,
+  MIGRATION_TARGET_SCHEMA_VERSION
+} from "../../src/features/storage-migration/migration-execution-runtime";
 import { calculateMigrationPercent } from "../../src/features/storage-migration/MigrationExecutionStep";
+import { STORAGE_ENTITY_LABELS } from "../../src/features/storage-migration/migration-error-messages";
 import { initialMigrationPreviewUiState, migrationPreviewReducer } from "../../src/features/storage-migration/migration-preview-reducer";
 import { makeMigrationAppState } from "./migration-preview-fixtures";
 
@@ -156,6 +161,26 @@ test.describe("Task 7B migration execution controller", () => {
     expect(control.createTargetCalls).toBe(0);
   });
 
+  test("review-required and blocked inspection results cannot enter confirmation", async () => {
+    const reviewController = new MigrationFlowController(new FakeReadonlyStorage({
+      [LEGACY_APP_STATE_STORAGE_KEY]: JSON.stringify(makeMigrationAppState({ duplicateSource: true })),
+      [LEGACY_THEME_STORAGE_KEY]: "lavender-mint",
+      [LEGACY_ACHIEVEMENT_STORAGE_KEY]: "{}"
+    }), createFakeRuntime().runtime);
+    await reviewController.inspect();
+    reviewController.markBackupDownloadTriggered();
+    expect(reviewController.canEnterConfirmation().ready).toBe(false);
+
+    const blockedController = new MigrationFlowController(new FakeReadonlyStorage({
+      [LEGACY_APP_STATE_STORAGE_KEY]: "{broken-json",
+      [LEGACY_THEME_STORAGE_KEY]: "lavender-mint",
+      [LEGACY_ACHIEVEMENT_STORAGE_KEY]: "{}"
+    }), createFakeRuntime().runtime);
+    await blockedController.inspect();
+    blockedController.markBackupDownloadTriggered();
+    expect(blockedController.canEnterConfirmation().ready).toBe(false);
+  });
+
   test("missing Web Locks stops before IndexedDB creation", async () => {
     const { controller, control } = await prepareReadyController(createFakeRuntime({ locksAvailable: false }));
     await expect(controller.startExecution()).rejects.toMatchObject({ code: "MIGRATION_LOCK_UNAVAILABLE" });
@@ -228,6 +253,24 @@ test.describe("Task 7B migration execution controller", () => {
     expect(calculateMigrationPercent("executing", makeProgress("migration-1", "writing_store", 3, 9))).toBe(35);
     expect(calculateMigrationPercent("verifying", makeProgress("migration-1", "verifying_all", 9, 9))).toBe(95);
     expect(calculateMigrationPercent("completed_not_activated")).toBe(100);
+  });
+
+  test("production constants and Store labels match the Task 7B contract", () => {
+    expect(MIGRATION_TARGET_DATABASE_NAME).toBe("collection-revival-local");
+    expect(MIGRATION_TARGET_SCHEMA_VERSION).toBe(1);
+    expect(STORAGE_ENTITY_LABELS).toEqual({
+      savedItems: "收藏",
+      importBatches: "扫描与导入批次",
+      importBatchItems: "导入明细",
+      smartAlbums: "智能专辑",
+      actionCards: "行动卡",
+      planCards: "计划卡",
+      classificationCorrections: "分类纠正",
+      searchLogs: "搜索记录",
+      settings: "主题与成就",
+      migrationMetadata: "升级记录",
+      backups: "原始备份"
+    });
   });
 });
 
