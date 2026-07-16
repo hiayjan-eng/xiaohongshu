@@ -21,6 +21,7 @@ import "./migration-data-upgrade.css";
 interface MigrationDataUpgradePageProps {
   onBackToSettings: () => void;
   onReturnToImport: () => void;
+  onExecutionActiveChange?: (active: boolean) => void;
 }
 
 const STEPS = ["检查数据", "查看结果", "保存备份", "最后确认", "执行升级"] as const;
@@ -33,7 +34,11 @@ const ACTIVE_EXECUTION_STATES = new Set<MigrationPreviewUiStateName>([
   "verifying"
 ]);
 
-export function MigrationDataUpgradePage({ onBackToSettings, onReturnToImport }: MigrationDataUpgradePageProps) {
+export function MigrationDataUpgradePage({
+  onBackToSettings,
+  onReturnToImport,
+  onExecutionActiveChange
+}: MigrationDataUpgradePageProps) {
   const [state, dispatch] = useReducer(migrationPreviewReducer, initialMigrationPreviewUiState);
   const controllerRef = useRef<MigrationFlowController | null>(null);
   const executionActive = ACTIVE_EXECUTION_STATES.has(state.status);
@@ -48,6 +53,11 @@ export function MigrationDataUpgradePage({ onBackToSettings, onReturnToImport }:
     window.addEventListener("beforeunload", warnBeforeUnload);
     return () => window.removeEventListener("beforeunload", warnBeforeUnload);
   }, [executionActive]);
+
+  useEffect(() => {
+    onExecutionActiveChange?.(executionActive);
+    return () => onExecutionActiveChange?.(false);
+  }, [executionActive, onExecutionActiveChange]);
 
   useEffect(() => {
     if (state.currentStep === 5 || state.status === "execution_failed" || state.status === "cancelled") {
