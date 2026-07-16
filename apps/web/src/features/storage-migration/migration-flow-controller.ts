@@ -175,7 +175,7 @@ export class MigrationFlowController {
     if (!data.sourceValidation.valid || data.preview.summary.totalBlockingIssues > 0) {
       return { ready: false, reason: "当前仍有阻断问题，不能开始升级。" };
     }
-    if (data.preview.summary.totalManualReview > 0 || data.plan.summary.manualReview > 0) {
+    if (data.preview.summary.totalManualReview > 0) {
       return { ready: false, reason: "仍有记录需要人工确认，不能开始升级。" };
     }
     if (!Object.values(this.confirmations).every(Boolean)) {
@@ -223,6 +223,7 @@ export class MigrationFlowController {
     this.executionActive = true;
     this.closeWarning = undefined;
     this.abortController = this.executionRuntime.createAbortController();
+    let completedResult: MigrationExecutionResult | undefined;
     try {
       onLifecycle?.({ type: "opening_target" });
       const targetAdapter = this.executionRuntime.createTargetAdapter();
@@ -274,7 +275,7 @@ export class MigrationFlowController {
           adapter: targetAdapter.kind
         });
       }
-      return { result, closeWarning: this.closeWarning };
+      completedResult = result;
     } finally {
       this.executionActive = false;
       this.abortController = undefined;
@@ -288,6 +289,14 @@ export class MigrationFlowController {
         }
       }
     }
+    if (!completedResult) {
+      throw new MigrationExecutionError({
+        code: "MIGRATION_VERIFY_FAILED",
+        message: "Migration execution did not return a completed result.",
+        recoverable: true
+      });
+    }
+    return { result: completedResult, closeWarning: this.closeWarning };
   }
 
   requestCancellation(): boolean {
