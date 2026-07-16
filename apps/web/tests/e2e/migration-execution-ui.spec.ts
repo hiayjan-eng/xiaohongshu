@@ -24,6 +24,15 @@ const STORE_DEFINITIONS = [
 ] as const;
 
 test.describe("Task 7B migration execution UI", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto("/");
+    await deleteTask7bDatabase(page);
+  });
+
+  test.afterEach(async ({ page }) => {
+    await deleteTask7bDatabase(page);
+  });
+
   test("confirmed data migrates into IndexedDB but remains completed-not-activated", async ({ page }) => {
     await seedMigrationFixture(page);
     const errors = collectConsoleErrors(page);
@@ -53,6 +62,13 @@ test.describe("Task 7B migration execution UI", () => {
     expect(counts.classificationCorrections).toBe(1);
     expect(counts.backups).toBe(1);
     expect(counts.migrationMetadata).toBe(1);
+    const schema = await readIndexedDbSchema(page);
+    expect(schema.version).toBe(1);
+    expect(schema.stores).toEqual(STORE_DEFINITIONS.map(([name]) => name).sort());
+    const metadata = await readStoreRecords(page, "migrationMetadata") as Array<{ activeStorageSwitched?: boolean }>;
+    expect(metadata).toHaveLength(1);
+    expect(metadata[0]?.activeStorageSwitched).toBe(false);
+    expect(await page.evaluate(() => localStorage.getItem("collection-revival-active-storage"))).toBeNull();
     expect(await readLocalStorageSnapshot(page)).toEqual(before);
     const boundary = await readTask7aBoundarySpies(page);
     expect(boundary.setItemCalls).toBe(0);
@@ -148,6 +164,27 @@ test.describe("Task 7B migration execution UI", () => {
     await releaseMigrationWriterLock(page);
   });
 
+  test("a real IndexedDB write failure keeps the backup and metadata without completing", async ({ page }) => {
+    await seedMigrationFixture(page);
+    await page.goto("/settings/data-migration");
+    await createMalformedTarget(page);
+    const before = await readLocalStorageSnapshot(page);
+    await reachConfirmation(page);
+    await checkAllConfirmations(page);
+    await page.getByTestId("start-migration-execution").click();
+
+    const failed = page.getByTestId("migration-execution-failed");
+    await expect(failed).toBeVisible();
+    await expect(failed).toContainText("新存储没有被启用");
+    await expect(page.getByTestId("migration-completed-not-activated")).toHaveCount(0);
+    const counts = await readIndexedDbCounts(page);
+    expect(counts.backups).toBe(1);
+    expect(counts.migrationMetadata).toBe(1);
+    expect(counts.savedItems).toBe(0);
+    expect(await readLocalStorageSnapshot(page)).toEqual(before);
+    expect(await page.evaluate(() => localStorage.getItem("collection-revival-active-storage"))).toBeNull();
+  });
+
   test("safe stop leaves no half-written Store and never activates the target", async ({ page }) => {
     test.slow();
     await seedMigrationFixture(page, { itemCount: 3000 });
@@ -227,6 +264,22 @@ async function createNonEmptyTarget(page: Page) {
   }), { databaseName: DATABASE_NAME, stores: STORE_DEFINITIONS });
 }
 
+async function createMalformedTarget(page: Page) {
+  await page.evaluate(({ databaseName, stores }) => new Promise<void>((resolve, reject) => {
+    const request = indexedDB.open(databaseName, 1);
+    request.onupgradeneeded = () => {
+      for (const [name, keyPath] of stores) {
+        request.result.createObjectStore(name, { keyPath: name === "savedItems" ? "wrongKey" : keyPath });
+      }
+    };
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      request.result.close();
+      resolve();
+    };
+  }), { databaseName: DATABASE_NAME, stores: STORE_DEFINITIONS });
+}
+
 async function readIndexedDbCounts(page: Page): Promise<Record<string, number>> {
   return page.evaluate(({ databaseName, stores }) => new Promise<Record<string, number>>((resolve, reject) => {
     const request = indexedDB.open(databaseName);
@@ -270,6 +323,28 @@ async function readStoreRecords(page: Page, storeName: string): Promise<unknown[
       records.onerror = () => reject(records.error);
     };
   }), { databaseName: DATABASE_NAME, storeName });
+}
+
+async function readIndexedDbSchema(page: Page): Promise<{ version: number; stores: string[] }> {
+  return page.evaluate((databaseName) => new Promise<{ version: number; stores: string[] }>((resolve, reject) => {
+    const request = indexedDB.open(databaseName);
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const database = request.result;
+      const result = { version: database.version, stores: Array.from(database.objectStoreNames).sort() };
+      database.close();
+      resolve(result);
+    };
+  }), DATABASE_NAME);
+}
+
+async function deleteTask7bDatabase(page: Page) {
+  await page.evaluate((databaseName) => new Promise<void>((resolve, reject) => {
+    const request = indexedDB.deleteDatabase(databaseName);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+    request.onblocked = () => reject(new Error("Task 7B test database deletion was blocked."));
+  }), DATABASE_NAME);
 }
 
 async function holdMigrationWriterLock(page: Page) {
