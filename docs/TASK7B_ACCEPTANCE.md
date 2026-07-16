@@ -47,6 +47,15 @@ Controller 显式调用 Adapter 的 `isAvailable` 和 `open`，随后把 Task 7A
 
 Task 7B 新增 Controller/reducer 契约、真实 IndexedDB E2E 和视觉验收测试。测试覆盖生产数据库名和版本、延迟创建、四项确认、真实 Web Locks、锁占用、目标非空、写入失败、取消、进度状态、Store 文案、移动端和 localStorage 不变。Task 1-6.1、Task 7A、MemoryAdapter、IndexedDbAdapter、Legacy Snapshot 和 Migration Preview 测试继续作为回归基线。
 
+最终验证结果：
+
+- `pnpm typecheck`：通过。
+- `pnpm --filter @revival/storage-service test`：161 tests / 754 assertions passed。
+- `pnpm check`：通过，production build 成功，Web E2E 82 passed。
+- Task 7B 新增 22 个 Playwright 测试，其中 9 个 Controller/reducer 契约、8 个执行 E2E、5 个视觉验收；原有 60 个 Web E2E 未减少。
+- `git diff --check`：通过。
+- 本轮没有 flaky 重跑记录。
+
 本地截图目录：
 
 `apps/web/test-results/task7b-migration-execution/`
