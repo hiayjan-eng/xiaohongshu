@@ -122,22 +122,24 @@ test.describe("Task 7A migration flow controller", () => {
       type: "INSPECTION_FAILED",
       error: { code: "INSPECTION_FAILED", message: "检查失败" }
     });
-    expect(failed).toEqual({ status: "inspection_failed", error: { code: "INSPECTION_FAILED", message: "检查失败" } });
-    expect(migrationPreviewReducer(failed, { type: "RESET" })).toEqual({ status: "idle" });
+    expect(failed.status).toBe("inspection_failed");
+    expect(failed.safeError).toEqual({ code: "INSPECTION_FAILED", message: "检查失败" });
+    expect(migrationPreviewReducer(failed, { type: "RESET" })).toEqual(initialMigrationPreviewUiState);
   });
 
-  test("Task 7A source boundary has no executor, Web Locks, or IndexedDB runtime wiring", async () => {
+  test("Task 7B production boundary has no test lock bypass, storage writes, resume, or rollback wiring", async () => {
     const fs = await import("node:fs/promises");
     const path = await import("node:path");
     const featureDir = path.resolve(process.cwd(), "src/features/storage-migration");
     const files = (await fs.readdir(featureDir)).filter((name) => /\.(ts|tsx)$/.test(name));
     const source = (await Promise.all(files.map((name) => fs.readFile(path.join(featureDir, name), "utf8")))).join("\n");
-    expect(source).not.toContain("MigrationExecutor");
-    expect(source).not.toContain("IndexedDbAdapter");
-    expect(source).not.toContain("WebLocksMigrationLockProvider");
+    expect(source).not.toContain("MemoryMigrationLockProvider");
+    expect(source).not.toContain("unsafeAllowProcessLocalLockForTests");
     expect(source).not.toContain("indexedDB.open");
     expect(source).not.toContain("localStorage.setItem");
     expect(source).not.toContain("localStorage.removeItem");
     expect(source).not.toContain("localStorage.clear");
+    expect(source).not.toContain(".resume(");
+    expect(source).not.toContain(".rollback(");
   });
 });
