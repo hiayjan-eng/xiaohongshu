@@ -119,8 +119,11 @@ export class WebLocksMigrationLockProvider implements MigrationLockProvider {
 
     const requestPromise = this.locks.request(
       name,
-      { mode: "exclusive", ifAvailable: true, signal: options.signal },
+      // Chrome rejects `signal` together with `ifAvailable`. This request never
+      // waits in a queue, so cancellation is checked before and inside the callback.
+      { mode: "exclusive", ifAvailable: true },
       async (lock) => {
+        assertNotAborted(options.signal);
         if (!lock) {
           rejectHandle(new MigrationExecutionError({
             code: "MIGRATION_LOCK_UNAVAILABLE",
