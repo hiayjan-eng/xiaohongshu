@@ -5,7 +5,7 @@ export const THEME_STORAGE_KEY = "collection-revival-theme";
 
 const NOW = "2026-07-16T08:00:00.000Z";
 
-export function makeMigrationAppState(options: { duplicateSource?: boolean } = {}) {
+export function makeMigrationAppState(options: { duplicateSource?: boolean; itemCount?: number } = {}) {
   const savedItem = {
     id: "saved-migration-001",
     userId: "user-migration-test",
@@ -38,9 +38,45 @@ export function makeMigrationAppState(options: { duplicateSource?: boolean } = {
     createdAt: NOW,
     updatedAt: NOW
   };
-  const savedItems = options.duplicateSource
-    ? [savedItem, { ...savedItem, id: "saved-migration-002", title: "重复来源测试", displayTitle: "重复来源测试" }]
-    : [savedItem];
+  const itemCount = Math.max(1, options.itemCount ?? 1);
+  const savedItems = Array.from({ length: itemCount }, (_, index) => {
+    if (index === 0) return savedItem;
+    const number = String(index + 1).padStart(4, "0");
+    return {
+      ...savedItem,
+      id: `saved-migration-${number}`,
+      sourceUrl: options.duplicateSource && index === 1
+        ? savedItem.sourceUrl
+        : `https://www.xiaohongshu.com/explore/migration-test-${number}`,
+      rawTitle: `迁移测试收藏 ${number}`,
+      cleanedTitle: `迁移测试收藏 ${number}`,
+      displayTitle: `迁移测试收藏 ${number}`,
+      title: `迁移测试收藏 ${number}`,
+      userNote: `测试备注 ${number}`,
+      searchableText: `迁移 测试 收藏 ${number}`
+    };
+  });
+  if (options.duplicateSource && itemCount === 1) {
+    savedItems.push({ ...savedItem, id: "saved-migration-0002", title: "重复来源测试", displayTitle: "重复来源测试" });
+  }
+  const importBatchItems = savedItems.map((item, index) => {
+    const number = String(index + 1).padStart(4, "0");
+    return {
+      id: `batch-item-migration-${number}`,
+      batchId: "batch-migration-001",
+      sourceUrl: item.sourceUrl,
+      title: item.title,
+      rawTitle: item.rawTitle,
+      cleanedTitle: item.cleanedTitle,
+      displayTitle: item.displayTitle,
+      textNormalizationVersion: 3,
+      rawShareText: item.rawShareText,
+      userNote: "",
+      status: "imported",
+      createdSavedItemId: item.id,
+      createdAt: NOW
+    };
+  });
 
   return {
     schemaVersion: 3,
@@ -56,8 +92,8 @@ export function makeMigrationAppState(options: { duplicateSource?: boolean } = {
       source: "extension_scan",
       title: "旧收藏扫描批次",
       status: "completed",
-      rawCount: 1,
-      importedCount: 1,
+      rawCount: savedItems.length,
+      importedCount: savedItems.length,
       duplicateCount: 0,
       failedCount: 0,
       createdActionCardCount: 0,
@@ -65,21 +101,7 @@ export function makeMigrationAppState(options: { duplicateSource?: boolean } = {
       createdAt: NOW,
       updatedAt: NOW
     }],
-    importBatchItems: [{
-      id: "batch-item-migration-001",
-      batchId: "batch-migration-001",
-      sourceUrl: savedItem.sourceUrl,
-      title: savedItem.title,
-      rawTitle: savedItem.rawTitle,
-      cleanedTitle: savedItem.cleanedTitle,
-      displayTitle: savedItem.displayTitle,
-      textNormalizationVersion: 3,
-      rawShareText: savedItem.rawShareText,
-      userNote: "",
-      status: "imported",
-      createdSavedItemId: savedItem.id,
-      createdAt: NOW
-    }],
+    importBatchItems,
     smartAlbums: [{
       id: "album-migration-001",
       title: "AI 工作流",
@@ -168,7 +190,7 @@ export function makeMigrationAppState(options: { duplicateSource?: boolean } = {
   };
 }
 
-export async function seedMigrationFixture(page: Page, options: { duplicateSource?: boolean } = {}) {
+export async function seedMigrationFixture(page: Page, options: { duplicateSource?: boolean; itemCount?: number } = {}) {
   const state = makeMigrationAppState(options);
   await page.addInitScript(({ state, storageKey, achievementKey, themeKey }) => {
     window.localStorage.setItem(storageKey, JSON.stringify(state));
