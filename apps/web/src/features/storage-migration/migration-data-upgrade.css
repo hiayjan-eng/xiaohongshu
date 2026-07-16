@@ -1206,7 +1206,10 @@
     width: 100%;
   }
 
-  .migration-confirmation-summary,
+  .migration-confirmation-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .migration-activation-status,
   .migration-result-metrics,
   .migration-execution-metrics {
