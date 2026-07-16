@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Archive,
   BarChart3,
@@ -193,6 +193,8 @@ const SEARCH_OPEN_MESSAGES = [
   "原帖已打开，收藏没有走丢"
 ];
 
+const MIGRATION_LEAVE_WARNING = "升级仍在进行。离开后本页面不会自动恢复进度，确定要离开吗？";
+
 export function App() {
   const [state, setState] = useState<AppState>(() => loadAppState(typeof window === "undefined" ? undefined : window.localStorage));
   const [activeView, setActiveView] = useState<ViewKey>(() => getInitialView());
@@ -228,6 +230,10 @@ export function App() {
   );
   const [achievementModal, setAchievementModal] = useState<AchievementDisplay | null>(null);
   const [rewardBurstId, setRewardBurstId] = useState(0);
+  const migrationExecutionActiveRef = useRef(false);
+  const setMigrationExecutionActive = useCallback((active: boolean) => {
+    migrationExecutionActiveRef.current = active;
+  }, []);
   const [aiStatus, setAiStatus] = useState<AiRuntimeStatus>({
     mode: "mock",
     providerName: "ServerAIProxy",
@@ -278,6 +284,12 @@ export function App() {
 
   useEffect(() => {
     const syncViewFromLocation = () => {
+      if (migrationExecutionActiveRef.current && !window.confirm(MIGRATION_LEAVE_WARNING)) {
+        window.history.pushState(null, "", "/settings/data-migration");
+        setActiveView("settings");
+        setSettingsSubRoute("data-migration");
+        return;
+      }
       const nextView = getInitialView();
       setActiveView(nextView);
       setSettingsSubRoute(getInitialSettingsSubRoute());
@@ -402,6 +414,13 @@ export function App() {
   }
 
   function navigatePrimaryView(view: ViewKey) {
+    if (
+      settingsSubRoute === "data-migration"
+      && migrationExecutionActiveRef.current
+      && !window.confirm(MIGRATION_LEAVE_WARNING)
+    ) {
+      return;
+    }
     if (settingsSubRoute === "data-migration" && typeof window !== "undefined") {
       const path = view === "welcome" ? "/" : `/${view}`;
       window.history.pushState(null, "", path);
@@ -1618,6 +1637,7 @@ export function App() {
             <MigrationDataUpgradePage
               onBackToSettings={returnToSettings}
               onReturnToImport={returnToImportFromMigration}
+              onExecutionActiveChange={setMigrationExecutionActive}
             />
           )}
 
