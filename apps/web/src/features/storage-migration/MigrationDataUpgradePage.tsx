@@ -251,7 +251,7 @@ export function MigrationDataUpgradePage({ onBackToSettings, onReturnToImport }:
       <p className="migration-memory-note">
         {executionActive
           ? "升级执行中请保持页面打开。Task 7C 完成前，刷新后不会自动恢复此页面。"
-          : "检查和确认只保留在当前页面。刷新或离开后需要重新开始。"}
+          : "检查结果只保留在当前页面。刷新或离开后需要重新检查。"}
       </p>
     </div>
   );
