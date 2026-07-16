@@ -1,5 +1,7 @@
 import type {
   LegacyBackupEnvelope,
+  MigrationExecutionProgress,
+  MigrationExecutionResult,
   MigrationPlan,
   MigrationPreviewReport,
   MigrationPreviewUserSummary,
@@ -14,7 +16,17 @@ export type MigrationPreviewUiStateName =
   | "blocked"
   | "backup_ready"
   | "backup_downloaded"
-  | "inspection_failed";
+  | "inspection_failed"
+  | "awaiting_confirmation"
+  | "checking_execution_support"
+  | "opening_target"
+  | "acquiring_lock"
+  | "executing"
+  | "cancelling"
+  | "cancelled"
+  | "verifying"
+  | "completed_not_activated"
+  | "execution_failed";
 
 export type MigrationInspectionStage =
   | "reading_local_data"
@@ -24,6 +36,23 @@ export type MigrationInspectionStage =
   | "creating_preview";
 
 export type MigrationInspectionDisposition = "ready" | "review_required" | "blocked" | "empty";
+export type MigrationPreviewDataStateName = "preview_ready" | "review_required" | "blocked";
+export type MigrationStepNumber = 1 | 2 | 3 | 4 | 5;
+
+export type MigrationConfirmationKey =
+  | "legacyDataRetained"
+  | "backupDownloaded"
+  | "legacyStorageStillActive"
+  | "activationRequiresNextPhase";
+
+export type MigrationConfirmationValues = Record<MigrationConfirmationKey, boolean>;
+
+export const EMPTY_MIGRATION_CONFIRMATIONS: MigrationConfirmationValues = {
+  legacyDataRetained: false,
+  backupDownloaded: false,
+  legacyStorageStillActive: false,
+  activationRequiresNextPhase: false
+};
 
 export interface MigrationInspectionProgress {
   stage: MigrationInspectionStage;
@@ -44,27 +73,26 @@ export interface MigrationInspectionResult {
 export interface MigrationUiError {
   code: string;
   message: string;
+  recoverable?: boolean;
 }
 
-export type MigrationPreviewDataStateName = "preview_ready" | "review_required" | "blocked";
-
-export type MigrationPreviewUiState =
-  | { status: "idle" }
-  | { status: "inspecting"; progress: MigrationInspectionProgress }
-  | { status: MigrationPreviewDataStateName; data: MigrationInspectionResult }
-  | {
-      status: "backup_ready";
-      data: MigrationInspectionResult;
-      previewStatus: MigrationPreviewDataStateName;
-      downloadError?: MigrationUiError;
-    }
-  | {
-      status: "backup_downloaded";
-      data: MigrationInspectionResult;
-      previewStatus: MigrationPreviewDataStateName;
-      filename: string;
-    }
-  | { status: "inspection_failed"; error: MigrationUiError };
+export interface MigrationPreviewUiState {
+  status: MigrationPreviewUiStateName;
+  currentStep: MigrationStepNumber;
+  data?: MigrationInspectionResult;
+  previewStatus?: MigrationPreviewDataStateName;
+  inspectionProgress?: MigrationInspectionProgress;
+  filename?: string;
+  downloadError?: MigrationUiError;
+  confirmationValues: MigrationConfirmationValues;
+  executionProgress?: MigrationExecutionProgress;
+  executionResult?: MigrationExecutionResult;
+  safeError?: MigrationUiError;
+  technicalErrorCode?: string;
+  canCancel: boolean;
+  cancelDialogOpen: boolean;
+  closeWarning?: string;
+}
 
 export type MigrationPreviewUiAction =
   | { type: "START_INSPECTION"; progress: MigrationInspectionProgress }
@@ -75,10 +103,27 @@ export type MigrationPreviewUiAction =
   | { type: "BACK_TO_PREVIEW" }
   | { type: "BACKUP_DOWNLOAD_SUCCEEDED"; filename: string }
   | { type: "BACKUP_DOWNLOAD_FAILED"; error: MigrationUiError }
+  | { type: "ENTER_CONFIRMATION" }
+  | { type: "BACK_TO_BACKUP" }
+  | { type: "SET_CONFIRMATION"; key: MigrationConfirmationKey; value: boolean }
+  | { type: "CHECK_EXECUTION_SUPPORT" }
+  | { type: "OPENING_TARGET" }
+  | { type: "EXECUTION_PROGRESS"; progress: MigrationExecutionProgress }
+  | { type: "OPEN_CANCEL_DIALOG" }
+  | { type: "CLOSE_CANCEL_DIALOG" }
+  | { type: "CANCELLING" }
+  | { type: "EXECUTION_CANCELLED"; error?: MigrationUiError; closeWarning?: string }
+  | { type: "EXECUTION_COMPLETED"; result: MigrationExecutionResult; closeWarning?: string }
+  | { type: "EXECUTION_FAILED"; error: MigrationUiError; closeWarning?: string }
   | { type: "RESET" };
 
 export interface PreparedLegacyBackupDownload {
   blob: Blob;
   filename: string;
   serialized: string;
+}
+
+export interface MigrationExecutionReadiness {
+  ready: boolean;
+  reason?: string;
 }
