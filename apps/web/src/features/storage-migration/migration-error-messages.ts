@@ -102,16 +102,40 @@ const ISSUE_PRESENTATIONS: Partial<Record<MigrationIssueCode | LegacySnapshotIss
 
 export const STORAGE_ENTITY_LABELS: Record<StorageEntityName, string> = {
   savedItems: "收藏",
-  importBatches: "导入批次",
+  importBatches: "扫描与导入批次",
   importBatchItems: "导入明细",
   smartAlbums: "智能专辑",
   actionCards: "行动卡",
   planCards: "计划卡",
   classificationCorrections: "分类纠正",
   searchLogs: "搜索记录",
-  settings: "设置",
-  migrationMetadata: "迁移状态",
-  backups: "备份"
+  settings: "主题与成就",
+  migrationMetadata: "升级记录",
+  backups: "原始备份"
+};
+
+const EXECUTION_ERROR_MESSAGES: Record<string, string> = {
+  MIGRATION_LOCK_UNAVAILABLE: "当前无法取得安全升级锁。请确认使用最新版 Chrome 或 Edge，并关闭其他正在升级的页面后重试。",
+  MIGRATION_LOCK_TIMEOUT: "等待安全升级锁超时。当前没有继续写入，请稍后重试。",
+  MIGRATION_ACTIVE_SESSION_EXISTS: "当前已有一次升级尚未处理完成，不能开始新的升级。",
+  MIGRATION_USER_CONFIRMATION_REQUIRED: "请完成备份下载和四项确认后再开始升级。",
+  MIGRATION_PREVIEW_BLOCKED: "当前仍有数据需要确认，暂时不能开始升级。",
+  MIGRATION_PLAN_MISMATCH: "当前检查结果与升级计划不一致，请重新检查当前数据。",
+  MIGRATION_SOURCE_MISMATCH: "当前收藏数据或备份已经发生变化，请重新检查并下载新的备份。",
+  MIGRATION_BACKUP_INVALID: "原始备份未通过检查，因此没有继续写入收藏数据。",
+  MIGRATION_BACKUP_PERSIST_FAILED: "恢复备份没有保存完整，因此没有继续写入收藏数据。",
+  MIGRATION_CRYPTO_UNAVAILABLE: "当前浏览器无法完成安全校验，请使用最新版 Chrome 或 Edge。",
+  MIGRATION_TARGET_UNAVAILABLE: "新存储暂时无法打开，当前数据没有被修改。",
+  MIGRATION_TARGET_SCHEMA_MISMATCH: "新存储版本与当前升级计划不一致，升级已经停止。",
+  MIGRATION_TARGET_NOT_EMPTY: "新存储中已经存在其他数据。为了避免覆盖，升级已停止。",
+  MIGRATION_UNSUPPORTED_TARGET: "当前环境不支持这次本地数据升级。",
+  MIGRATION_WRITE_FAILED: "写入过程中遇到问题，新存储没有被启用。",
+  MIGRATION_VERIFY_FAILED: "写入后的校验没有通过，新存储没有被启用。",
+  MIGRATION_CHECKPOINT_INVALID: "升级记录不完整，当前不会继续覆盖新存储。",
+  MIGRATION_CANCELLED: "升级已经安全停止，新存储尚未启用。",
+  MIGRATION_RESUME_CONFLICT: "新存储中的数据与升级记录不一致，不能自动继续。",
+  MIGRATION_ALREADY_ACTIVATED: "新存储已被标记为启用，当前流程不会继续修改。",
+  MIGRATION_NOT_FOUND: "没有找到对应的升级记录。"
 };
 
 export function getIssuePresentation(code: MigrationIssueCode | LegacySnapshotIssueCode): MigrationIssuePresentation {
@@ -124,6 +148,14 @@ export function getIssuePresentation(code: MigrationIssueCode | LegacySnapshotIs
 
 export function toSafeMigrationUiError(error: unknown): MigrationUiError {
   const code = readSafeErrorCode(error);
+  const executionMessage = EXECUTION_ERROR_MESSAGES[code];
+  if (executionMessage) {
+    return {
+      code,
+      message: executionMessage,
+      recoverable: readRecoverable(error)
+    };
+  }
   if (code === "STORAGE_UNAVAILABLE") {
     return { code, message: "无法读取当前浏览器的本地数据。当前没有修改任何内容。" };
   }
@@ -144,6 +176,12 @@ function readSafeErrorCode(error: unknown): string {
   if (!error || typeof error !== "object") return "INSPECTION_FAILED";
   const code = (error as { code?: unknown }).code;
   return typeof code === "string" && /^[A-Z0-9_]+$/.test(code) ? code : "INSPECTION_FAILED";
+}
+
+function readRecoverable(error: unknown): boolean | undefined {
+  if (!error || typeof error !== "object") return undefined;
+  const recoverable = (error as { recoverable?: unknown }).recoverable;
+  return typeof recoverable === "boolean" ? recoverable : undefined;
 }
 
 function sanitizeIdentifier(value: unknown): string {
