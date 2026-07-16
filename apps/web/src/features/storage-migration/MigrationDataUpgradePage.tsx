@@ -101,6 +101,7 @@ export function MigrationDataUpgradePage({ onBackToSettings, onReturnToImport }:
     if (!controller) return;
     dispatch({ type: "CHECK_EXECUTION_SUPPORT" });
     try {
+      await waitForNextPaint();
       const outcome = await controller.startExecution(handleLifecycleEvent);
       dispatch({
         type: "EXECUTION_COMPLETED",
@@ -140,7 +141,11 @@ export function MigrationDataUpgradePage({ onBackToSettings, onReturnToImport }:
   const showExecution = ACTIVE_EXECUTION_STATES.has(state.status);
 
   return (
-    <div className="migration-upgrade-page" data-testid="migration-data-upgrade-page">
+    <div
+      className="migration-upgrade-page"
+      data-testid="migration-data-upgrade-page"
+      data-migration-state={state.status}
+    >
       <button className="migration-back-link" type="button" onClick={handleBackToSettings}>
         <ArrowLeft size={17} aria-hidden="true" /> 返回设置
       </button>
@@ -255,4 +260,8 @@ export function MigrationDataUpgradePage({ onBackToSettings, onReturnToImport }:
       </p>
     </div>
   );
+}
+
+function waitForNextPaint(): Promise<void> {
+  return new Promise((resolve) => requestAnimationFrame(() => resolve()));
 }
