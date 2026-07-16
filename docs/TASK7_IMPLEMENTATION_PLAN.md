@@ -181,6 +181,19 @@ Stop conditions:
 
 Effort: L.
 
+Implementation result on `phase1-task7b-migration-execution-ui`:
+
+- Extended the Task 7A reducer with confirmation, capability-check, target-opening, lock-acquisition, execution, verification, cancellation, completed-not-activated, and failure states.
+- Added four explicit unchecked confirmations. The transition is gated by a real backup download trigger, executable plan, zero blocking issues, and zero unresolved manual review records.
+- Added a delayed production runtime factory for `collection-revival-local` schema v1. It uses the native IndexedDB adapter, Web Locks provider, and Task 6 executor; it does not import the memory lock or pass the test-only lock bypass.
+- Added safe Adapter lifecycle handling: availability, explicit open, executor use, and `finally` close. A close warning cannot replace a completed or failed execution result.
+- Added real progress, translated Store labels, accessible progress semantics, before-unload and in-app navigation warnings, safe-stop confirmation, cancelled state, execution failure, and completed-not-activated result.
+- No resume, rollback UI, active storage switch, localStorage deletion, or startup storage wiring was added.
+- The Task 6 lock provider received one necessary compatibility correction: native Chrome does not permit `signal` together with `ifAvailable`. Non-queued acquisition now omits that incompatible option while retaining cancellation checks before and inside the callback. The storage-service contract suite covers this behavior.
+- Controller and browser tests cover delayed creation, backup/confirmation gates, unsupported Web Locks, held locks, non-empty targets, real IndexedDB write failure, 3000-record safe cancellation, localStorage byte preservation, schema/Store creation, progress ordering, and mobile overflow.
+- Ten local acceptance screenshots cover desktop and mobile confirmation, progress, final verification, completion, failure, and cancellation. They are test artifacts and are not committed.
+- Task 7B remains prohibited from merge and deployment until Task 7C adds refresh inspection, resume, and rollback.
+
 ## Task 7C: Resume and Rollback UI
 
 Goal: make interrupted, failed, cancelled, completed, rolled back, and rollback_failed states understandable and recoverable.
