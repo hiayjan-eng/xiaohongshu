@@ -207,6 +207,15 @@ test.describe("Task 7B migration execution UI", () => {
     await page.getByTestId("start-migration-execution").click();
     await expect(page.getByTestId("migration-execution-step")).toBeVisible();
     await expect(page.getByTestId("migration-current-store")).toContainText(/收藏|导入明细/, { timeout: 30_000 });
+    let leaveWarning = "";
+    page.once("dialog", async (dialog) => {
+      leaveWarning = dialog.message();
+      await dialog.dismiss();
+    });
+    await page.getByRole("button", { name: "今日复活" }).click();
+    expect(leaveWarning).toContain("升级仍在进行");
+    await expect(page).toHaveURL(/\/settings\/data-migration$/);
+    await expect(page.getByTestId("migration-execution-step")).toBeVisible();
     await page.getByRole("button", { name: "安全停止" }).click();
     const dialog = page.getByRole("dialog", { name: "安全停止升级？" });
     await expect(dialog).toBeVisible();
