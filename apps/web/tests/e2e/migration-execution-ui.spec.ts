@@ -42,6 +42,7 @@ test.describe("Task 7B migration execution UI", () => {
 
     await reachConfirmation(page);
     await checkAllConfirmations(page);
+    await installExecutionObservers(page);
     await page.getByTestId("start-migration-execution").click();
 
     const completed = page.getByTestId("migration-completed-not-activated");
@@ -69,6 +70,17 @@ test.describe("Task 7B migration execution UI", () => {
     expect(metadata).toHaveLength(1);
     expect(metadata[0]?.activeStorageSwitched).toBe(false);
     expect(await page.evaluate(() => localStorage.getItem("collection-revival-active-storage"))).toBeNull();
+    const observed = await readExecutionObservers(page);
+    expect(observed.states).toEqual(expect.arrayContaining([
+      "checking_execution_support",
+      "opening_target",
+      "acquiring_lock",
+      "executing",
+      "verifying",
+      "completed_not_activated"
+    ]));
+    expect(observed.progressValues.length).toBeGreaterThan(0);
+    expect(observed.progressValues).toEqual([...observed.progressValues].sort((left, right) => left - right));
     expect(await readLocalStorageSnapshot(page)).toEqual(before);
     const boundary = await readTask7aBoundarySpies(page);
     expect(boundary.setItemCalls).toBe(0);
@@ -372,4 +384,36 @@ async function releaseMigrationWriterLock(page: Page) {
 
 async function hasHorizontalOverflow(page: Page) {
   return page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1);
+}
+
+async function installExecutionObservers(page: Page) {
+  await page.evaluate(() => {
+    const root = document.querySelector<HTMLElement>("[data-testid=migration-data-upgrade-page]");
+    if (!root) throw new Error("Migration page root is missing.");
+    const states: string[] = [];
+    const progressValues: number[] = [];
+    const capture = () => {
+      const state = root.dataset.migrationState;
+      if (state && states.at(-1) !== state) states.push(state);
+      const progress = root.querySelector<HTMLElement>("[role=progressbar]");
+      const value = Number(progress?.getAttribute("aria-valuenow"));
+      if (Number.isFinite(value) && progressValues.at(-1) !== value) progressValues.push(value);
+    };
+    capture();
+    const observer = new MutationObserver(capture);
+    observer.observe(root, { attributes: true, childList: true, subtree: true });
+    Object.assign(window, { __task7bExecutionStates: states, __task7bProgressValues: progressValues, __task7bExecutionObserver: observer });
+  });
+}
+
+async function readExecutionObservers(page: Page) {
+  return page.evaluate(() => {
+    const state = window as Window & {
+      __task7bExecutionStates: string[];
+      __task7bProgressValues: number[];
+      __task7bExecutionObserver: MutationObserver;
+    };
+    state.__task7bExecutionObserver.disconnect();
+    return { states: state.__task7bExecutionStates, progressValues: state.__task7bProgressValues };
+  });
 }
