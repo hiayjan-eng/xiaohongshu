@@ -69,13 +69,13 @@ test("captures desktop safely cancelled state", async ({ page }) => {
 test("captures mobile confirmation, progress, and completed-not-activated", async ({ page }) => {
   test.slow();
   await page.setViewportSize({ width: 390, height: 844 });
-  await seedMigrationFixture(page, { itemCount: 1500 });
+  await seedMigrationFixture(page, { itemCount: 3000 });
   await page.goto("/settings/data-migration");
   await reachConfirmation(page);
   await page.screenshot({ path: path.join(screenshotDirectory, "mobile-390-confirmation.png"), fullPage: true });
   await checkConfirmations(page);
   await page.getByTestId("start-migration-execution").click();
-  await expect(page.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "35", { timeout: 30_000 });
+  await expect(page.getByTestId("migration-current-store")).toContainText("导入明细", { timeout: 30_000 });
   await page.screenshot({ path: path.join(screenshotDirectory, "mobile-390-progress.png"), fullPage: true });
   await expect(page.getByTestId("migration-completed-not-activated")).toBeVisible({ timeout: 30_000 });
   await page.screenshot({ path: path.join(screenshotDirectory, "mobile-390-completed-not-activated.png"), fullPage: true });
