@@ -138,7 +138,6 @@ export function MigrationDataUpgradePage({ onBackToSettings, onReturnToImport }:
   }
 
   const showExecution = ACTIVE_EXECUTION_STATES.has(state.status);
-  const showResult = state.status === "completed_not_activated" || state.status === "cancelled" || state.status === "execution_failed";
 
   return (
     <div className="migration-upgrade-page" data-testid="migration-data-upgrade-page">
@@ -220,7 +219,7 @@ export function MigrationDataUpgradePage({ onBackToSettings, onReturnToImport }:
         />
       )}
 
-      {showResult && (
+      {(state.status === "completed_not_activated" || state.status === "cancelled" || state.status === "execution_failed") && (
         <MigrationExecutionResultStep
           status={state.status}
           result={state.executionResult}
