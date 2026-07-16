@@ -5,7 +5,7 @@ import {
 } from "../src/index";
 import { expectStorageError, TestHarness } from "./test-harness";
 
-const CASE_COUNT = 5;
+const CASE_COUNT = 6;
 
 export function runMigrationLockTests(harness: TestHarness): void {
   harness.test("Migration lock: Memory provider is exclusive and releases cleanly", async () => {
@@ -72,6 +72,30 @@ export function runMigrationLockTests(harness: TestHarness): void {
     harness.equal(callbackCompleted, false, "callback still held");
     await lock.release();
     harness.equal(callbackCompleted, true, "callback completed after release");
+  });
+
+  harness.test("Migration lock: Web Locks ifAvailable request omits the incompatible signal option", async () => {
+    let receivedOptions: { mode?: "exclusive"; ifAvailable?: boolean; signal?: AbortSignal } | undefined;
+    const provider = new WebLocksMigrationLockProvider({
+      async request<T>(
+        _name: string,
+        options: { mode?: "exclusive"; ifAvailable?: boolean; signal?: AbortSignal },
+        callback: (lock: unknown | null) => T | Promise<T>
+      ): Promise<T> {
+        receivedOptions = options;
+        return callback(null);
+      }
+    });
+    const controller = new AbortController();
+    await expectStorageError(
+      harness,
+      () => provider.acquire({ migrationId: "migration-001", signal: controller.signal }),
+      "MIGRATION_LOCK_UNAVAILABLE",
+      "web lock unavailable"
+    );
+    harness.equal(receivedOptions?.mode, "exclusive", "exclusive mode");
+    harness.equal(receivedOptions?.ifAvailable, true, "non-queued acquisition");
+    harness.equal("signal" in (receivedOptions ?? {}), false, "signal omitted with ifAvailable");
   });
 }
 
