@@ -42,7 +42,7 @@ Small note:
 10. User clicks `开始升级`.
 11. Executor writes backup, metadata, stores, checkpoints, and final verification.
 12. Completion state is `completed_not_activated`: IndexedDB data exists and is verified, but the app still reads legacy localStorage.
-13. User can view report, keep backup, or roll back the staged IndexedDB migration.
+13. In Task 7B the user can view the report and return to Settings. Resume and rollback controls remain unavailable until Task 7C.
 14. Active storage switch remains a later Task 8 decision.
 
 ## Wizard Steps
@@ -114,10 +114,10 @@ Implementation requirements:
 
 Execution cannot start until all four confirmations are checked:
 
-1. `我已经下载并保存了升级前备份。`
-2. `我理解升级只影响当前浏览器里的收藏复活数据，不会删除原 localStorage 数据。`
-3. `我理解升级完成后暂时仍不会切换 activeStorage。`
-4. `我确认当前没有其他页面正在执行数据升级。`
+1. `我知道原来的本地收藏不会被删除。`
+2. `我已经下载并检查浏览器下载列表中的原始备份。`
+3. `我知道升级完成后，当前产品暂时仍使用旧存储。`
+4. `我知道新存储需要在下一阶段完成验证后才会正式启用。`
 
 If any confirmation is missing, the primary button stays disabled with a clear reason.
 
@@ -163,11 +163,9 @@ Completion copy:
 Actions:
 
 - `查看迁移报告`
-- `保留备份`
-- `恢复到升级前状态`
-- `稍后再启用`
+- `返回设置`
 
-The UI must not call active storage switching code in Task 7.
+Task 7B intentionally provides no resume, rollback, delete-old-data, or activate-now action. The UI must not call active storage switching code in Task 7.
 
 ## UI State Machine
 
@@ -210,7 +208,7 @@ Responsibilities:
 - Validate four confirmations.
 - Create explicit IndexedDbAdapter only at execution time.
 - Create WebLocksMigrationLockProvider only at execution time.
-- Call `execute`, `resume`, `rollback`.
+- Call `execute` in Task 7B. Task 7C may add explicit `inspect`, `resume`, and `rollback` actions after refresh recovery is designed.
 - Convert executor errors into safe Chinese UI messages.
 - Never modify `activeStorage`.
 
@@ -331,6 +329,19 @@ Task 7A downloads the Task 4 `LegacyBackupEnvelope` through `serializeLegacyBack
 ### Task 7B: Execution Confirmation and Progress
 
 Includes four confirmations, explicit IndexedDbAdapter creation, Web Locks provider, executor `execute`, progress UI, cancel, and completed-not-activated state. Requires Task 6 blocking gaps to be fixed first.
+
+Implemented contract:
+
+- The production runtime lives in `apps/web/src/features/storage-migration/migration-execution-runtime.ts` and creates `IndexedDbAdapter`, `WebLocksMigrationLockProvider`, and `MigrationExecutor` only after the final user action.
+- The target is `collection-revival-local`, schema version 1. Opening Settings, inspection, preview, backup creation, download, and checkbox changes do not create the database.
+- The controller passes the existing envelope, preview, plan, explicit confirmation, AbortSignal, target schema version, and progress callback to the Task 6 executor. The executor contract has no `verifyAfterEachStore` option; per-store verification is mandatory inside the executor and therefore cannot be disabled by Web code.
+- Production Web code imports no `MemoryMigrationLockProvider`, sets no `unsafeAllowProcessLocalLockForTests`, and has no lock fallback.
+- The native Web Locks request uses non-queued `ifAvailable` acquisition. Because Chrome rejects `ifAvailable` combined with `signal`, the provider checks cancellation before and inside the lock callback and omits the incompatible request option.
+- Progress is derived from real `MigrationExecutionProgress` checkpoints. The UI exposes the current phase, translated Store name, record count, verified Store count, and an ARIA progressbar.
+- Safe stop uses `AbortController`. Task 6 completes or rolls back the active Store transaction atomically, records cancellation metadata, retains backup evidence, and never switches `activeStorage`.
+- Success is rendered only as `completed_not_activated`; failure and cancellation retain the old localStorage runtime and expose no automatic retry, resume, rollback, activation, or deletion action.
+- Task 7B state remains memory-only. Refresh does not auto-execute, auto-resume, or auto-rollback. Task 7C owns recovery UI.
+- The branch must not merge or deploy before Task 7C closes the refresh-recovery gap.
 
 ### Task 7C: Resume and Rollback UI
 
