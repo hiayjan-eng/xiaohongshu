@@ -1,6 +1,7 @@
 import {
   LEGACY_APP_STATE_STORAGE_KEY,
   LegacyLocalStorageSnapshotReader,
+  MigrationExecutionError,
   createLegacyBackupBlob,
   createLegacyBackupFilename,
   createMigrationPreview,
@@ -8,16 +9,27 @@ import {
   serializeLegacyBackup,
   validateMigrationSource,
   type LegacyBackupEnvelope,
-  type ReadonlyStorageLike
+  type MigrationExecutionProgress,
+  type MigrationExecutionResult,
+  type ReadonlyStorageLike,
+  type StorageAdapter
 } from "@revival/storage-service";
-import type {
-  MigrationInspectionDisposition,
-  MigrationInspectionProgress,
-  MigrationInspectionResult,
-  PreparedLegacyBackupDownload
+import {
+  MIGRATION_TARGET_SCHEMA_VERSION,
+  createBrowserMigrationExecutionRuntime,
+  type MigrationExecutionRuntime
+} from "./migration-execution-runtime";
+import {
+  EMPTY_MIGRATION_CONFIRMATIONS,
+  type MigrationConfirmationKey,
+  type MigrationConfirmationValues,
+  type MigrationExecutionReadiness,
+  type MigrationInspectionDisposition,
+  type MigrationInspectionProgress,
+  type MigrationInspectionResult,
+  type PreparedLegacyBackupDownload
 } from "./migration-preview-types";
 
-const TARGET_SCHEMA_VERSION = 1;
 const PRODUCT_DATA_STORES = [
   "savedItems",
   "importBatches",
@@ -36,36 +48,63 @@ export const MIGRATION_INSPECTION_PROGRESS: readonly MigrationInspectionProgress
   { stage: "creating_preview", label: "正在生成升级预览" }
 ] as const;
 
+export type MigrationControllerLifecycleEvent =
+  | { type: "checking_execution_support" }
+  | { type: "opening_target" }
+  | { type: "progress"; progress: MigrationExecutionProgress };
+
+export interface MigrationExecutionOutcome {
+  result: MigrationExecutionResult;
+  closeWarning?: string;
+}
+
 export class MigrationFlowController {
   private currentResult?: MigrationInspectionResult;
+  private backupDownloadTriggered = false;
+  private confirmations: MigrationConfirmationValues = { ...EMPTY_MIGRATION_CONFIRMATIONS };
+  private abortController?: AbortController;
+  private targetAdapter?: StorageAdapter;
+  private executionActive = false;
+  private closeWarning?: string;
 
-  constructor(private readonly storage: ReadonlyStorageLike) {}
+  constructor(
+    private readonly storage: ReadonlyStorageLike,
+    private readonly executionRuntime: MigrationExecutionRuntime = createBrowserMigrationExecutionRuntime()
+  ) {}
 
   async inspect(onProgress?: (progress: MigrationInspectionProgress) => void): Promise<MigrationInspectionResult> {
+    this.backupDownloadTriggered = false;
+    this.confirmations = { ...EMPTY_MIGRATION_CONFIRMATIONS };
     onProgress?.(MIGRATION_INSPECTION_PROGRESS[0]);
     const reader = new LegacyLocalStorageSnapshotReader(this.storage);
 
     onProgress?.(MIGRATION_INSPECTION_PROGRESS[1]);
     const envelope = await reader.createBackupEnvelope({
-      appVersion: "web-task7a",
-      notes: "User-initiated read-only migration inspection"
+      appVersion: "web-task7b",
+      notes: "User-initiated migration inspection and confirmation"
     });
 
     onProgress?.(MIGRATION_INSPECTION_PROGRESS[2]);
     const sourceValidation = await validateMigrationSource(envelope, {
-      targetSchemaVersion: TARGET_SCHEMA_VERSION
+      targetSchemaVersion: MIGRATION_TARGET_SCHEMA_VERSION
     });
 
     onProgress?.(MIGRATION_INSPECTION_PROGRESS[3]);
     const preview = await createMigrationPreview(envelope, {
-      targetSchemaVersion: TARGET_SCHEMA_VERSION,
+      targetSchemaVersion: MIGRATION_TARGET_SCHEMA_VERSION,
       targetMustBeEmpty: true
     });
 
     onProgress?.(MIGRATION_INSPECTION_PROGRESS[4]);
     const userSummary = createMigrationPreviewUserSummary(preview);
     const hasProductData = hasLegacyProductData(envelope);
-    const disposition = getInspectionDisposition(envelope, preview.summary.totalBlockingIssues, preview.summary.totalWarnings, preview.summary.totalManualReview, hasProductData);
+    const disposition = getInspectionDisposition(
+      envelope,
+      preview.summary.totalBlockingIssues,
+      preview.summary.totalWarnings,
+      preview.summary.totalManualReview,
+      hasProductData
+    );
     const result: MigrationInspectionResult = {
       disposition,
       envelope,
@@ -105,6 +144,173 @@ export class MigrationFlowController {
     };
   }
 
+  markBackupDownloadTriggered(): void {
+    this.backupDownloadTriggered = true;
+  }
+
+  canEnterConfirmation(): MigrationExecutionReadiness {
+    const data = this.currentResult;
+    if (!data || data.disposition !== "ready" || !data.plan.executable) {
+      return { ready: false, reason: "当前检查结果还不能进入最终确认。" };
+    }
+    if (!this.backupDownloadTriggered) {
+      return { ready: false, reason: "请先下载并保存原始备份。" };
+    }
+    return { ready: true };
+  }
+
+  setConfirmation(key: MigrationConfirmationKey, value: boolean): MigrationConfirmationValues {
+    this.confirmations = { ...this.confirmations, [key]: value };
+    return this.getConfirmationValues();
+  }
+
+  getConfirmationValues(): MigrationConfirmationValues {
+    return { ...this.confirmations };
+  }
+
+  canStartExecution(): MigrationExecutionReadiness {
+    const confirmationReadiness = this.canEnterConfirmation();
+    if (!confirmationReadiness.ready) return confirmationReadiness;
+    const data = this.currentResult!;
+    if (!data.sourceValidation.valid || data.preview.summary.totalBlockingIssues > 0) {
+      return { ready: false, reason: "当前仍有阻断问题，不能开始升级。" };
+    }
+    if (data.preview.summary.totalManualReview > 0 || data.plan.summary.manualReview > 0) {
+      return { ready: false, reason: "仍有记录需要人工确认，不能开始升级。" };
+    }
+    if (!Object.values(this.confirmations).every(Boolean)) {
+      return { ready: false, reason: "请完成四项确认后再开始升级。" };
+    }
+    return { ready: true };
+  }
+
+  checkExecutionSupport(): MigrationExecutionReadiness {
+    return this.executionRuntime.isWebLocksAvailable()
+      ? { ready: true }
+      : { ready: false, reason: "当前浏览器不支持安全的数据升级，请使用最新版 Chrome 或 Edge 后重试。" };
+  }
+
+  async startExecution(
+    onLifecycle?: (event: MigrationControllerLifecycleEvent) => void
+  ): Promise<MigrationExecutionOutcome> {
+    if (this.executionActive) {
+      throw new MigrationExecutionError({
+        code: "MIGRATION_ACTIVE_SESSION_EXISTS",
+        message: "A migration execution is already active in this page.",
+        recoverable: true
+      });
+    }
+    const readiness = this.canStartExecution();
+    if (!readiness.ready) {
+      throw new MigrationExecutionError({
+        code: "MIGRATION_USER_CONFIRMATION_REQUIRED",
+        message: readiness.reason ?? "Migration confirmation is incomplete.",
+        recoverable: true
+      });
+    }
+
+    onLifecycle?.({ type: "checking_execution_support" });
+    const support = this.checkExecutionSupport();
+    if (!support.ready) {
+      throw new MigrationExecutionError({
+        code: "MIGRATION_LOCK_UNAVAILABLE",
+        message: support.reason ?? "Browser Web Locks are unavailable.",
+        recoverable: true
+      });
+    }
+
+    const data = this.currentResult!;
+    this.executionActive = true;
+    this.closeWarning = undefined;
+    this.abortController = this.executionRuntime.createAbortController();
+    try {
+      onLifecycle?.({ type: "opening_target" });
+      const targetAdapter = this.executionRuntime.createTargetAdapter();
+      this.targetAdapter = targetAdapter;
+      if (!await targetAdapter.isAvailable()) {
+        throw new MigrationExecutionError({
+          code: "MIGRATION_TARGET_UNAVAILABLE",
+          message: "The new local storage is unavailable.",
+          recoverable: true,
+          adapter: targetAdapter.kind
+        });
+      }
+      await targetAdapter.open();
+      if (this.abortController.signal.aborted) {
+        throw new MigrationExecutionError({
+          code: "MIGRATION_CANCELLED",
+          message: "Migration was safely cancelled before execution.",
+          recoverable: true
+        });
+      }
+
+      const lockProvider = this.executionRuntime.createLockProvider();
+      if (lockProvider.kind !== "web-locks" || lockProvider.isAvailable?.() === false) {
+        throw new MigrationExecutionError({
+          code: "MIGRATION_LOCK_UNAVAILABLE",
+          message: "IndexedDB migration requires an available Web Locks provider.",
+          recoverable: true,
+          adapter: targetAdapter.kind
+        });
+      }
+      const executor = this.executionRuntime.createExecutor({
+        targetAdapter,
+        lockProvider,
+        expectedTargetSchemaVersion: MIGRATION_TARGET_SCHEMA_VERSION,
+        onProgress: (progress) => onLifecycle?.({ type: "progress", progress })
+      });
+      const result = await executor.execute({
+        envelope: data.envelope,
+        preview: data.preview,
+        plan: data.plan,
+        userConfirmed: true,
+        signal: this.abortController.signal
+      });
+      if (result.status !== "completed" || result.activeStorageSwitched !== false) {
+        throw new MigrationExecutionError({
+          code: "MIGRATION_VERIFY_FAILED",
+          message: "Migration did not finish in completed-not-activated state.",
+          recoverable: true,
+          adapter: targetAdapter.kind
+        });
+      }
+      return { result, closeWarning: this.closeWarning };
+    } finally {
+      this.executionActive = false;
+      this.abortController = undefined;
+      const adapter = this.targetAdapter;
+      this.targetAdapter = undefined;
+      if (adapter) {
+        try {
+          await adapter.close();
+        } catch {
+          this.closeWarning = "新存储连接关闭时出现提示，但不会覆盖本次升级结果。";
+        }
+      }
+    }
+  }
+
+  requestCancellation(): boolean {
+    if (!this.executionActive || !this.abortController || this.abortController.signal.aborted) return false;
+    this.abortController.abort();
+    return true;
+  }
+
+  isExecutionActive(): boolean {
+    return this.executionActive;
+  }
+
+  getCloseWarning(): string | undefined {
+    return this.closeWarning;
+  }
+
+  async dispose(): Promise<void> {
+    if (this.executionActive) return;
+    const adapter = this.targetAdapter;
+    this.targetAdapter = undefined;
+    if (adapter) await adapter.close().catch(() => undefined);
+  }
+
   private requireEnvelope(): LegacyBackupEnvelope {
     if (!this.currentResult) {
       throw new Error("Migration inspection must complete before preparing a backup download.");
@@ -117,7 +323,7 @@ export function createReadonlyBrowserStorage(storage?: Storage): ReadonlyStorage
   const source = storage ?? globalThis.localStorage;
   if (!source) throw new Error("Browser localStorage is unavailable.");
 
-  // This is the Task 7A read-only boundary. Do not replace it with a full Storage object.
+  // This remains a read-only migration boundary. Never pass the full Storage API to the controller.
   return {
     get length() {
       return source.length;
