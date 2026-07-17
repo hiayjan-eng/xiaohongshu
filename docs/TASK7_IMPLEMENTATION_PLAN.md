@@ -270,6 +270,16 @@ Stop conditions:
 
 Effort: L.
 
+### Task 7C implementation result
+
+- Added `migration-database-inspector.ts`; it checks database existence with `indexedDB.databases()` and refuses to create a missing database by probing with `open()`.
+- Added `MigrationRecoveryController`; inspection opens only an existing database, calls `inspectAll`, validates unresolved metadata and backup status, probes the Web writer lock where required, and always closes the adapter.
+- Extended the executor inspection contract with persisted Backup verification, safe report/result recovery, and persisted-plan Resume. Resume now accepts only a migration id, explicit user confirmation, and optional cancellation signal.
+- Added recovery overview, Resume confirmation, Rollback confirmation, Resume/Rollback progress, safe report, stored-backup download, rollback-failed retry, and responsive styles without changing other product routes.
+- Added reducer states for existing-session discovery and recovery. Refresh repeats read-only discovery; no state automatically starts a write operation.
+- Added controller/reducer contracts, browser E2E for completed/cancelled/conflict/tampering/rollback retry/multi-tab/no-database/mobile behavior, and 15 visual acceptance screenshots at 1440x900 and 390x844.
+- Task 7C still does not activate IndexedDB, delete localStorage, wire repositories to the new adapter, merge to main, or deploy. Task 8 must begin with a design and merge-readiness audit before any activation work.
+
 ## Task 7D: Full Flow Validation
 
 Goal: verify Task 7A-C as a complete flow without using real user browser data.

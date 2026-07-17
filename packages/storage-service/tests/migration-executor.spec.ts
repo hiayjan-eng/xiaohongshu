@@ -17,7 +17,7 @@ import { makeSavedItem } from "./fixtures";
 import { createMigrationExecutionFixture, makeExecutionState } from "./migration-executor-fixtures";
 import { expectStorageError, TestHarness } from "./test-harness";
 
-const CASE_COUNT = 30;
+const CASE_COUNT = 34;
 
 export function runMigrationExecutorTests(harness: TestHarness): void {
   harness.test("MigrationExecutor: executes an approved plan into target storage", async () => {
@@ -134,7 +134,7 @@ export function runMigrationExecutorTests(harness: TestHarness): void {
       "simulated write failure"
     );
     harness.equal((await target.getAll("savedItems")).length, 1, "store transaction had committed before failure");
-    const resumed = await executor.resume({ migrationId: preview.migrationId, envelope, preview, userConfirmed: true });
+    const resumed = await executor.resume({ migrationId: preview.migrationId, userConfirmed: true });
     harness.equal(resumed.status, "completed", "resume status");
     harness.equal(resumed.resumed, true, "resume count reflected");
     harness.equal((await target.getAll("planCards")).length, 1, "remaining stores written");
@@ -159,7 +159,7 @@ export function runMigrationExecutorTests(harness: TestHarness): void {
     await target.put("savedItems", makeSavedItem("saved-001", { userNote: "changed target note" }));
     await expectStorageError(
       harness,
-      () => executor.resume({ migrationId: preview.migrationId, envelope, preview, userConfirmed: true }),
+      () => executor.resume({ migrationId: preview.migrationId, userConfirmed: true }),
       "MIGRATION_RESUME_CONFLICT",
       "resume conflict"
     );
@@ -273,6 +273,57 @@ export function runMigrationExecutorTests(harness: TestHarness): void {
     harness.equal(inspection.found, true, "inspection found");
     harness.equal(inspection.canResume, true, "can resume");
     harness.equal(inspection.canRollback, true, "can rollback");
+  });
+
+  harness.test("MigrationExecutor: inspectAll returns verified backup and persisted MigrationReport", async () => {
+    const { envelope, preview, target } = await createMigrationExecutionFixture();
+    const executor = createMigrationExecutor({ targetAdapter: target });
+    await executor.execute({ envelope, preview, userConfirmed: true });
+    const inspections = await executor.inspectAll();
+    harness.equal(inspections.length, 1, "one persisted inspection");
+    harness.equal(inspections[0].backup.status, "verified", "persisted backup verified");
+    harness.equal(inspections[0].report?.migrationId, preview.migrationId, "preview report persisted");
+    harness.equal(inspections[0].result?.status, "completed", "completed result reconstructed");
+  });
+
+  harness.test("MigrationExecutor: persisted resume still requires explicit confirmation", async () => {
+    const { envelope, preview, target } = await createMigrationExecutionFixture();
+    const failing = createMigrationExecutor({
+      targetAdapter: target,
+      faultInjector: { beforeStoreWrite({ store }) { if (store === "savedItems") throw new Error("pause"); } }
+    });
+    await expectStorageError(harness, () => failing.execute({ envelope, preview, userConfirmed: true }), "MIGRATION_WRITE_FAILED", "seed failed migration");
+    const retry = createMigrationExecutor({ targetAdapter: target });
+    await expectStorageError(
+      harness,
+      () => retry.resume({ migrationId: preview.migrationId, userConfirmed: false }),
+      "MIGRATION_USER_CONFIRMATION_REQUIRED",
+      "resume confirmation"
+    );
+  });
+
+  harness.test("MigrationExecutor: stored backup can be independently verified and read", async () => {
+    const { envelope, preview, target } = await createMigrationExecutionFixture();
+    const executor = createMigrationExecutor({ targetAdapter: target });
+    await executor.execute({ envelope, preview, userConfirmed: true });
+    const persisted = await executor.readPersistedBackup(preview.migrationId);
+    harness.equal(persisted.envelope.backupId, envelope.backupId, "stored envelope id");
+    harness.equal(persisted.migrationId, preview.migrationId, "stored migration id");
+    harness.assert(persisted.serializedEnvelope.includes(envelope.backupId), "serialized backup retained");
+  });
+
+  harness.test("MigrationExecutor: tampered stored backup disables resume inspection", async () => {
+    const { envelope, preview, target } = await createMigrationExecutionFixture();
+    const failing = createMigrationExecutor({
+      targetAdapter: target,
+      faultInjector: { beforeStoreWrite({ store }) { if (store === "savedItems") throw new Error("pause"); } }
+    });
+    await expectStorageError(harness, () => failing.execute({ envelope, preview, userConfirmed: true }), "MIGRATION_WRITE_FAILED", "seed recoverable migration");
+    const backup = await target.get("backups", "legacy-backup:legacy_backup_execution") as unknown as Record<string, unknown>;
+    await target.put("backups", { ...backup, checksum: "a".repeat(64) } as never);
+    const inspection = await createMigrationExecutor({ targetAdapter: target }).inspect(preview.migrationId);
+    harness.equal(inspection.backup.status, "invalid", "tampered backup invalid");
+    harness.equal(inspection.canResume, false, "tampered backup cannot resume");
   });
 
   harness.test("MigrationExecutor: backup read-back failure blocks business writes", async () => {
@@ -479,8 +530,8 @@ export function runMigrationExecutorTests(harness: TestHarness): void {
     const retry = createMigrationExecutor({ targetAdapter: target });
     await expectStorageError(
       harness,
-      () => retry.resume({ migrationId: preview.migrationId, envelope, preview, userConfirmed: true }),
-      "MIGRATION_BACKUP_PERSIST_FAILED",
+      () => retry.resume({ migrationId: preview.migrationId, userConfirmed: true }),
+      "MIGRATION_RESUME_CONFLICT",
       "resume backup tamper"
     );
   });

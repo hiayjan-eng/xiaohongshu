@@ -117,6 +117,7 @@ export const STORAGE_ENTITY_LABELS: Record<StorageEntityName, string> = {
 const EXECUTION_ERROR_MESSAGES: Record<string, string> = {
   MIGRATION_LOCK_UNAVAILABLE: "当前无法取得安全升级锁。请确认使用最新版 Chrome 或 Edge，并关闭其他正在升级的页面后重试。",
   MIGRATION_LOCK_TIMEOUT: "等待安全升级锁超时。当前没有继续写入，请稍后重试。",
+  MIGRATION_LOCK_HELD: "另一个页面正在处理这次升级，请等待它完成后刷新状态。",
   MIGRATION_ACTIVE_SESSION_EXISTS: "当前已有一次升级尚未处理完成，不能开始新的升级。",
   MIGRATION_USER_CONFIRMATION_REQUIRED: "请完成备份下载和四项确认后再开始升级。",
   MIGRATION_PREVIEW_BLOCKED: "当前仍有数据需要确认，暂时不能开始升级。",
@@ -133,8 +134,12 @@ const EXECUTION_ERROR_MESSAGES: Record<string, string> = {
   MIGRATION_VERIFY_FAILED: "写入后的校验没有通过，新存储没有被启用。",
   MIGRATION_CHECKPOINT_INVALID: "升级记录不完整，当前不会继续覆盖新存储。",
   MIGRATION_CANCELLED: "升级已经安全停止，新存储尚未启用。",
-  MIGRATION_RESUME_CONFLICT: "新存储中的数据与升级记录不一致，不能自动继续。",
+  MIGRATION_RESUME_CONFLICT: "新存储中的数据与升级记录不一致，不能自动继续。建议先恢复到升级前。",
+  MIGRATION_ALREADY_COMPLETED: "这次升级已经完成，不需要再次继续。",
   MIGRATION_ALREADY_ACTIVATED: "新存储已被标记为启用，当前流程不会继续修改。",
+  MIGRATION_ROLLBACK_NOT_AVAILABLE: "当前状态不能安全恢复到升级前。",
+  MIGRATION_ROLLBACK_FAILED: "恢复没有全部完成。原始备份仍然保留，请继续恢复，不要清理浏览器数据。",
+  MIGRATION_CHECKSUM_MISMATCH: "备份或新存储校验没有通过，当前不会自动继续。",
   MIGRATION_NOT_FOUND: "没有找到对应的升级记录。"
 };
 

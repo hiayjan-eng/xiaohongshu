@@ -7,12 +7,19 @@ import { MigrationExecutionResultStep } from "./MigrationExecutionResultStep";
 import { MigrationExecutionStep } from "./MigrationExecutionStep";
 import { MigrationInspectionStep } from "./MigrationInspectionStep";
 import { MigrationPreviewStep } from "./MigrationPreviewStep";
+import { MigrationRecoveryOverview } from "./MigrationRecoveryOverview";
+import { MigrationRecoveryProgress } from "./MigrationRecoveryProgress";
+import { MigrationResumeConfirmation, MigrationRollbackConfirmation } from "./MigrationRecoveryConfirmations";
 import {
   MigrationFlowController,
   createReadonlyBrowserStorage,
   MIGRATION_INSPECTION_PROGRESS,
   type MigrationControllerLifecycleEvent
 } from "./migration-flow-controller";
+import {
+  MigrationRecoveryController,
+  type MigrationRecoveryLifecycleEvent
+} from "./migration-recovery-controller";
 import { toSafeMigrationUiError } from "./migration-error-messages";
 import { initialMigrationPreviewUiState, migrationPreviewReducer } from "./migration-preview-reducer";
 import type { MigrationConfirmationKey, MigrationPreviewUiStateName } from "./migration-preview-types";
@@ -31,7 +38,19 @@ const ACTIVE_EXECUTION_STATES = new Set<MigrationPreviewUiStateName>([
   "acquiring_lock",
   "executing",
   "cancelling",
-  "verifying"
+  "verifying",
+  "resuming",
+  "rolling_back"
+]);
+
+const RECOVERY_OVERVIEW_STATES = new Set<MigrationPreviewUiStateName>([
+  "resume_available",
+  "rollback_available",
+  "rollback_failed",
+  "rolled_back",
+  "recovery_blocked",
+  "another_session_running",
+  "completed_not_activated"
 ]);
 
 export function MigrationDataUpgradePage({
@@ -41,6 +60,8 @@ export function MigrationDataUpgradePage({
 }: MigrationDataUpgradePageProps) {
   const [state, dispatch] = useReducer(migrationPreviewReducer, initialMigrationPreviewUiState);
   const controllerRef = useRef<MigrationFlowController | null>(null);
+  const recoveryControllerRef = useRef<MigrationRecoveryController | null>(null);
+  const existingSessionCheckedRef = useRef(false);
   const executionActive = ACTIVE_EXECUTION_STATES.has(state.status);
   const readiness = controllerRef.current?.canStartExecution() ?? { ready: false, reason: "请先完成数据检查和备份。" };
 
@@ -68,6 +89,24 @@ export function MigrationDataUpgradePage({
   useEffect(() => () => {
     void controllerRef.current?.dispose();
   }, []);
+
+  useEffect(() => {
+    if (existingSessionCheckedRef.current) return;
+    existingSessionCheckedRef.current = true;
+    void inspectExistingSession();
+  }, []);
+
+  async function inspectExistingSession() {
+    dispatch({ type: "CHECK_EXISTING_SESSION" });
+    try {
+      const controller = recoveryControllerRef.current ?? new MigrationRecoveryController();
+      recoveryControllerRef.current = controller;
+      const recovery = await controller.inspectExistingSession();
+      dispatch({ type: "EXISTING_SESSION_RESOLVED", recovery });
+    } catch (error) {
+      dispatch({ type: "EXISTING_SESSION_FAILED", error: toSafeMigrationUiError(error) });
+    }
+  }
 
   async function inspectCurrentData() {
     dispatch({ type: "START_INSPECTION", progress: MIGRATION_INSPECTION_PROGRESS[0] });
@@ -113,18 +152,14 @@ export function MigrationDataUpgradePage({
     try {
       await waitForNextPaint();
       const outcome = await controller.startExecution(handleLifecycleEvent);
-      dispatch({
-        type: "EXECUTION_COMPLETED",
-        result: outcome.result,
-        closeWarning: controller.getCloseWarning()
-      });
+      const recovery = await requireRecoveryController().inspectExistingSession();
+      dispatch({ type: "RECOVERY_COMPLETED", result: outcome.result, recovery, closeWarning: controller.getCloseWarning() });
     } catch (error) {
       const safeError = toSafeMigrationUiError(error);
-      if (safeError.code === "MIGRATION_CANCELLED") {
-        dispatch({ type: "EXECUTION_CANCELLED", error: safeError, closeWarning: controller.getCloseWarning() });
-      } else {
-        dispatch({ type: "EXECUTION_FAILED", error: safeError, closeWarning: controller.getCloseWarning() });
-      }
+      const recovery = await safelyInspectRecovery(safeError);
+      if (safeError.code === "MIGRATION_CANCELLED" && recovery?.inspection) dispatch({ type: "RECOVERY_CANCELLED", recovery, error: safeError, closeWarning: controller.getCloseWarning() });
+      else if (recovery?.inspection) dispatch({ type: "RECOVERY_FAILED", recovery, error: safeError, closeWarning: controller.getCloseWarning() });
+      else dispatch({ type: "EXECUTION_FAILED", error: safeError, closeWarning: controller.getCloseWarning() });
     }
   }
 
@@ -135,7 +170,9 @@ export function MigrationDataUpgradePage({
   }
 
   function requestCancellation() {
-    if (controllerRef.current?.requestCancellation()) dispatch({ type: "CANCELLING" });
+    if (controllerRef.current?.requestCancellation() || recoveryControllerRef.current?.requestResumeCancellation()) {
+      dispatch({ type: "CANCELLING" });
+    }
   }
 
   function reinspect() {
@@ -143,12 +180,110 @@ export function MigrationDataUpgradePage({
     void inspectCurrentData();
   }
 
+  async function refreshRecovery() {
+    dispatch({ type: "START_REFRESH_RECOVERY" });
+    await inspectExistingSession();
+  }
+
+  async function resumeMigration() {
+    const inspection = state.recovery?.inspection;
+    if (!inspection) return;
+    dispatch({ type: "START_RESUME" });
+    try {
+      await waitForNextPaint();
+      const result = await requireRecoveryController().resumeMigration(inspection, state.resumeConfirmed, handleRecoveryLifecycle);
+      const recovery = await requireRecoveryController().inspectExistingSession();
+      dispatch({ type: "RECOVERY_COMPLETED", result, recovery, closeWarning: requireRecoveryController().getCloseWarning() });
+    } catch (error) {
+      await handleRecoveryFailure(error);
+    }
+  }
+
+  async function rollbackMigration() {
+    const inspection = state.recovery?.inspection;
+    if (!inspection) return;
+    dispatch({ type: "START_ROLLBACK" });
+    try {
+      await waitForNextPaint();
+      const result = await requireRecoveryController().rollbackMigration(inspection, state.rollbackConfirmations, handleRecoveryLifecycle);
+      const recovery = await requireRecoveryController().inspectExistingSession();
+      dispatch({ type: "RECOVERY_COMPLETED", result, recovery, closeWarning: requireRecoveryController().getCloseWarning() });
+    } catch (error) {
+      await handleRecoveryFailure(error);
+    }
+  }
+
+  async function handleRecoveryFailure(error: unknown) {
+    const safeError = toSafeMigrationUiError(error);
+    const inspected = await safelyInspectRecovery(safeError);
+    if (!inspected) {
+      dispatch({ type: "EXISTING_SESSION_FAILED", error: safeError });
+      return;
+    }
+    const recovery = safeError.code === "MIGRATION_RESUME_CONFLICT"
+      ? { ...inspected, disposition: "recovery_blocked" as const, reason: safeError.message }
+      : inspected;
+    if (safeError.code === "MIGRATION_CANCELLED") {
+      dispatch({ type: "RECOVERY_CANCELLED", recovery, error: safeError, closeWarning: requireRecoveryController().getCloseWarning() });
+    } else {
+      dispatch({ type: "RECOVERY_FAILED", recovery, error: safeError, closeWarning: requireRecoveryController().getCloseWarning() });
+    }
+  }
+
+  function handleRecoveryLifecycle(event: MigrationRecoveryLifecycleEvent) {
+    if (event.type === "progress" && event.progress) dispatch({ type: "RECOVERY_PROGRESS", progress: event.progress });
+  }
+
+  async function downloadStoredBackup() {
+    const migrationId = state.recovery?.inspection?.migrationId;
+    if (!migrationId) return;
+    try {
+      const prepared = await requireRecoveryController().prepareStoredBackupDownload(migrationId);
+      triggerPreparedBackupDownload(prepared);
+      dispatch({ type: "STORED_BACKUP_DOWNLOADED", filename: prepared.filename });
+    } catch (error) {
+      dispatch({ type: "RECOVERY_FAILED", recovery: state.recovery!, error: toSafeMigrationUiError(error) });
+    }
+  }
+
+  function downloadRecoveryReport() {
+    const inspection = state.recovery?.inspection;
+    if (!inspection) return;
+    try {
+      const prepared = requireRecoveryController().prepareReportDownload(inspection);
+      triggerPreparedBackupDownload(prepared);
+      dispatch({ type: "REPORT_DOWNLOADED", filename: prepared.filename });
+    } catch (error) {
+      dispatch({ type: "RECOVERY_FAILED", recovery: state.recovery!, error: toSafeMigrationUiError(error) });
+    }
+  }
+
+  async function safelyInspectRecovery(error: { code: string; message: string }) {
+    try {
+      return await requireRecoveryController().inspectExistingSession();
+    } catch {
+      void error;
+      return undefined;
+    }
+  }
+
+  function requireRecoveryController() {
+    const controller = recoveryControllerRef.current ?? new MigrationRecoveryController();
+    recoveryControllerRef.current = controller;
+    return controller;
+  }
+
   function handleBackToSettings() {
-    if (executionActive && !window.confirm("升级仍在进行。离开后本页面不会自动恢复进度，确定要离开吗？")) return;
+    if (executionActive && !window.confirm("当前操作仍在进行。离开页面不会切换新存储，但可能需要稍后继续处理。确定仍然离开吗？")) return;
     onBackToSettings();
   }
 
   const showExecution = ACTIVE_EXECUTION_STATES.has(state.status);
+  const recoveryReport = state.recovery?.inspection
+    ? requireRecoveryController().createReport(state.recovery.inspection)
+    : undefined;
+  const showRecoveryOverview = RECOVERY_OVERVIEW_STATES.has(state.status) && Boolean(state.recovery) && !state.selectedAction;
+  const showWizard = !state.recovery && state.status !== "checking_existing_session" && state.status !== "recovery_blocked";
 
   return (
     <div
@@ -166,24 +301,33 @@ export function MigrationDataUpgradePage({
         <p>先检查、再备份，确认后才会写入新存储。当前不会切换正在使用的数据源。</p>
       </header>
 
-      <div className="migration-mobile-step" aria-live="polite">
-        第 {state.currentStep} / 5 步 · {STEPS[state.currentStep - 1]}
-      </div>
-      <ol className="migration-steps migration-steps--five" aria-label="数据升级步骤">
-        {STEPS.map((step, index) => {
-          const stepNumber = index + 1;
-          const completed = stepNumber < state.currentStep || (state.status === "completed_not_activated" && stepNumber === 5);
-          const active = stepNumber === state.currentStep;
-          return (
-            <li key={step} className={active ? "active" : completed ? "completed" : ""} aria-current={active ? "step" : undefined}>
-              <span>{completed ? <CheckCircle2 size={16} aria-hidden="true" /> : stepNumber}</span>
-              <strong>{step}</strong>
-            </li>
-          );
-        })}
-      </ol>
+      {showWizard && (
+        <>
+          <div className="migration-mobile-step" aria-live="polite">第 {state.currentStep} / 5 步 · {STEPS[state.currentStep - 1]}</div>
+          <ol className="migration-steps migration-steps--five" aria-label="数据升级步骤">
+            {STEPS.map((step, index) => {
+              const stepNumber = index + 1;
+              const completed = stepNumber < state.currentStep || (state.status === "completed_not_activated" && stepNumber === 5);
+              const active = stepNumber === state.currentStep;
+              return (
+                <li key={step} className={active ? "active" : completed ? "completed" : ""} aria-current={active ? "step" : undefined}>
+                  <span>{completed ? <CheckCircle2 size={16} aria-hidden="true" /> : stepNumber}</span>
+                  <strong>{step}</strong>
+                </li>
+              );
+            })}
+          </ol>
+        </>
+      )}
 
-      {(state.status === "idle" || state.status === "inspecting") && (
+      {state.status === "checking_existing_session" && (
+        <section className="migration-stage-card migration-existing-session-check" aria-live="polite" data-testid="checking-existing-migration-session">
+          <h2>正在检查上一次升级状态</h2>
+          <p>这里只会读取新存储中的升级记录，不会继续或恢复数据。</p>
+        </section>
+      )}
+
+      {(state.status === "idle" || state.status === "existing_session_not_found" || state.status === "inspecting") && (
         <MigrationInspectionStep
           inspecting={state.status === "inspecting"}
           progress={state.inspectionProgress}
@@ -234,7 +378,57 @@ export function MigrationDataUpgradePage({
         />
       )}
 
-      {(state.status === "completed_not_activated" || state.status === "cancelled" || state.status === "execution_failed") && (
+      {showRecoveryOverview && state.recovery && (
+        <MigrationRecoveryOverview
+          recovery={state.recovery}
+          report={recoveryReport}
+          reportExpanded={state.reportExpanded}
+          reportFilename={state.reportFilename}
+          storedBackupFilename={state.storedBackupFilename}
+          refreshing={state.recoveryRefreshing}
+          error={state.recoveryError}
+          onResume={() => dispatch({ type: "SELECT_RECOVERY_ACTION", action: "resume" })}
+          onRollback={() => dispatch({ type: "SELECT_RECOVERY_ACTION", action: "rollback" })}
+          onReinspectLegacy={() => void inspectCurrentData()}
+          onRefresh={() => void refreshRecovery()}
+          onDownloadBackup={() => void downloadStoredBackup()}
+          onToggleReport={() => dispatch({ type: "TOGGLE_REPORT" })}
+          onDownloadReport={downloadRecoveryReport}
+          onReturnToSettings={handleBackToSettings}
+        />
+      )}
+
+      {state.selectedAction === "resume" && state.recovery?.inspection && (
+        <MigrationResumeConfirmation
+          inspection={state.recovery.inspection}
+          confirmed={state.resumeConfirmed}
+          onChange={(value) => dispatch({ type: "SET_RESUME_CONFIRMATION", value })}
+          onCancel={() => dispatch({ type: "SELECT_RECOVERY_ACTION" })}
+          onConfirm={() => void resumeMigration()}
+        />
+      )}
+
+      {state.selectedAction === "rollback" && state.recovery?.inspection && (
+        <MigrationRollbackConfirmation
+          inspection={state.recovery.inspection}
+          values={state.rollbackConfirmations}
+          onChange={(key, value) => dispatch({ type: "SET_ROLLBACK_CONFIRMATION", key, value })}
+          onCancel={() => dispatch({ type: "SELECT_RECOVERY_ACTION" })}
+          onConfirm={() => void rollbackMigration()}
+        />
+      )}
+
+      {(state.status === "resuming" || state.status === "rolling_back" || (state.status === "cancelling" && state.recovery)) && state.recovery?.inspection && (
+        <MigrationRecoveryProgress
+          operation={state.status === "rolling_back" ? "rollback" : "resume"}
+          inspection={state.recovery.inspection}
+          progress={state.recoveryProgress}
+          canCancel={state.status !== "cancelling" && state.status !== "rolling_back"}
+          onCancel={() => dispatch({ type: "OPEN_CANCEL_DIALOG" })}
+        />
+      )}
+
+      {!state.recovery && (state.status === "completed_not_activated" || state.status === "cancelled" || state.status === "execution_failed") && (
         <MigrationExecutionResultStep
           status={state.status}
           result={state.executionResult}
@@ -265,8 +459,10 @@ export function MigrationDataUpgradePage({
 
       <p className="migration-memory-note">
         {executionActive
-          ? "升级执行中请保持页面打开。Task 7C 完成前，刷新后不会自动恢复此页面。"
-          : "检查结果只保留在当前页面。刷新或离开后需要重新检查。"}
+          ? "当前操作仍在进行。离开不会切换新存储，但可能需要稍后继续处理。"
+          : state.recovery
+            ? "刷新页面只会重新检查升级记录，不会自动继续或恢复。"
+            : "检查结果只保留在当前页面。刷新或离开后需要重新检查。"}
       </p>
     </div>
   );

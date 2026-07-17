@@ -139,6 +139,6 @@ test.describe("Task 7A read-only migration preview UI", () => {
     await expect(page.getByTestId("migration-preview-step")).toBeVisible();
     await page.reload();
     await expect(page.getByTestId("migration-inspection-step")).toBeVisible();
-    await expect(page.getByText("检查结果只保留在当前页面")).toBeVisible();
+    await expect(page.getByText("刷新页面只会重新检查升级记录，不会自动继续或恢复。")).toBeVisible();
   });
 });

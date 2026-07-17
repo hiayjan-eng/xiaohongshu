@@ -224,7 +224,9 @@ test.describe("Task 7B migration execution UI", () => {
     const cancelled = page.getByTestId("migration-cancelled");
     await expect(cancelled).toBeVisible({ timeout: 30_000 });
     await expect(cancelled).toContainText("当前使用：旧本地存储");
-    await expect(cancelled.getByRole("button", { name: /继续升级|恢复|启用/ })).toHaveCount(0);
+    await expect(cancelled.getByRole("button", { name: "继续升级" })).toBeVisible();
+    await expect(cancelled.getByRole("button", { name: "恢复到升级前" })).toBeVisible();
+    await expect(cancelled.getByRole("button", { name: /启用/ })).toHaveCount(0);
     const counts = await readIndexedDbCounts(page);
     expect([0, 3000]).toContain(counts.savedItems);
     expect([0, 3000]).toContain(counts.importBatchItems);

@@ -1247,6 +1247,237 @@
   }
 }
 
+.migration-existing-session-check {
+  min-height: 180px;
+  display: grid;
+  align-content: center;
+  gap: 8px;
+}
+
+.migration-existing-session-check h2,
+.migration-existing-session-check p {
+  margin: 0;
+}
+
+.migration-recovery-overview,
+.migration-recovery-confirmation {
+  display: grid;
+  gap: 22px;
+}
+
+.migration-recovery-overview--success .migration-result-heading > span {
+  color: #2f7658;
+  background: #edf7f1;
+}
+
+.migration-recovery-overview--warning .migration-result-heading > span {
+  color: #93611f;
+  background: #fff7e8;
+}
+
+.migration-recovery-overview--danger .migration-result-heading > span {
+  color: #a44d4d;
+  background: #fff1f1;
+}
+
+.migration-recovery-facts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 0;
+  border-top: 1px solid var(--migration-border, #e7e3ec);
+  border-bottom: 1px solid var(--migration-border, #e7e3ec);
+}
+
+.migration-recovery-facts > div {
+  min-width: 0;
+  padding: 16px 14px;
+  border-right: 1px solid var(--migration-border, #e7e3ec);
+}
+
+.migration-recovery-facts > div:nth-child(4n) {
+  border-right: 0;
+}
+
+.migration-recovery-facts dt,
+.migration-recovery-facts dd {
+  margin: 0;
+}
+
+.migration-recovery-facts dt {
+  margin-bottom: 5px;
+  color: var(--text-muted, #736d79);
+  font-size: 12px;
+}
+
+.migration-recovery-facts dd {
+  overflow-wrap: anywhere;
+  color: var(--text-primary, #29252d);
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.migration-recovery-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.migration-warning-button {
+  min-height: 42px;
+  border: 1px solid #c47b38;
+  border-radius: 7px;
+  background: #fff8ed;
+  color: #874a18;
+  padding: 0 18px;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.migration-warning-button:hover:not(:disabled) {
+  background: #ffefd7;
+}
+
+.migration-warning-button:disabled {
+  cursor: not-allowed;
+  opacity: .48;
+}
+
+.migration-recovery-confirmation--warning {
+  border-color: #ecd6b8;
+}
+
+.migration-lock-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: #80591f;
+}
+
+.migration-report-panel {
+  border-top: 1px solid var(--migration-border, #e7e3ec);
+  padding-top: 18px;
+}
+
+.migration-report-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 4px 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.migration-report-toggle > span {
+  display: grid;
+  gap: 3px;
+}
+
+.migration-report-toggle small {
+  color: var(--text-muted, #736d79);
+  font-weight: 400;
+}
+
+.migration-report-content {
+  display: grid;
+  gap: 18px;
+  padding-top: 18px;
+}
+
+.migration-report-checkpoints {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.migration-report-checkpoints details {
+  min-width: 0;
+  border: 1px solid var(--migration-border, #e7e3ec);
+  border-radius: 7px;
+  background: #fff;
+}
+
+.migration-report-checkpoints summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  cursor: pointer;
+}
+
+.migration-report-checkpoints summary strong {
+  color: var(--text-muted, #736d79);
+  font-size: 12px;
+}
+
+.migration-report-checkpoints dl {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0 14px 14px;
+}
+
+.migration-report-checkpoints dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.migration-report-checkpoints dt,
+.migration-report-checkpoints dd {
+  margin: 0;
+  font-size: 13px;
+}
+
+.migration-report-checkpoints dt {
+  color: var(--text-muted, #736d79);
+}
+
+.migration-technical-details ul {
+  margin: 10px 0 0;
+  padding-left: 20px;
+}
+
+@media (max-width: 800px) {
+  .migration-recovery-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .migration-recovery-facts > div:nth-child(2n) {
+    border-right: 0;
+  }
+
+  .migration-report-checkpoints {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 600px) {
+  .migration-recovery-actions,
+  .migration-recovery-confirmation .migration-footer-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+    width: 100%;
+  }
+
+  .migration-recovery-actions button,
+  .migration-recovery-confirmation .migration-footer-actions button,
+  .migration-report-content > button {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .migration-recovery-facts > div {
+    padding: 13px 10px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .migration-progress__pulse {
     animation: none;

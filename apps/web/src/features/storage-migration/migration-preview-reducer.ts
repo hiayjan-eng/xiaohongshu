@@ -13,7 +13,11 @@ export const initialMigrationPreviewUiState: MigrationPreviewUiState = {
   currentStep: 1,
   confirmationValues: { ...EMPTY_MIGRATION_CONFIRMATIONS },
   canCancel: false,
-  cancelDialogOpen: false
+  cancelDialogOpen: false,
+  resumeConfirmed: false,
+  rollbackConfirmations: { clearNewStorage: false, recheckRequired: false },
+  reportExpanded: false,
+  recoveryRefreshing: false
 };
 
 export function migrationPreviewReducer(
@@ -111,6 +115,87 @@ export function migrationPreviewReducer(
         technicalErrorCode: action.error.code,
         closeWarning: action.closeWarning
       };
+    case "CHECK_EXISTING_SESSION":
+      return { ...initialMigrationPreviewUiState, status: "checking_existing_session" };
+    case "EXISTING_SESSION_RESOLVED":
+      return {
+        ...initialMigrationPreviewUiState,
+        status: action.recovery.disposition,
+        currentStep: 5,
+        recovery: action.recovery,
+        executionResult: action.recovery.inspection?.result
+      };
+    case "EXISTING_SESSION_FAILED":
+      return {
+        ...initialMigrationPreviewUiState,
+        status: "recovery_blocked",
+        recoveryError: action.error,
+        recoveryTechnicalCode: action.error.code
+      };
+    case "SELECT_RECOVERY_ACTION":
+      return {
+        ...state,
+        selectedAction: action.action,
+        resumeConfirmed: action.action === "resume" ? false : state.resumeConfirmed,
+        rollbackConfirmations: action.action === "rollback"
+          ? { clearNewStorage: false, recheckRequired: false }
+          : state.rollbackConfirmations
+      };
+    case "SET_RESUME_CONFIRMATION":
+      return state.selectedAction === "resume" ? { ...state, resumeConfirmed: action.value } : state;
+    case "SET_ROLLBACK_CONFIRMATION":
+      return state.selectedAction === "rollback"
+        ? { ...state, rollbackConfirmations: { ...state.rollbackConfirmations, [action.key]: action.value } }
+        : state;
+    case "START_RESUME":
+      return { ...state, status: "resuming", selectedAction: undefined, canCancel: true, recoveryError: undefined };
+    case "START_ROLLBACK":
+      return { ...state, status: "rolling_back", selectedAction: undefined, canCancel: false, recoveryError: undefined };
+    case "RECOVERY_PROGRESS":
+      return {
+        ...state,
+        recoveryProgress: action.progress,
+        status: state.status === "rolling_back" || action.progress.status === "rollback_pending" ? "rolling_back" : "resuming"
+      };
+    case "RECOVERY_COMPLETED":
+      return {
+        ...state,
+        status: action.result.status === "rolled_back" ? "rolled_back" : "completed_not_activated",
+        recovery: action.recovery,
+        executionResult: action.result,
+        canCancel: false,
+        closeWarning: action.closeWarning,
+        selectedAction: undefined
+      };
+    case "RECOVERY_CANCELLED":
+      return {
+        ...state,
+        status: action.recovery.disposition,
+        recovery: action.recovery,
+        recoveryError: action.error,
+        recoveryTechnicalCode: action.error?.code,
+        canCancel: false,
+        closeWarning: action.closeWarning
+      };
+    case "RECOVERY_FAILED":
+      return {
+        ...state,
+        status: action.recovery.disposition,
+        recovery: action.recovery,
+        recoveryError: action.error,
+        recoveryTechnicalCode: action.error.code,
+        canCancel: false,
+        closeWarning: action.closeWarning,
+        selectedAction: undefined
+      };
+    case "STORED_BACKUP_DOWNLOADED":
+      return { ...state, storedBackupFilename: action.filename };
+    case "REPORT_DOWNLOADED":
+      return { ...state, reportFilename: action.filename };
+    case "TOGGLE_REPORT":
+      return { ...state, reportExpanded: action.expanded ?? !state.reportExpanded };
+    case "START_REFRESH_RECOVERY":
+      return { ...state, recoveryRefreshing: true, recoveryError: undefined };
     case "RESET":
       return initialMigrationPreviewUiState;
   }

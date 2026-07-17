@@ -127,7 +127,7 @@ test.describe("Task 7A migration flow controller", () => {
     expect(migrationPreviewReducer(failed, { type: "RESET" })).toEqual(initialMigrationPreviewUiState);
   });
 
-  test("Task 7B production boundary has no test lock bypass, storage writes, resume, or rollback wiring", async () => {
+  test("Task 7C production boundary permits explicit recovery without unsafe locks or localStorage writes", async () => {
     const fs = await import("node:fs/promises");
     const path = await import("node:path");
     const featureDir = path.resolve(process.cwd(), "src/features/storage-migration");
@@ -139,7 +139,9 @@ test.describe("Task 7A migration flow controller", () => {
     expect(source).not.toContain("localStorage.setItem");
     expect(source).not.toContain("localStorage.removeItem");
     expect(source).not.toContain("localStorage.clear");
-    expect(source).not.toContain(".resume(");
-    expect(source).not.toContain(".rollback(");
+    const recoverySource = await fs.readFile(path.join(featureDir, "migration-recovery-controller.ts"), "utf8");
+    expect(recoverySource).toContain("executor.resume({ migrationId:");
+    expect(recoverySource).toContain("executor.rollback({ migrationId:");
+    expect(recoverySource).not.toContain("executor.execute(");
   });
 });

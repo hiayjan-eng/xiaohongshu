@@ -345,7 +345,18 @@ Implemented contract:
 
 ### Task 7C: Resume and Rollback UI
 
-Includes refresh recovery, inspect, resume, rollback, rollback failed state, and safe Chinese error mapping.
+Implemented on `phase1-task7c-migration-recovery-ui`:
+
+- `/settings/data-migration` explicitly checks for an existing migration session on mount. `IndexedDbDatabaseInspector` uses `indexedDB.databases()` and never calls `open()` to test existence. Unsupported enumeration is a safe blocking state; an absent database returns to the Task 7A inspection entry with zero database creation.
+- An existing database is opened read-only through `IndexedDbAdapter`, `MigrationExecutor.inspectAll()` reads every metadata record and the persisted backup summary, and the adapter is closed in `finally`. More than one unresolved migration or `activeStorageSwitched=true` blocks all recovery actions.
+- The reducer owns `checking_existing_session`, `existing_session_not_found`, `resume_available`, `rollback_available`, `resuming`, `rolling_back`, `rolled_back`, `rollback_failed`, `recovery_blocked`, and `another_session_running`. Page load and refresh only inspect; they never call `execute`, `resume`, or `rollback` automatically.
+- Resume requires one explicit confirmation and a verified persisted backup. It calls `MigrationExecutor.resume({ migrationId, userConfirmed: true })`; the executor reconstructs recovery input from persisted Backup, Metadata, Plan, and Store checkpoints. It does not reread localStorage, rebuild the preview, create a new backup, or call `execute`.
+- Rollback requires two explicit confirmations. It clears only the nine migration business stores, keeps `backups` and `migrationMetadata`, leaves localStorage byte-for-byte unchanged, and supports an idempotent second attempt from `rollback_failed`.
+- Resume and rollback create `WebLocksMigrationLockProvider` at the explicit action boundary. Production Web code has no Memory lock, test-only lock bypass, or no-lock fallback. A held writer lock maps to `another_session_running`; the user must refresh after the other page releases it.
+- Completed sessions map to `completed_not_activated`; rolled-back sessions remain inspectable. Neither state offers activation, old-data deletion, or an active-storage switch.
+- Persisted backup re-download calls the executor's verified read path before constructing the existing Task 4 JSON Blob. A damaged backup disables Resume and download but leaves rollback available when metadata permits it.
+- The safe report contains sanitized migration/execution ids, timestamps, status, counts, checkpoint summaries, backup status, Resume count, recovery capabilities, and whitelisted warning/error codes. It excludes record content, notes, titles, URLs, tokens, serialized envelopes, raw backup, full checksums, and stack traces.
+- Recovery results are rediscovered after refresh; only confirmations, expanded report state, and in-flight presentation remain in React memory. The active product runtime remains localStorage.
 
 ### Task 7D: Full Flow Validation
 

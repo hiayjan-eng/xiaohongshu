@@ -26,7 +26,17 @@ export type MigrationPreviewUiStateName =
   | "cancelled"
   | "verifying"
   | "completed_not_activated"
-  | "execution_failed";
+  | "execution_failed"
+  | "checking_existing_session"
+  | "existing_session_not_found"
+  | "resume_available"
+  | "rollback_available"
+  | "resuming"
+  | "rolling_back"
+  | "rolled_back"
+  | "rollback_failed"
+  | "recovery_blocked"
+  | "another_session_running";
 
 export type MigrationInspectionStage =
   | "reading_local_data"
@@ -92,6 +102,20 @@ export interface MigrationPreviewUiState {
   canCancel: boolean;
   cancelDialogOpen: boolean;
   closeWarning?: string;
+  recovery?: import("./migration-recovery-controller").MigrationRecoveryInspectionResult;
+  recoveryProgress?: MigrationExecutionProgress;
+  recoveryError?: MigrationUiError;
+  recoveryTechnicalCode?: string;
+  selectedAction?: "resume" | "rollback" | "report";
+  resumeConfirmed: boolean;
+  rollbackConfirmations: {
+    clearNewStorage: boolean;
+    recheckRequired: boolean;
+  };
+  reportExpanded: boolean;
+  storedBackupFilename?: string;
+  reportFilename?: string;
+  recoveryRefreshing: boolean;
 }
 
 export type MigrationPreviewUiAction =
@@ -115,6 +139,22 @@ export type MigrationPreviewUiAction =
   | { type: "EXECUTION_CANCELLED"; error?: MigrationUiError; closeWarning?: string }
   | { type: "EXECUTION_COMPLETED"; result: MigrationExecutionResult; closeWarning?: string }
   | { type: "EXECUTION_FAILED"; error: MigrationUiError; closeWarning?: string }
+  | { type: "CHECK_EXISTING_SESSION" }
+  | { type: "EXISTING_SESSION_RESOLVED"; recovery: import("./migration-recovery-controller").MigrationRecoveryInspectionResult }
+  | { type: "EXISTING_SESSION_FAILED"; error: MigrationUiError }
+  | { type: "SELECT_RECOVERY_ACTION"; action?: "resume" | "rollback" | "report" }
+  | { type: "SET_RESUME_CONFIRMATION"; value: boolean }
+  | { type: "SET_ROLLBACK_CONFIRMATION"; key: "clearNewStorage" | "recheckRequired"; value: boolean }
+  | { type: "START_RESUME" }
+  | { type: "START_ROLLBACK" }
+  | { type: "RECOVERY_PROGRESS"; progress: MigrationExecutionProgress }
+  | { type: "RECOVERY_COMPLETED"; result: MigrationExecutionResult; recovery: import("./migration-recovery-controller").MigrationRecoveryInspectionResult; closeWarning?: string }
+  | { type: "RECOVERY_CANCELLED"; recovery: import("./migration-recovery-controller").MigrationRecoveryInspectionResult; error?: MigrationUiError; closeWarning?: string }
+  | { type: "RECOVERY_FAILED"; recovery: import("./migration-recovery-controller").MigrationRecoveryInspectionResult; error: MigrationUiError; closeWarning?: string }
+  | { type: "STORED_BACKUP_DOWNLOADED"; filename: string }
+  | { type: "REPORT_DOWNLOADED"; filename: string }
+  | { type: "TOGGLE_REPORT"; expanded?: boolean }
+  | { type: "START_REFRESH_RECOVERY" }
   | { type: "RESET" };
 
 export interface PreparedLegacyBackupDownload {

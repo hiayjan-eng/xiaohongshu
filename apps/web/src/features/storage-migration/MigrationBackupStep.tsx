@@ -82,7 +82,7 @@ export function MigrationBackupStep({
   );
 }
 
-export function triggerPreparedBackupDownload(prepared: PreparedLegacyBackupDownload): void {
+export function triggerPreparedBackupDownload(prepared: Pick<PreparedLegacyBackupDownload, "blob" | "filename">): void {
   const objectUrl = URL.createObjectURL(prepared.blob);
   const link = document.createElement("a");
   try {

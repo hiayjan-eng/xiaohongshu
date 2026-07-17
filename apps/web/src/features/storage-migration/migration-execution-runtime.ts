@@ -6,7 +6,9 @@ import {
   WebLocksMigrationLockProvider,
   type LockManagerLike,
   type MigrationExecutionOptions,
+  type MigrationExecutionInspection,
   type MigrationExecutionResult,
+  type PersistedMigrationBackup,
   type MigrationLockProvider,
   type StorageAdapter
 } from "@revival/storage-service";
@@ -16,6 +18,10 @@ export const MIGRATION_TARGET_SCHEMA_VERSION = DEFAULT_INDEXED_DB_SCHEMA_VERSION
 
 export interface MigrationExecutorLike {
   execute(input: Parameters<MigrationExecutor["execute"]>[0]): Promise<MigrationExecutionResult>;
+  resume(input: Parameters<MigrationExecutor["resume"]>[0]): Promise<MigrationExecutionResult>;
+  rollback(input: Parameters<MigrationExecutor["rollback"]>[0]): Promise<MigrationExecutionResult>;
+  inspectAll(): Promise<MigrationExecutionInspection[]>;
+  readPersistedBackup(migrationId: string): Promise<PersistedMigrationBackup>;
 }
 
 export interface MigrationExecutionRuntime {
