@@ -2,7 +2,6 @@ import fs from "node:fs/promises";
 import { expect, test, type Page } from "@playwright/test";
 import { collectConsoleErrors, expectNoConsoleErrors } from "./helpers";
 import { seedMigrationFixture } from "./migration-preview-fixtures";
-import { completeMigration, deleteDatabase, readMarker, readRecords } from "./activation-prepare.spec";
 
 const MARKER_KEY = "collection-revival-storage-bootstrap:v1";
 const LEGACY_KEYS = ["collection-revival-system:v1", "collection-revival-theme", "collection-revival-achievements"] as const;
