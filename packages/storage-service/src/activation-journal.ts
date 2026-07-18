@@ -168,9 +168,7 @@ function journalIdentity(value: StorageActivationJournalV1): Record<string, unkn
     targetRuntimeChecksum: value.targetRuntimeChecksum,
     bootstrapRevisionBefore: value.bootstrapRevisionBefore,
     databaseName: value.databaseName,
-    schemaVersion: value.schemaVersion,
-    preflightSummary: value.preflightSummary,
-    createdAt: value.createdAt
+    schemaVersion: value.schemaVersion
   };
 }
 
