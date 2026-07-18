@@ -149,19 +149,11 @@ interface AppStateStorageFacade {
 | 搜索结果缓存 | 不迁移，不建 v1 store。 |
 | 文本修复预览 | 与存储迁移独立，不自动应用。 |
 
-## activeStorage 与回退
+## activeStorage 与恢复
 
-建议使用两个标识：
+Task 8 采用独立 Bootstrap Marker `collection-revival-storage-bootstrap:v1` 和 IndexedDB `migrationMetadata` 中的 Activation Journal。Marker 只保存 backend、state、revision、migration/activation id、schema 和 checksum，不含用户内容。settings 镜像不能单独决定启动后端。
 
-1. localStorage 小 key：`collection-revival-active-storage`，值为 `localStorage` 或 `indexedDB`。它只保存启动路由选择，不含用户数据。
-2. IndexedDB `settings.storageRuntime` 和 `migrationMetadata.current`：保存 schemaVersion、lastMigrationId、lastVerifiedAt。
-
-启动流程：
-
-1. 读取 activeStorage 小 key。
-2. 如果是 `indexedDB`，尝试打开 DB 并读取 `migrationMetadata.current`。
-3. 如果 IndexedDB 打开失败或校验失败，显示中文提示并回退 LocalStorageAdapter，只读旧数据。
-4. 不在失败时删除 IndexedDB，也不静默清空 localStorage。
+Marker 缺失时兼容 legacy localStorage。Marker 为 prepared/activating/indexeddb_active 时，启动必须先与 Journal 和 MigrationMetadata 交叉验证。正式激活后 IndexedDB 打开或校验失败时进入启动级 Recovery Screen，不得静默回到可写 LocalStorageAdapter。完整状态机见 `STORAGE_BOOTSTRAP_AND_ACTIVATION_PROTOCOL.md`。
 
 ## 依赖关系图
 
@@ -298,7 +290,7 @@ export type StorageEntityName =
 
 Phase 1 正式迁移只能走 `staging`，不能直接 replace 用户真实数据。
 
-`ActiveStorageMetadata` 只允许 `localStorage` 与 `indexedDB`。activeStorage 标识不进入整个 AppState 大对象，后续应使用独立最小启动元数据；切换 IndexedDB 前必须完成 migration verification，失败时继续使用 LocalStorageAdapter。
+`ActiveStorageMetadata` 只允许 `localStorage` 与 `indexedDB`。activeStorage 标识不进入整个 AppState 大对象，后续使用独立最小 Bootstrap Marker；切换前必须完成 migration verification、source drift 和 boot verification。尚未 commit 时失败继续保持 LocalStorageRuntime；commit 后失败进入 Recovery Screen，禁止静默 fallback writer。
 
 ## Task 1 定稿：Repository 边界
 
