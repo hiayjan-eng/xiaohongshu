@@ -8,7 +8,7 @@ import {
 } from "../src/index";
 import { expectStorageError, TestHarness } from "./test-harness";
 
-const CASE_COUNT = 7;
+const CASE_COUNT = 8;
 
 export function runActivationJournalTests(harness: TestHarness): void {
   harness.test("Activation Journal: record type, schema and safe immutable fields", async () => {
@@ -31,6 +31,21 @@ export function runActivationJournalTests(harness: TestHarness): void {
       harness.equal(first.reused, false, "first creates");
       harness.equal(second.reused, true, "second reuses");
       harness.equal((await repository.list()).length, 1, "one journal");
+    } finally { await close(); }
+  });
+
+  harness.test("Activation Journal: repeat evidence reuses the original record across inspection timestamps", async () => {
+    const { repository, close } = await setup();
+    try {
+      const first = await repository.createOrReuse(input());
+      const second = await repository.createOrReuse({
+        ...input(),
+        createdAt: "2026-07-18T00:05:00.000Z",
+        preflightSummary: { eligible: true, checkedAt: "2026-07-18T00:05:00.000Z", blockingIssueCodes: [], warningCodes: ["SAFE_WARNING"] }
+      });
+      harness.equal(second.reused, true, "same activation evidence reused");
+      harness.equal(second.journal.createdAt, first.journal.createdAt, "original creation time retained");
+      harness.deepEqual(second.journal.preflightSummary, first.journal.preflightSummary, "original safe summary retained");
     } finally { await close(); }
   });
 
