@@ -311,7 +311,6 @@ class SchemaReportingIndexedDbAdapter extends IndexedDbAdapter {
   constructor(databaseName: string) {
     super({ databaseName, schemaVersion: 1, indexedDBFactory: fakeIndexedDB, keyRangeFactory: FakeIDBKeyRange });
   }
-+
   override async getSchemaVersion(): Promise<number> {
     return 2;
   }
