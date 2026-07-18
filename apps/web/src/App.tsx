@@ -203,9 +203,10 @@ type AppContentProps = {
   initialSettings: StorageRuntimeProductSettings;
   runtime: ActiveStorageRuntime;
   writeGate: StorageWriteGate;
+  activatedAt?: string;
 };
 
-export function AppContent({ initialState, initialSettings, runtime, writeGate }: AppContentProps) {
+export function AppContent({ initialState, initialSettings, runtime, writeGate, activatedAt }: AppContentProps) {
   const [state, setState] = useState<AppState>(initialState);
   const [activeView, setActiveView] = useState<ViewKey>(() => getInitialView());
   const [settingsSubRoute, setSettingsSubRoute] = useState<SettingsSubRoute>(() => getInitialSettingsSubRoute());
@@ -3689,7 +3690,7 @@ function SettingsView(props: {
 
       <ThemePicker selectedThemeId={props.themeId} onThemeChange={props.setThemeId} />
 
-      <MigrationDataUpgradeEntry onOpen={props.openDataMigration} />
+      <MigrationDataUpgradeEntry onOpen={props.openDataMigration} runtimeKind={props.runtimeKind} activatedAt={props.activatedAt} />
 
       <section className="tool-panel single settings-list" data-testid="local-data-tools">
         <div className="settings-row">
