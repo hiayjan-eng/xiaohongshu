@@ -52,10 +52,16 @@ export function dehydrateRuntimeState(
 ): DehydratedRuntimeState {
   validateAppState(bundle.state, "RUNTIME_DEHYDRATION_FAILED");
   validateProductSettings(bundle.settings, "RUNTIME_DEHYDRATION_FAILED");
-  const stores = {} as RuntimeEntityRecords;
-  for (const collection of RUNTIME_ORDERED_COLLECTIONS) {
-    stores[collection] = clone(bundle.state[collection] ?? []) as RuntimeEntityRecords[typeof collection];
-  }
+  const stores: RuntimeEntityRecords = {
+    savedItems: clone(bundle.state.savedItems),
+    actionCards: clone(bundle.state.actionCards),
+    planCards: clone(bundle.state.planCards ?? []),
+    classificationCorrections: clone(bundle.state.classificationCorrections ?? []),
+    searchLogs: clone(bundle.state.searchLogs),
+    smartAlbums: clone(bundle.state.smartAlbums ?? []),
+    importBatches: clone(bundle.state.importBatches ?? []),
+    importBatchItems: clone(bundle.state.importBatchItems ?? [])
+  };
   const runtimeSettings = createRuntimeMetadataSettings(bundle.state, updatedAt);
   return {
     stores,
@@ -77,24 +83,26 @@ export function hydrateRuntimeState(input: DehydratedRuntimeState): HydratedRunt
   if (!manifestResult.valid) {
     throw codecError(manifestResult.reason === "missing" ? "RUNTIME_ORDER_MANIFEST_MISSING" : "RUNTIME_ORDER_MANIFEST_INVALID");
   }
-  if (metadataResult.value.appSchemaVersion !== APP_SCHEMA_VERSION) {
+  const metadata = metadataResult.value;
+  const manifest = manifestResult.value;
+  if (!metadata || !manifest) throw codecError("RUNTIME_METADATA_UNSUPPORTED");
+  if (metadata.appSchemaVersion !== APP_SCHEMA_VERSION) {
     throw codecError("RUNTIME_TARGET_SCHEMA_MISMATCH");
   }
 
-  const ordered = {} as RuntimeEntityRecords;
-  for (const collection of RUNTIME_ORDERED_COLLECTIONS) {
-    const records = input.stores[collection];
-    const byId = new Map(records.map((record) => [record.id, record]));
-    const ids = manifestResult.value.orders[collection];
-    if (byId.size !== records.length || ids.length !== records.length || ids.some((id) => !byId.has(id))) {
-      throw codecError("RUNTIME_ORDER_MANIFEST_INVALID");
-    }
-    ordered[collection] = ids.map((id) => clone(byId.get(id)!)) as RuntimeEntityRecords[typeof collection];
-  }
-
+  const ordered: RuntimeEntityRecords = {
+    savedItems: orderRecords(input.stores.savedItems, manifest.orders.savedItems),
+    actionCards: orderRecords(input.stores.actionCards, manifest.orders.actionCards),
+    planCards: orderRecords(input.stores.planCards, manifest.orders.planCards),
+    classificationCorrections: orderRecords(input.stores.classificationCorrections, manifest.orders.classificationCorrections),
+    searchLogs: orderRecords(input.stores.searchLogs, manifest.orders.searchLogs),
+    smartAlbums: orderRecords(input.stores.smartAlbums, manifest.orders.smartAlbums),
+    importBatches: orderRecords(input.stores.importBatches, manifest.orders.importBatches),
+    importBatchItems: orderRecords(input.stores.importBatchItems, manifest.orders.importBatchItems)
+  };
   const state: AppState = {
-    schemaVersion: metadataResult.value.appSchemaVersion,
-    user: clone(metadataResult.value.user),
+    schemaVersion: metadata.appSchemaVersion,
+    user: clone(metadata.user),
     savedItems: ordered.savedItems,
     actionCards: ordered.actionCards,
     planCards: ordered.planCards,
@@ -176,9 +184,16 @@ export function findRuntimeReferenceIssues(state: AppState): RuntimeReferenceIss
 }
 
 export function canonicalRuntimeValue(value: unknown): string {
-  return canonicalJsonStringify(value);
+  return canonicalJsonStringify(value, { adapter: "indexedDB", code: "STORAGE_VALIDATION_FAILED" });
 }
 
+function orderRecords<T extends { id: string }>(records: T[], ids: string[]): T[] {
+  const byId = new Map(records.map((record) => [record.id, record]));
+  if (byId.size !== records.length || ids.length !== records.length || ids.some((id) => !byId.has(id))) {
+    throw codecError("RUNTIME_ORDER_MANIFEST_INVALID");
+  }
+  return ids.map((id) => clone(byId.get(id)!));
+}
 function makeProductSetting(
   key: string,
   value: StoredSetting["value"],
