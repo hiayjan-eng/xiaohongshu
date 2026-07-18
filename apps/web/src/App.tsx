@@ -42,11 +42,7 @@ import { RewardConfetti } from "./components/RewardConfetti";
 import { ThemePicker } from "./components/ThemePicker";
 import { TodayWidgetPreview } from "./components/TodayWidgetPreview";
 import { RealTestView } from "./components/RealTestView";
-import {
-  MIGRATION_LEAVE_WARNING,
-  MigrationDataUpgradeEntry,
-  MigrationDataUpgradePage
-} from "./features/storage-migration";
+import { MigrationDataUpgradeEntry, MigrationDataUpgradePage } from "./features/storage-migration";
 import { ThemeProvider } from "./theme/ThemeProvider";
 import { getThemePreset, THEME_STORAGE_KEY, type ThemePresetId } from "./theme/themePresets";
 import type { ActiveStorageRuntime, StorageRuntimeProductSettings } from "@revival/storage-runtime";
@@ -196,6 +192,8 @@ const SEARCH_OPEN_MESSAGES = [
   "找到了，那条被你想起来的收藏",
   "原帖已打开，收藏没有走丢"
 ];
+
+const MIGRATION_LEAVE_WARNING = "升级仍在进行。离开后本页面不会自动恢复进度，确定要离开吗？";
 
 type AppContentProps = {
   initialState: AppState;
