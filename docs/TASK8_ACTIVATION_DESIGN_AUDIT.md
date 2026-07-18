@@ -6,6 +6,8 @@
 
 `TASK8_DESIGN_STATUS: READY_FOR_TASK8A`
 
+Task 8A 已完成后的实施状态为：`TASK8A_IMPLEMENTATION_STATUS: PASS_WITH_NON_BLOCKING_GAPS`。启动门、LocalStorageRuntime 和持久化协调器已经落地，原 blocking 1、2 已关闭；产品仍固定使用 localStorage，尚未创建 Marker 或启用 IndexedDB。下一步设计门为 `READY_FOR_TASK8B`，但仍不允许 activeStorage 切换、合并 main 或部署。
+
 这个状态表示设计已足够开始 Runtime 契约和 LocalStorage 兼容层，不表示允许切换 activeStorage、合并 main 或部署。
 
 ## 2. 当前启动链
