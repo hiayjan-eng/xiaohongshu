@@ -99,7 +99,7 @@ export interface MigrationExecutionResult {
   expectedChecksums: Partial<Record<StorageEntityName, string>>;
   targetChecksums: Partial<Record<StorageEntityName, string>>;
   rollbackAvailable: boolean;
-  activeStorageSwitched: false;
+  activeStorageSwitched: boolean;
   resumed: boolean;
   resumeCount: number;
   idempotent: boolean;
@@ -195,7 +195,9 @@ export interface MigrationExecutionMetadataRecord extends MigrationMetadata {
   backupChecksum?: string;
   backupByteLength?: number;
   sourceSnapshotChecksum?: string;
-  activeStorageSwitched: false;
+  activeStorageSwitched: boolean;
+  activeStorageSwitchedAt?: string;
+  activationId?: string;
   rollbackAvailable: boolean;
   resumeCount: number;
   checkpoints: MigrationStoreCheckpoint[];
@@ -1480,7 +1482,7 @@ export class MigrationExecutor {
       expectedChecksums: metadata.expectedChecksums,
       targetChecksums: metadata.targetChecksums,
       rollbackAvailable: metadata.rollbackAvailable,
-      activeStorageSwitched: false,
+      activeStorageSwitched: metadata.activeStorageSwitched,
       resumed: metadata.resumeCount > 0,
       resumeCount: metadata.resumeCount,
       idempotent,
