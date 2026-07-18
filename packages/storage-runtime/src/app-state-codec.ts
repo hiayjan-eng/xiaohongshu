@@ -22,9 +22,16 @@ import { StorageRuntimeError, type StorageRuntimeErrorCode } from "./errors";
 
 export type RuntimeEntityStoreName = RuntimeOrderedCollection;
 
-export type RuntimeEntityRecords = {
-  [K in RuntimeEntityStoreName]: StorageRecordMap[(typeof RUNTIME_COLLECTION_STORE_MAP)[K]][];
-};
+export interface RuntimeEntityRecords {
+  savedItems: StorageRecordMap["savedItems"][];
+  actionCards: StorageRecordMap["actionCards"][];
+  planCards: StorageRecordMap["planCards"][];
+  classificationCorrections: StorageRecordMap["classificationCorrections"][];
+  searchLogs: StorageRecordMap["searchLogs"][];
+  smartAlbums: StorageRecordMap["smartAlbums"][];
+  importBatches: StorageRecordMap["importBatches"][];
+  importBatchItems: StorageRecordMap["importBatchItems"][];
+}
 
 export interface RuntimeStateBundle {
   state: AppState;
