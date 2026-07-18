@@ -125,3 +125,6 @@ commit 后 localStorage 主数据、theme、achievements保持原字节，只是
 ## 10. 非目标
 
 不实现 delta migration、双向同步、last-write-wins、自动冲突合并、后台 shadow write、跨设备同步或 committed 后反向迁移。
+## Task 8C 实现结论
+
+Source Drift 只比较 `collection-revival-system:v1`、`collection-revival-theme` 和 `collection-revival-achievements`。Marker、瞬时 runtime 通知、developer/QA、未知 key 与扩展状态均排除。检查同时验证 raw Backup SHA-256、当前和来源 Runtime bundle 的 canonical SHA-256，并分别报告 app_state、theme、achievements。任何来源损坏、漂移、Backup 冲突、目标 Store checksum 或完整 Runtime 等价失败都会阻止 Prepare，且不会写 Marker 或 Journal。Task 8C 只产生 prepared 证据，不执行 cutover。
