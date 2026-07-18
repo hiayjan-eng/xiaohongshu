@@ -1,5 +1,13 @@
 # Task 8 Implementation Plan
 
+## Task 8A 实施结果
+
+`TASK8A_STATUS: PASS_WITH_NON_BLOCKING_GAPS`
+
+Task 8A 已在 `phase1-task8a-local-storage-runtime` 完成 Runtime 契约、LocalStorageRuntime、Web 异步启动门和串行持久化协调器。与最初计划相比，Web 接入被纳入本任务，以便真实验证 hydrate 前零渲染、零写入和 StrictMode 幂等；当前后端选择仍固定为 localStorage，因此没有跨越 activeStorage 切换边界。
+
+Task 8B 下一步实现 IndexedDbRuntime、hydrate/dehydrate、数组顺序和 AppState round-trip 等价性，并复用 Task 8A 的 Runtime 与浏览器测试。Task 8B 仍不得创建 Marker、切换 activeStorage 或让普通 App 使用 IndexedDB。
+
 ## 总体门槛
 
 Task 8 分为 8A 至 8E。每个任务独立分支、独立验收、独立 commit。8A 至 8C 均不得切换 activeStorage；8D 才实现激活协议，但仍只在隔离 Profile 验证；8E 才讨论合并和发布。任何任务失败都停止，不跨阶段顺手修产品功能。
