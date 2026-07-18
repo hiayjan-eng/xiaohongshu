@@ -30,7 +30,7 @@ export interface ActivationPreparePanelProps {
 
 export function ActivationPreparePanel({ onPreparedChange }: ActivationPreparePanelProps) {
   const [state, dispatch] = useReducer(reducer, initialState);
-  const controllerRef = useRef<ActivationPrepareController>();
+  const controllerRef = useRef<ActivationPrepareController | null>(null);
   const controller = controllerRef.current ?? (controllerRef.current = new ActivationPrepareController());
   const confirmationsComplete = Object.values(state.confirmations).every(Boolean);
   const drifted = Boolean(state.report?.sourceDrift.drifted);
