@@ -229,7 +229,7 @@ async function capture(page: Page, name: string): Promise<void> {
   await page.screenshot({ path: `${directory}/${name}.png`, fullPage: true });
 }
 
-async function completeMigration(page: Page) {
+export async function completeMigration(page: Page) {
   await page.goto("/settings/data-migration");
   await page.getByTestId("start-migration-inspection").click();
   await expect(page.getByTestId("migration-preview-step")).toBeVisible();
@@ -246,11 +246,11 @@ async function completeMigration(page: Page) {
   await expect(page.getByTestId("activation-preflight-idle")).toBeVisible();
 }
 
-async function readMarker(page: Page): Promise<Record<string, unknown> | null> {
+export async function readMarker(page: Page): Promise<Record<string, unknown> | null> {
   return page.evaluate((key) => { const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : null; }, MARKER_KEY);
 }
 
-async function readRecords(page: Page, storeName: string): Promise<unknown[]> {
+export async function readRecords(page: Page, storeName: string): Promise<unknown[]> {
   return page.evaluate(({ databaseName, storeName }) => new Promise<unknown[]>((resolve, reject) => {
     const request = indexedDB.open(databaseName);
     request.onerror = () => reject(request.error);
@@ -263,7 +263,7 @@ async function readRecords(page: Page, storeName: string): Promise<unknown[]> {
   }), { databaseName: DATABASE_NAME, storeName });
 }
 
-async function deleteDatabase(page: Page) {
+export async function deleteDatabase(page: Page) {
   await page.evaluate((databaseName) => new Promise<void>((resolve, reject) => {
     const request = indexedDB.deleteDatabase(databaseName);
     request.onsuccess = () => resolve();
