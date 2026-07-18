@@ -5,6 +5,7 @@ import {
 } from "@revival/storage-service";
 import {
   ActivationPreparer,
+  ActivationSwitcher,
   IndexedDbRuntime,
   StorageBootstrapMarkerStore,
   StorageRuntimeBroadcast,
@@ -14,6 +15,10 @@ import {
   runActivationPreflight,
   type ActivationPreflightReport,
   type ActivationPreflightResult,
+  type ActivationConfirmationValues,
+  type ActivationSwitchResult,
+  type ActivationSwitchStage,
+  type ControlledReloader,
   type ActivationPrepareConfirmations,
   type ActivationPrepareResult,
   type ActivationPrepareStage,
@@ -53,6 +58,7 @@ export class ActivationPrepareController {
   private readonly readonlyStorageFactory: typeof createReadonlyBrowserStorage;
   private readonly broadcastFactory: () => StorageRuntimeBroadcast;
   private readonly now: () => Date;
+  private readonly reloader: ControlledReloader;
   private lastPreflight?: ActivationPreflightResult;
 
   constructor(options: ActivationPrepareControllerOptions = {}) {
@@ -62,6 +68,7 @@ export class ActivationPrepareController {
     this.readonlyStorageFactory = options.readonlyStorageFactory ?? createReadonlyBrowserStorage;
     this.broadcastFactory = options.broadcastFactory ?? createBrowserStorageRuntimeBroadcast;
     this.now = options.now ?? (() => new Date());
+    this.reloader = options.reloader ?? { reload: () => globalThis.location.reload() };
   }
 
   async checkConditions(): Promise<ActivationPreflightReport> {
@@ -94,6 +101,37 @@ export class ActivationPrepareController {
           onStage
         });
         return await preparer.prepare(confirmations);
+      } finally {
+        broadcast.close();
+      }
+    }, true);
+  }
+
+  async activate(
+    confirmations: ActivationConfirmationValues,
+    onStage?: (stage: ActivationSwitchStage) => void
+  ): Promise<ActivationSwitchResult> {
+    return this.withActivationSession(async (session) => {
+      const broadcast = this.broadcastFactory();
+      const writeGate = new StorageWriteGate("activation_prepared");
+      try {
+        const switcher = new ActivationSwitcher({
+          lockProvider: session.lockProvider,
+          markerStorage: this.markerStorage,
+          journalRepository: session.journals,
+          writeGate,
+          broadcast,
+          flushPendingWrites: async () => undefined,
+          runFinalPreflight: async () => {
+            const result = await this.runPreflight(session);
+            this.lastPreflight = result;
+            return result;
+          },
+          reloader: this.reloader,
+          now: this.now,
+          onStage
+        });
+        return await switcher.switch(confirmations);
       } finally {
         broadcast.close();
       }
