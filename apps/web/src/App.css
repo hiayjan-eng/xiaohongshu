@@ -18,6 +18,166 @@
   letter-spacing: 0;
 }
 
+.app-boot-screen {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 32px;
+  background: var(--color-page, #f7f5ef);
+  color: var(--color-text, #1f2933);
+}
+
+.app-boot-panel {
+  width: min(100%, 640px);
+  padding: 44px;
+  border: 1px solid var(--color-border, #e8e3da);
+  border-radius: 8px;
+  background: var(--color-surface, #fff);
+  box-shadow: 0 18px 55px rgba(31, 41, 51, 0.08);
+}
+
+.app-boot-panel.warning {
+  border-left: 4px solid var(--color-warning, #d98c64);
+}
+
+.app-boot-panel.danger {
+  border-left: 4px solid var(--color-danger, #c86767);
+}
+
+.app-boot-mark {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--color-primary, #4f8a75);
+  color: #fff;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.app-boot-kicker {
+  margin: 24px 0 8px;
+  color: var(--color-primary, #4f8a75);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.app-boot-panel h1 {
+  margin: 0;
+  font-size: 30px;
+  line-height: 1.25;
+  letter-spacing: 0;
+}
+
+.app-boot-panel > p:not(.app-boot-kicker) {
+  margin: 14px 0 0;
+  color: var(--color-muted, #6b7280);
+  line-height: 1.7;
+}
+
+.app-boot-progress {
+  height: 4px;
+  margin-top: 30px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--color-surface-soft, #eef6f2);
+}
+
+.app-boot-progress span {
+  display: block;
+  width: 42%;
+  height: 100%;
+  background: var(--color-primary, #4f8a75);
+  animation: runtime-boot-progress 1.15s ease-in-out infinite alternate;
+}
+
+.app-boot-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 28px;
+}
+
+.app-boot-actions button {
+  min-height: 42px;
+}
+
+.app-boot-details {
+  margin-top: 22px;
+  color: var(--color-muted, #6b7280);
+}
+
+.app-boot-details summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.app-boot-details code {
+  display: inline-block;
+  margin-top: 10px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: var(--color-surface-soft, #eef6f2);
+}
+
+.runtime-save-alert {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 100;
+  display: grid;
+  width: min(420px, calc(100vw - 32px));
+  gap: 4px;
+  padding: 16px;
+  border: 1px solid var(--color-danger, #c86767);
+  border-radius: 8px;
+  background: var(--color-surface, #fff);
+  box-shadow: 0 16px 40px rgba(31, 41, 51, 0.14);
+}
+
+.runtime-save-alert span {
+  color: var(--color-muted, #6b7280);
+  line-height: 1.5;
+}
+
+.runtime-save-alert code {
+  margin-top: 4px;
+  color: var(--color-danger, #c86767);
+  font-size: 12px;
+}
+
+@keyframes runtime-boot-progress {
+  from { transform: translateX(-10%); }
+  to { transform: translateX(150%); }
+}
+
+@media (max-width: 600px) {
+  .app-boot-screen {
+    padding: 16px;
+  }
+
+  .app-boot-panel {
+    padding: 28px 22px;
+  }
+
+  .app-boot-panel h1 {
+    font-size: 25px;
+  }
+
+  .app-boot-actions {
+    flex-direction: column;
+  }
+
+  .app-boot-actions button {
+    width: 100%;
+  }
+
+  .runtime-save-alert {
+    right: 16px;
+    bottom: 16px;
+  }
+}
+
 * {
   box-sizing: border-box;
 }
