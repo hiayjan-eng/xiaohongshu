@@ -4,8 +4,7 @@ export type StorageWriteGateState =
   | "open"
   | "activation_preflight"
   | "activation_prepared"
-  | "activation_switching"
-  | "indexeddb_active";
+  | "activation_switching";
 export type StorageWriteGateListener = (state: StorageWriteGateState) => void;
 
 export class StorageWriteGate {
@@ -21,11 +20,13 @@ export class StorageWriteGate {
 
   enterPreflight(): void { this.setState("activation_preflight"); }
   markPrepared(): void { this.setState("activation_prepared"); }
+  markSwitching(): void { this.setState("activation_switching"); }
+  markIndexedDbActive(): void { this.setState("open"); }
   reopen(): void { this.setState("open"); }
 
   assertWritable(): void {
     if (!this.writable) {
-      const code = this.current === "activation_switching" || this.current === "indexeddb_active"
+      const code = this.current === "activation_switching"
         ? "ACTIVATION_OLD_TAB_WRITE_BLOCKED"
         : "ACTIVATION_WRITE_GATE_FAILED";
       throw new ActivationError({ code, recoverable: true });
@@ -39,7 +40,7 @@ export class StorageWriteGate {
 
   private setState(next: StorageWriteGateState): void {
     if (this.current === next) return;
-    if ((this.current === "activation_prepared" || this.current === "activation_switching" || this.current === "indexeddb_active") &&
+    if ((this.current === "activation_prepared" || this.current === "activation_switching") &&
         next === "activation_preflight") {
       throw new ActivationError({ code: "ACTIVATION_WRITE_GATE_FAILED", recoverable: false });
     }
