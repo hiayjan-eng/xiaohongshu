@@ -16,3 +16,4 @@ export * from "./activation-prepare";
 export * from "./activation-switch";
 export * from "./activation-boot";
 export * from "./runtime-selector";
+export * from "./activation-recovery";
