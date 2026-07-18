@@ -121,11 +121,11 @@ Task 5 结束后仍然不允许执行真实迁移。Task 6 的输入应是 Task 
 
 | 项目 | 内容 |
 |---|---|
-| 目标 | 用户确认后写入 IndexedDB staging，校验通过后切换 activeStorage；失败可回滚。 |
-| 修改文件 | storage-service migration executor、activeStorage resolver、测试文件。 |
+| 目标 | 用户确认后写入 IndexedDB staging 并校验；保持 activeStorage 为 localStorage，失败可回滚。 |
+| 修改文件 | storage-service migration executor、checkpoint/backup/lock、测试文件。 |
 | 不修改文件 | 扩展扫描逻辑、分类、AI、页面大布局。 |
 | 输入 | Task 3 IndexedDbAdapter、Task 5 validator。 |
-| 输出 | `runMigration()`、`rollbackMigration()`、迁移锁、BroadcastChannel 事件。 |
+| 输出 | `MigrationExecutor`、Resume/Rollback、迁移 writer lock 和持久化 checkpoint。 |
 | 自动化测试 | 迁移中刷新恢复、重复执行不重复插入、失败不切换、回滚读取 localStorage、多标签锁。 |
 | 人工验收 | 测试 profile 执行迁移，导出报告，回滚后数据仍在。 |
 | 失败停止条件 | 任何场景会删除或覆盖 localStorage 原始数据。 |
@@ -153,17 +153,17 @@ Task 5 结束后仍然不允许执行真实迁移。Task 6 的输入应是 Task 
 
 | 项目 | 内容 |
 |---|---|
-| 目标 | IndexedDB 作为 activeStorage 后，导入、搜索、收藏池、专辑、行动卡、PlanCard、设置继续可用；localStorage 可回滚。 |
-| 修改文件 | active storage resolver、AppState facade 或 repository 接入点、E2E。 |
+| 目标 | 按 Task 8A-E 建立 Runtime 等价性、source drift、Bootstrap/Journal、两阶段激活、Recovery 和发布验收。 |
+| 修改文件 | storage Runtime、Web bootstrap、AppState controller、activation/recovery UI 与 E2E。 |
 | 不修改文件 | 扩展扫描内部逻辑、分类 taxonomy、真实 AI、Supabase。 |
 | 输入 | Task 1-7 全部完成。 |
-| 输出 | Phase 1 可上线版本。 |
+| 输出 | 默认仍 legacy、用户主动启用且可安全恢复的 Phase 1 可发布版本。 |
 | 自动化测试 | `pnpm check`、legacy localStorage fixture 迁移、IndexedDB clean profile、回滚、扩展导入 payload 写入 active adapter。 |
 | 人工验收 | 干净浏览器和有旧数据浏览器各跑一遍；导入、搜索、确认专辑、生成行动卡、计划延期/取消、主题切换、扩展导入回归。 |
-| 失败停止条件 | IndexedDB 打开失败无法回退，或任何用户数据丢失。 |
+| 失败停止条件 | 任一数据丢失、双写、source drift 未阻断、Marker/Journal 不可恢复或静默 fallback。 |
 | 是否允许 commit | 允许。 |
-| 是否允许 deploy | 允许，必须先通过完整门禁和 production smoke。 |
-| 工作量 | L |
+| 是否允许 deploy | 仅 Task 8E 完整门禁通过并获得用户新授权后允许。 |
+| 工作量 | XL |
 
 ## 迁移影响矩阵
 
@@ -189,10 +189,10 @@ Task 5 结束后仍然不允许执行真实迁移。Task 6 的输入应是 Task 
 
 1. **扩展导入 payload 进入 Web 后走哪个 Adapter**：进入当前 active Adapter。未迁移时写 localStorage facade；迁移完成后写 IndexedDB facade。
 2. **迁移期间是否允许继续导入**：不允许写操作。导入、复活、专辑确认和计划更新都显示“正在升级本地数据，请稍后再试”。
-3. **多标签页同时迁移**：使用 localStorage 迁移锁 + BroadcastChannel。第二个标签页只能查看状态，不能启动迁移。
+3. **多标签页同时迁移/激活**：迁移继续使用 Web Locks writer lock；激活和 Runtime 写入使用 authority Web Lock，并以 BroadcastChannel/storage event 通知。禁止 production localStorage lease fallback。
 4. **localStorage 和 IndexedDB 不双向写入**：activeStorage 是单一写目标。localStorage 原始数据只读保留。
-5. **activeStorage 标识保存位置**：localStorage 小 key + IndexedDB metadata 镜像。这样启动时能快速判断，但用户数据不放在该 key。
-6. **数据库打开失败如何回退**：显示中文错误，自动切回 LocalStorageAdapter 只读/可用模式，并提示用户导出备份或稍后重试。
+5. **activeStorage 标识保存位置**：Bootstrap Marker + IndexedDB Activation Journal；必须交叉验证，不能只信一个布尔值。
+6. **数据库打开失败如何恢复**：commit 前保持 legacy active；commit 后进入 Recovery Screen，不自动回到可写 localStorage。
 
 ## 推荐第一实施任务
 
