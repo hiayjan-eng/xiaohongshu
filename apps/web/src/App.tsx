@@ -49,7 +49,8 @@ import {
 } from "./features/storage-migration";
 import { ThemeProvider } from "./theme/ThemeProvider";
 import { getThemePreset, THEME_STORAGE_KEY, type ThemePresetId } from "./theme/themePresets";
-import type { ActiveStorageRuntime, StorageRuntimeProductSettings } from "@revival/storage-runtime";
+import { createBrowserStorageRuntimeBroadcast, StorageWriteGate } from "@revival/storage-runtime";
+import type { ActiveStorageRuntime, StorageRuntimeProductSettings, StorageWriteGateState } from "@revival/storage-runtime";
 import { RuntimePersistCoordinator, type RuntimePersistStatus } from "./runtime/runtime-persist-coordinator";
 import {
   CATEGORIES,
@@ -203,7 +204,7 @@ type AppContentProps = {
   runtime: ActiveStorageRuntime;
 };
 
-export function AppContent({ initialState, initialSettings, runtime }: AppContentProps) {
+export function AppContent({ initialState, initialSettings, runtime, writeGate }: AppContentProps) {
   const [state, setState] = useState<AppState>(initialState);
   const [activeView, setActiveView] = useState<ViewKey>(() => getInitialView());
   const [settingsSubRoute, setSettingsSubRoute] = useState<SettingsSubRoute>(() => getInitialSettingsSubRoute());
@@ -239,6 +240,7 @@ export function AppContent({ initialState, initialSettings, runtime }: AppConten
     () => new RuntimePersistCoordinator(runtime, setRuntimePersistStatus),
     [runtime]
   );
+  const [writeGateState, setWriteGateState] = useState<StorageWriteGateState>(writeGate.state);
   const previousStateRef = useRef(initialState);
   const previousSettingsRef = useRef<StorageRuntimeProductSettings>({
     themeId: getThemePreset(initialSettings.themeId).id,
@@ -290,6 +292,24 @@ export function AppContent({ initialState, initialSettings, runtime }: AppConten
     void persistCoordinator.enqueueProductSettings(previous, next).catch(() => undefined);
   }, [persistCoordinator, themeId, unlockedAchievements]);
 
+  useEffect(() => {
+    const unsubscribeGate = writeGate.subscribe(setWriteGateState);
+    const broadcast = createBrowserStorageRuntimeBroadcast();
+    const unsubscribeBroadcast = broadcast.subscribe((message) => {
+      if (message.type === "activation_preflight_started") {
+        void persistCoordinator.freezeForActivationPreflight().catch(() => undefined);
+      } else if (message.type === "activation_prepared") {
+        writeGate.markPrepared();
+      } else {
+        writeGate.reopen();
+      }
+    });
+    return () => {
+      unsubscribeBroadcast();
+      unsubscribeGate();
+      broadcast.close();
+    };
+  }, [persistCoordinator, writeGate]);
   useEffect(() => {
     persistCoordinator.activate();
     return () => {
@@ -1386,6 +1406,20 @@ export function AppContent({ initialState, initialSettings, runtime }: AppConten
     setState((current) => ({ ...current, smartAlbums: [album, ...(current.smartAlbums ?? smartAlbums)] }));
     setSelectedAlbumId(album.id);
     setToast("已新建手动专辑");
+  }
+  if (writeGateState !== "open") {
+    return (
+      <ThemeProvider themeId={themeId}>
+        <main className="app-boot-screen" data-testid={writeGateState === "activation_prepared" ? "app-write-gate-prepared" : "app-write-gate-preflight"}>
+          <section className="app-boot-panel warning" role="alert">
+            <p className="app-boot-kicker">本地数据保护</p>
+            <h1>{writeGateState === "activation_prepared" ? "新存储已经准备，尚未切换" : "正在检查新存储启用条件"}</h1>
+            <p>{writeGateState === "activation_prepared" ? "当前正式数据源仍是旧本地存储。普通编辑已冻结，请前往数据管理取消准备或等待下一阶段。" : "正在保存已有修改并核对数据。此页面暂时不能继续编辑，当前数据源仍是旧本地存储。"}</p>
+            <button className="primary-button" type="button" onClick={() => window.location.assign("/settings/data-migration")}>前往数据管理</button>
+          </section>
+        </main>
+      </ThemeProvider>
+    );
   }
   if (activeView === "welcome") {
     return (
