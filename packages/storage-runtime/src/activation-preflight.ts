@@ -64,7 +64,7 @@ export interface ActivationMigrationStatus {
 }
 
 export interface ActivationMultiTabStatus {
-  markerState: "missing" | "legacy_active" | "activation_prepared" | "recovery_required" | "invalid";
+  markerState: "missing" | "legacy_active" | "activation_prepared" | "activating" | "indexeddb_active" | "recovery_required" | "invalid";
   activeJournalCount: number;
   consistent: boolean;
 }
