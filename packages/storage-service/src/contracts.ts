@@ -83,6 +83,45 @@ export interface MigrationMetadata {
   warnings: string[];
 }
 
+export type StorageActivationJournalStatus =
+  | "preparing"
+  | "prepared"
+  | "cancelled"
+  | "prepare_failed";
+
+export interface SafeActivationPreflightSummary {
+  eligible: boolean;
+  checkedAt: string;
+  blockingIssueCodes: string[];
+  warningCodes: string[];
+}
+
+export interface StorageActivationJournalV1 {
+  id: string;
+  recordType: "activation";
+  version: 1;
+  activationId: string;
+  migrationId: string;
+  status: StorageActivationJournalStatus;
+  sourceBackend: "localStorage";
+  targetBackend: "indexedDB";
+  sourceRawChecksum: string;
+  sourceNormalizedChecksum: string;
+  targetRuntimeChecksum: string;
+  bootstrapRevisionBefore: number | null;
+  bootstrapRevisionPrepared?: number;
+  databaseName: "collection-revival-local";
+  schemaVersion: 1;
+  preflightSummary: SafeActivationPreflightSummary;
+  createdAt: string;
+  updatedAt: string;
+  preparedAt?: string;
+  cancelledAt?: string;
+  failedAt?: string;
+  errorCode?: string;
+}
+
+export type StorageMetadataRecord = MigrationMetadata | StorageActivationJournalV1;
 export interface StorageBackup {
   id: string;
   sourceStorage: StorageKind;
@@ -104,7 +143,7 @@ export interface StorageRecordMap {
   classificationCorrections: ClassificationCorrection;
   searchLogs: SearchLog;
   settings: StoredSetting;
-  migrationMetadata: MigrationMetadata;
+  migrationMetadata: StorageMetadataRecord;
   backups: StorageBackup;
 }
 
