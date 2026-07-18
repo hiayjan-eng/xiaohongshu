@@ -181,7 +181,10 @@ export function registerLocalStorageRuntimeTests(harness: TestHarness): void {
     const unchanged = await runtime.persistAppState(loaded.state, loaded.state);
     harness.equal(unchanged.changed, false, "unchanged result");
     harness.equal(storage.writes.length, 0, "unchanged writes");
-    const next = { ...loaded.state, searchLogs: [] };
+    const next = {
+      ...loaded.state,
+      searchLogs: [{ id: "changed", userId: "user", query: "changed", resultCount: 1, createdAt: "2026-07-18T00:00:00.000Z" }]
+    };
     const changed = await runtime.persistAppState(loaded.state, next);
     harness.equal(changed.changed, true, "changed result");
     harness.equal(storage.writes[0]?.key, STORAGE_KEY, "main key");
@@ -217,7 +220,10 @@ export function registerLocalStorageRuntimeTests(harness: TestHarness): void {
     storage.failWrites = true;
     let caught: unknown;
     try {
-      await runtime.persistAppState(loaded.state, { ...loaded.state, searchLogs: [] });
+      await runtime.persistAppState(loaded.state, {
+        ...loaded.state,
+        searchLogs: [{ id: "failure", userId: "user", query: "failure", resultCount: 1, createdAt: "2026-07-18T00:00:00.000Z" }]
+      });
     } catch (error) {
       caught = error;
     }
