@@ -662,7 +662,7 @@ function createNormalizedStorageSnapshot(
       recoverable: false
     }));
   }
-+  const settings = [
+  const settings = [
     ...collectLegacySettings(rawRecords, context, createdAt, options),
     ...runtimeSettings
   ];
