@@ -5,13 +5,18 @@ export const STORAGE_BOOTSTRAP_MARKER_KEY = "collection-revival-storage-bootstra
 export const STORAGE_BOOTSTRAP_MARKER_VERSION = 1;
 const MARKER_JSON_OPTIONS = { adapter: "localStorage" as const, code: "STORAGE_VALIDATION_FAILED" as const, recoverable: false };
 
-export type StorageBootstrapMarkerState = "legacy_active" | "activation_prepared" | "recovery_required";
+export type StorageBootstrapMarkerState =
+  | "legacy_active"
+  | "activation_prepared"
+  | "activating"
+  | "indexeddb_active"
+  | "recovery_required";
 
 export interface StorageBootstrapMarkerV1 {
   version: 1;
   revision: number;
   state: StorageBootstrapMarkerState;
-  activeBackend: "localStorage";
+  activeBackend: "localStorage" | "indexedDB";
   migrationId?: string;
   activationId?: string;
   journalId?: string;
@@ -21,6 +26,8 @@ export interface StorageBootstrapMarkerV1 {
   sourceNormalizedChecksum?: string;
   targetRuntimeChecksum?: string;
   preparedAt?: string;
+  activatingAt?: string;
+  activatedAt?: string;
   updatedAt: string;
   errorCode?: string;
 }
@@ -52,7 +59,7 @@ export class StorageBootstrapMarkerStore {
     let raw: string | null;
     try {
       raw = this.storage.getItem(STORAGE_BOOTSTRAP_MARKER_KEY);
-    } catch (cause) {
+    } catch {
       return { status: "invalid", errorCode: "ACTIVATION_MARKER_INVALID" };
     }
     if (raw === null) return { status: "missing" };
@@ -84,7 +91,7 @@ export class StorageBootstrapMarkerStore {
     try {
       this.storage.setItem(STORAGE_BOOTSTRAP_MARKER_KEY, serialized);
     } catch (cause) {
-      throw markerError("ACTIVATION_PREPARE_FAILED", true, cause);
+      throw markerError("ACTIVATION_MARKER_SWITCH_FAILED", true, cause);
     }
     const readBack = await this.read();
     if (readBack.status !== "valid" || canonicalJsonStringify(readBack.marker, MARKER_JSON_OPTIONS) !== serialized) {
@@ -121,16 +128,51 @@ export function createLegacyActiveMarker(previous: StorageBootstrapMarkerV1, upd
   };
 }
 
+export function createActivatingMarker(previous: StorageBootstrapMarkerV1, updatedAt: string): StorageBootstrapMarkerV1 {
+  if (previous.state !== "activation_prepared") throw markerError("ACTIVATION_BACKEND_CONFLICT", false);
+  return {
+    ...previous,
+    revision: previous.revision + 1,
+    state: "activating",
+    activeBackend: "indexedDB",
+    activatingAt: updatedAt,
+    updatedAt,
+    errorCode: undefined
+  };
+}
+
+export function createIndexedDbActiveMarker(previous: StorageBootstrapMarkerV1, updatedAt: string): StorageBootstrapMarkerV1 {
+  if (previous.state !== "activating" && previous.state !== "recovery_required") {
+    throw markerError("ACTIVATION_BACKEND_CONFLICT", false);
+  }
+  return {
+    ...previous,
+    revision: previous.revision + 1,
+    state: "indexeddb_active",
+    activeBackend: "indexedDB",
+    activatedAt: updatedAt,
+    updatedAt,
+    errorCode: undefined
+  };
+}
+
 export function isStorageBootstrapMarker(value: unknown): value is StorageBootstrapMarkerV1 {
   if (!isPlainRecord(value)) return false;
   if (value.version !== 1 || !Number.isInteger(value.revision) || Number(value.revision) < 1) return false;
-  if (value.state !== "legacy_active" && value.state !== "activation_prepared" && value.state !== "recovery_required") return false;
-  if (value.activeBackend !== "localStorage" || !isIso(value.updatedAt)) return false;
-  if (value.state === "activation_prepared") {
+  if (!["legacy_active", "activation_prepared", "activating", "indexeddb_active", "recovery_required"].includes(String(value.state))) return false;
+  if ((value.activeBackend !== "localStorage" && value.activeBackend !== "indexedDB") || !isIso(value.updatedAt)) return false;
+
+  if (value.state === "legacy_active") return value.activeBackend === "localStorage" && optionalString(value.errorCode);
+  if (value.state === "activation_prepared" && value.activeBackend !== "localStorage") return false;
+  if ((value.state === "activating" || value.state === "indexeddb_active") && value.activeBackend !== "indexedDB") return false;
+
+  if (value.state !== "recovery_required") {
     if (![value.migrationId, value.activationId, value.journalId].every(nonEmptyString)) return false;
     if (value.databaseName !== "collection-revival-local" || value.schemaVersion !== 1 || !isIso(value.preparedAt)) return false;
     if (![value.sourceRawChecksum, value.sourceNormalizedChecksum, value.targetRuntimeChecksum].every(isSha256)) return false;
   }
+  if (value.state === "activating" && !isIso(value.activatingAt)) return false;
+  if (value.state === "indexeddb_active" && (!isIso(value.activatingAt) || !isIso(value.activatedAt))) return false;
   return optionalString(value.errorCode) && optionalString(value.migrationId) && optionalString(value.activationId) && optionalString(value.journalId);
 }
 
