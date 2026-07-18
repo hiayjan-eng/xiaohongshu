@@ -24,6 +24,7 @@
       "@revival/action-card-service": ["packages/action-card-service/src/index.ts"],
       "@revival/recommendation-service": ["packages/recommendation-service/src/index.ts"],
       "@revival/database": ["packages/database/src/index.ts"],
+      "@revival/storage-runtime": ["packages/storage-runtime/src/index.ts"],
       "@revival/import-service": ["packages/import-service/src/index.ts"],
       "@revival/storage-service": ["packages/storage-service/src/index.ts"]
     }
