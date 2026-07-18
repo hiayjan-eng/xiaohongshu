@@ -36,7 +36,7 @@ export function ActivationPreparePanel({ onPreparedChange }: ActivationPreparePa
   const drifted = Boolean(state.report?.sourceDrift.drifted);
   const targetMismatch = Boolean(state.report?.issues.some((issue) => issue.code === "ACTIVATION_TARGET_NOT_EQUIVALENT" || issue.code === "ACTIVATION_STORE_CHECKSUM_MISMATCH"));
   const safeCounts = useMemo(() => ({
-    source: state.report?.sourceDrift.blocking ? "需要处理" : "一致",
+    source: state.report?.sourceDrift.blocking ? "旧本地存储 · 需要处理" : "旧本地存储 · 一致",
     target: state.report?.equivalence.equivalent ? "完整一致" : "存在差异",
     backup: state.report?.backupStatus.verified ? "已验证" : "需要检查",
     migration: state.report?.migrationStatus.completed ? "已完成，尚未启用" : "未完成"
