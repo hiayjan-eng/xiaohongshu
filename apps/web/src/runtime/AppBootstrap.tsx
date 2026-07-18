@@ -22,7 +22,22 @@ import { StorageRecoveryScreen } from "./StorageRecoveryScreen";
 type AppBootstrapProps = { runtimeFactory?: () => ActiveStorageRuntime };
 
 export function AppBootstrap({ runtimeFactory = createDefaultRuntime }: AppBootstrapProps) {
-  if (isDirectMigrationRoute()) return <MigrationRouteShell />;
+  return isDirectMigrationRoute()
+    ? <MigrationRouteBootstrap runtimeFactory={runtimeFactory} />
+    : <StorageMarkerBootstrap runtimeFactory={runtimeFactory} />;
+}
+
+function MigrationRouteBootstrap({ runtimeFactory }: Required<AppBootstrapProps>) {
+  const [selection, setSelection] = useState<StorageRuntimeSelection>();
+  useEffect(() => {
+    let active = true;
+    void new StorageBootstrapMarkerStore(window.localStorage).read().then((marker) => {
+      if (active) setSelection(selectStorageRuntime(marker));
+    });
+    return () => { active = false; };
+  }, []);
+  if (!selection) return <AppBootScreen mode="loading" />;
+  if (selection.mode === "legacy" || selection.mode === "activation_prepared") return <MigrationRouteShell />;
   return <StorageMarkerBootstrap runtimeFactory={runtimeFactory} />;
 }
 
