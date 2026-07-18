@@ -104,7 +104,7 @@ export function parseRuntimeOrderManifest(setting: StoredSetting | undefined): R
     if (!Array.isArray(ids) || ids.some((id) => typeof id !== "string" || id.length === 0) || new Set(ids).size !== ids.length) {
       return { valid: false, reason: "invalid" };
     }
-    orders[collection] = [...ids];
+    orders[collection] = [...ids] as string[];
   }
   return {
     valid: true,
