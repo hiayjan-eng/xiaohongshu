@@ -30,10 +30,8 @@ import {
   createInitialDemoData,
   createSearchLog,
   STORAGE_KEY,
-  loadAppState,
   migrateScannedTextV2,
   migrateScannedTextV3,
-  persistAppState,
   updateItemStatus,
   type ScannedTextMigrationV3Report
 } from "@revival/database";
@@ -46,7 +44,9 @@ import { TodayWidgetPreview } from "./components/TodayWidgetPreview";
 import { RealTestView } from "./components/RealTestView";
 import { MigrationDataUpgradeEntry, MigrationDataUpgradePage } from "./features/storage-migration";
 import { ThemeProvider } from "./theme/ThemeProvider";
-import { getStoredThemeId, getThemePreset, THEME_STORAGE_KEY, type ThemePresetId } from "./theme/themePresets";
+import { getThemePreset, THEME_STORAGE_KEY, type ThemePresetId } from "./theme/themePresets";
+import type { ActiveStorageRuntime, StorageRuntimeProductSettings } from "@revival/storage-runtime";
+import { RuntimePersistCoordinator, type RuntimePersistStatus } from "./runtime/runtime-persist-coordinator";
 import {
   CATEGORIES,
   REVIVE_INTENTS,
@@ -195,8 +195,14 @@ const SEARCH_OPEN_MESSAGES = [
 
 const MIGRATION_LEAVE_WARNING = "升级仍在进行。离开后本页面不会自动恢复进度，确定要离开吗？";
 
-export function App() {
-  const [state, setState] = useState<AppState>(() => loadAppState(typeof window === "undefined" ? undefined : window.localStorage));
+type AppContentProps = {
+  initialState: AppState;
+  initialSettings: StorageRuntimeProductSettings;
+  runtime: ActiveStorageRuntime;
+};
+
+export function AppContent({ initialState, initialSettings, runtime }: AppContentProps) {
+  const [state, setState] = useState<AppState>(initialState);
   const [activeView, setActiveView] = useState<ViewKey>(() => getInitialView());
   const [settingsSubRoute, setSettingsSubRoute] = useState<SettingsSubRoute>(() => getInitialSettingsSubRoute());
   const [importInput, setImportInput] = useState<ShareInput>(emptyImport);
@@ -224,10 +230,18 @@ export function App() {
   const [lastPlanUndoState, setLastPlanUndoState] = useState<AppState | null>(null);
   const [lastMigrationUndoState, setLastMigrationUndoState] = useState<AppState | null>(null);
   const [textMigrationPreview, setTextMigrationPreview] = useState<ScannedTextMigrationV3Report | null>(null);
-  const [themeId, setThemeId] = useState<ThemePresetId>(() => getStoredThemeId(typeof window === "undefined" ? undefined : window.localStorage));
-  const [unlockedAchievements, setUnlockedAchievements] = useState<UnlockedAchievementMap>(() =>
-    loadUnlockedAchievements(typeof window === "undefined" ? undefined : window.localStorage)
+  const [themeId, setThemeId] = useState<ThemePresetId>(() => getThemePreset(initialSettings.themeId).id);
+  const [unlockedAchievements, setUnlockedAchievements] = useState<UnlockedAchievementMap>(() => ({ ...initialSettings.achievements }));
+  const [runtimePersistStatus, setRuntimePersistStatus] = useState<RuntimePersistStatus>({ status: "idle" });
+  const persistCoordinator = useMemo(
+    () => new RuntimePersistCoordinator(runtime, setRuntimePersistStatus),
+    [runtime]
   );
+  const previousStateRef = useRef(initialState);
+  const previousSettingsRef = useRef<StorageRuntimeProductSettings>({
+    themeId: getThemePreset(initialSettings.themeId).id,
+    achievements: { ...initialSettings.achievements }
+  });
   const [achievementModal, setAchievementModal] = useState<AchievementDisplay | null>(null);
   const [rewardBurstId, setRewardBurstId] = useState(0);
   const migrationExecutionActiveRef = useRef(false);
@@ -257,18 +271,33 @@ export function App() {
   );
 
   useEffect(() => {
-    persistAppState(state, typeof window === "undefined" ? undefined : window.localStorage);
-  }, [state]);
+    const previous = previousStateRef.current;
+    if (previous === state) return;
+    previousStateRef.current = state;
+    void persistCoordinator.enqueueAppState(previous, state).catch(() => undefined);
+  }, [persistCoordinator, state]);
+
+  useEffect(() => {
+    const previous = previousSettingsRef.current;
+    const next: StorageRuntimeProductSettings = {
+      themeId,
+      achievements: { ...unlockedAchievements }
+    };
+    if (previous.themeId === next.themeId && JSON.stringify(previous.achievements) === JSON.stringify(next.achievements)) return;
+    previousSettingsRef.current = next;
+    void persistCoordinator.enqueueProductSettings(previous, next).catch(() => undefined);
+  }, [persistCoordinator, themeId, unlockedAchievements]);
+
+  useEffect(() => () => {
+    persistCoordinator.dispose();
+    void persistCoordinator.flush();
+  }, [persistCoordinator]);
 
   useEffect(() => {
     if (!toast) return;
     const timer = window.setTimeout(() => setToast(""), 2400);
     return () => window.clearTimeout(timer);
   }, [toast]);
-
-  useEffect(() => {
-    persistUnlockedAchievements(unlockedAchievements, typeof window === "undefined" ? undefined : window.localStorage);
-  }, [unlockedAchievements]);
 
   useEffect(() => {
     const handleSearchShortcut = (event: KeyboardEvent) => {
@@ -1364,6 +1393,7 @@ export function App() {
         />
         <RewardConfetti burstId={rewardBurstId} />
         <AchievementModal achievement={achievementModal} onClose={() => setAchievementModal(null)} />
+        <RuntimeSaveAlert status={runtimePersistStatus} />
       </ThemeProvider>
     );
   }
@@ -1674,11 +1704,23 @@ export function App() {
         </section>
 
         {toast && <div className="toast">{toast}</div>}
+        <RuntimeSaveAlert status={runtimePersistStatus} />
         <RewardConfetti burstId={rewardBurstId} />
         <AchievementModal achievement={achievementModal} onClose={() => setAchievementModal(null)} />
       </main>
     </div>
     </ThemeProvider>
+  );
+}
+
+function RuntimeSaveAlert({ status }: { status: RuntimePersistStatus }) {
+  if (status.status !== "failed") return null;
+  return (
+    <div className="runtime-save-alert" role="alert" data-testid="runtime-save-error">
+      <strong>这次修改还没有保存</strong>
+      <span>请保留当前页面并重试操作。本地数据没有被清空。</span>
+      <code>{status.code}</code>
+    </div>
   );
 }
 
@@ -4302,23 +4344,6 @@ function getStorageStatus(state: AppState): StorageStatus {
     };
   }
 }
-const ACHIEVEMENT_STORAGE_KEY = "collection-revival-achievements";
-
-function loadUnlockedAchievements(storage?: Storage): UnlockedAchievementMap {
-  try {
-    const raw = storage?.getItem(ACHIEVEMENT_STORAGE_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw) as UnlockedAchievementMap;
-    return parsed && typeof parsed === "object" ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-
-function persistUnlockedAchievements(achievements: UnlockedAchievementMap, storage?: Storage) {
-  storage?.setItem(ACHIEVEMENT_STORAGE_KEY, JSON.stringify(achievements));
-}
-
 function pickMessage(messages: string[]): string {
   return messages[Math.floor(Math.random() * messages.length)] ?? messages[0] ?? "完成了";
 }
