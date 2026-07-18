@@ -9,10 +9,8 @@ import {
   type MigrationLockHandle,
   type MigrationLockProvider,
   type SafeBootVerificationSummary,
-  type StorageAdapter,
-  type StorageRuntimeProductSettings
+  type StorageAdapter
 } from "@revival/storage-service";
-import type { AppState } from "@revival/shared-types";
 import { ActivationError } from "./activation-errors";
 import {
   StorageBootstrapMarkerStore,
@@ -237,8 +235,10 @@ export class ActivationBootCoordinator {
 
   private async readMetadata(migrationId: string): Promise<MigrationExecutionMetadataRecord | undefined> {
     const value = await this.options.targetAdapter.get("migrationMetadata", metadataId(migrationId));
-    if (!value || !("executionStatus" in value) || typeof value.activeStorageSwitched !== "boolean") return undefined;
-    return value as MigrationExecutionMetadataRecord;
+    if (!value || !("executionStatus" in value)) return undefined;
+    const candidate = value as Partial<MigrationExecutionMetadataRecord>;
+    if (typeof candidate.activeStorageSwitched !== "boolean") return undefined;
+    return candidate as MigrationExecutionMetadataRecord;
   }
   private assertCapabilities(): void {
     if (this.options.lockProvider.kind !== "web-locks" || this.options.lockProvider.isAvailable?.() === false) {
@@ -255,5 +255,3 @@ function activationError(code: ConstructorParameters<typeof ActivationError>[0][
 function safeCode(error: unknown): string {
   return error && typeof error === "object" && "code" in error ? String((error as { code: unknown }).code) : "ACTIVATION_BOOT_VERIFICATION_FAILED";
 }
-
-export type { AppState, StorageRuntimeProductSettings };
