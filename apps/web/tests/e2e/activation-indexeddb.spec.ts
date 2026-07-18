@@ -77,6 +77,7 @@ const LEGACY_KEYS = ["collection-revival-system:v1", "collection-revival-theme",
   test("corrupt Marker opens startup Recovery without writable legacy fallback", async ({ page }) => {
     const errors = collectConsoleErrors(page);
     await seedMigrationFixture(page);
+    await page.reload();
     const legacyBefore = await readLegacy(page);
     await page.evaluate((key) => localStorage.setItem(key, "{broken-marker"), MARKER_KEY);
     await page.goto("/");
