@@ -99,6 +99,24 @@ export class StorageBootstrapMarkerStore {
     }
   }
 
+  async repairCommittedMarker(next: StorageBootstrapMarkerV1): Promise<void> {
+    this.ensureWriteLock();
+    validateMarker(next);
+    if (next.state !== "indexeddb_active" || next.activeBackend !== "indexedDB") {
+      throw markerError("RECOVERY_MARKER_REPAIR_FAILED", false);
+    }
+    const serialized = canonicalJsonStringify(next, MARKER_JSON_OPTIONS);
+    try {
+      this.storage.setItem(STORAGE_BOOTSTRAP_MARKER_KEY, serialized);
+    } catch (cause) {
+      throw markerError("RECOVERY_MARKER_REPAIR_FAILED", true, cause);
+    }
+    const readBack = await this.read();
+    if (readBack.status !== "valid" || canonicalJsonStringify(readBack.marker, MARKER_JSON_OPTIONS) !== serialized) {
+      throw markerError("RECOVERY_MARKER_REPAIR_FAILED", false);
+    }
+  }
+
   async removeExpectedRevision(expectedRevision: number): Promise<void> {
     this.ensureWriteLock();
     const current = await this.read();
