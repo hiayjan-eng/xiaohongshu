@@ -299,3 +299,7 @@ The `backups` object store still uses keyPath `id`, but Task 6.1 treats records 
 - `report`
 
 The primary checksum on the backup record is the SHA-256 of `serializedEnvelope`. The executor compares existing backup records inside a `backups` readwrite transaction. Same id and same immutable content may be reused; same id with different serialized content, checksum, byte length, migration id, or backup id blocks execution. The executor does not add extension data, browser bridge state, cookies, API keys, or chrome.storage.local content to this store.
+
+## Runtime Reserved Settings
+
+schemaVersion 继续为 1，不新增 Store/index/keyPath。`settings` Store 保留 `runtime:app-metadata:v1` 与 `runtime:order-manifest:v1`，分别承载 user/App schema 和八组 AppState ID 顺序；`theme`、`achievements` 保持产品设置记录。Runtime reserved records 为 internal，不进入普通设置 UI。manifest 与实体 ID 集合不一致属于 blocking corruption。
