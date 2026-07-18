@@ -288,9 +288,12 @@ export function AppContent({ initialState, initialSettings, runtime }: AppConten
     void persistCoordinator.enqueueProductSettings(previous, next).catch(() => undefined);
   }, [persistCoordinator, themeId, unlockedAchievements]);
 
-  useEffect(() => () => {
-    persistCoordinator.dispose();
-    void persistCoordinator.flush();
+  useEffect(() => {
+    persistCoordinator.activate();
+    return () => {
+      persistCoordinator.dispose();
+      void persistCoordinator.flush();
+    };
   }, [persistCoordinator]);
 
   useEffect(() => {
