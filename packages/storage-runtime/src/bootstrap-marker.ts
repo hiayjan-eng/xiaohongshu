@@ -3,6 +3,7 @@ import { ActivationError } from "./activation-errors";
 
 export const STORAGE_BOOTSTRAP_MARKER_KEY = "collection-revival-storage-bootstrap:v1";
 export const STORAGE_BOOTSTRAP_MARKER_VERSION = 1;
+const MARKER_JSON_OPTIONS = { adapter: "localStorage" as const, code: "STORAGE_VALIDATION_FAILED" as const, recoverable: false };
 
 export type StorageBootstrapMarkerState = "legacy_active" | "activation_prepared" | "recovery_required";
 
@@ -79,14 +80,14 @@ export class StorageBootstrapMarkerStore {
     if (actualRevision !== expectedRevision || next.revision !== (expectedRevision ?? 0) + 1) {
       throw markerError("ACTIVATION_MARKER_REVISION_CONFLICT", true);
     }
-    const serialized = canonicalJsonStringify(next);
+    const serialized = canonicalJsonStringify(next, MARKER_JSON_OPTIONS);
     try {
       this.storage.setItem(STORAGE_BOOTSTRAP_MARKER_KEY, serialized);
     } catch (cause) {
       throw markerError("ACTIVATION_PREPARE_FAILED", true, cause);
     }
     const readBack = await this.read();
-    if (readBack.status !== "valid" || canonicalJsonStringify(readBack.marker) !== serialized) {
+    if (readBack.status !== "valid" || canonicalJsonStringify(readBack.marker, MARKER_JSON_OPTIONS) !== serialized) {
       throw markerError("ACTIVATION_MARKER_INVALID", false);
     }
   }
@@ -142,8 +143,9 @@ function markerError(code: ConstructorParameters<typeof ActivationError>[0]["cod
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value) &&
-    (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null) &&
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return (prototype === Object.prototype || prototype === null) &&
     !Object.keys(value).some((key) => key === "__proto__" || key === "constructor" || key === "prototype");
 }
 
