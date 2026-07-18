@@ -145,6 +145,9 @@ importers:
       '@revival/shared-types':
         specifier: workspace:*
         version: link:../shared-types
+      '@revival/storage-service':
+        specifier: workspace:*
+        version: link:../storage-service
 
   packages/storage-service:
     dependencies:
