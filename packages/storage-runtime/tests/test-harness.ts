@@ -16,6 +16,12 @@ export class TestHarness {
     if (actual !== expected) throw new Error(`${message}: expected ${String(expected)}, received ${String(actual)}`);
   }
 
+  deepEqual(actual: unknown, expected: unknown, message: string): void {
+    this.assertions += 1;
+    const actualJson = JSON.stringify(actual);
+    const expectedJson = JSON.stringify(expected);
+    if (actualJson !== expectedJson) throw new Error(`${message}: expected ${expectedJson}, received ${actualJson}`);
+  }
   async rejects(operation: () => Promise<unknown>, code: string, message: string): Promise<void> {
     try {
       await operation();
