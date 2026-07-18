@@ -1,5 +1,6 @@
 import { ArrowLeft, CheckCircle2 } from "lucide-react";
-import { useEffect, useReducer, useRef } from "react";
+import { useEffect, useReducer, useRef, useState } from "react";
+import { ActivationPreparePanel } from "./ActivationPreparePanel";
 import { MigrationBackupStep, triggerPreparedBackupDownload } from "./MigrationBackupStep";
 import { MigrationCancelDialog } from "./MigrationCancelDialog";
 import { MigrationConfirmationStep } from "./MigrationConfirmationStep";
@@ -59,6 +60,7 @@ export function MigrationDataUpgradePage({
   onExecutionActiveChange
 }: MigrationDataUpgradePageProps) {
   const [state, dispatch] = useReducer(migrationPreviewReducer, initialMigrationPreviewUiState);
+  const [activationPrepared, setActivationPrepared] = useState(false);
   const controllerRef = useRef<MigrationFlowController | null>(null);
   const recoveryControllerRef = useRef<MigrationRecoveryController | null>(null);
   const existingSessionCheckedRef = useRef(false);
@@ -387,6 +389,7 @@ export function MigrationDataUpgradePage({
           storedBackupFilename={state.storedBackupFilename}
           refreshing={state.recoveryRefreshing}
           error={state.recoveryError}
+          activationPrepared={activationPrepared}
           onResume={() => dispatch({ type: "SELECT_RECOVERY_ACTION", action: "resume" })}
           onRollback={() => dispatch({ type: "SELECT_RECOVERY_ACTION", action: "rollback" })}
           onReinspectLegacy={() => void inspectCurrentData()}
@@ -398,6 +401,9 @@ export function MigrationDataUpgradePage({
         />
       )}
 
+      {showRecoveryOverview && state.recovery?.disposition === "completed_not_activated" && (
+        <ActivationPreparePanel onPreparedChange={setActivationPrepared} />
+      )}
       {state.selectedAction === "resume" && state.recovery?.inspection && (
         <MigrationResumeConfirmation
           inspection={state.recovery.inspection}
