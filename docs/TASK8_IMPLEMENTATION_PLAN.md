@@ -227,3 +227,6 @@ phase1-task8-activation-design-audit
 ## Task 8B 完成门
 
 Task 8B 已完成 IndexedDbRuntime、Runtime metadata/order manifest、hydrate/dehydrate、实体差异事务写入、引用预检、change-set read-back 和 round-trip 等价测试。schema v1 未变化，Web 未启用 IndexedDB。下一阶段 Task 8C 只能处理 activation preflight、source drift、Marker/Journal 和切换恢复，不得重新实现 Runtime 数据读写。
+## Task 8C 完成记录
+
+Task 8C 已实现 Source Drift、目标完整等价预检、Web Locks writer lock、Runtime write gate、多标签页通知、Bootstrap Marker、Activation Journal、Prepare/Cancel 和启动只读识别。验收状态为 `PASS_WITH_NON_BLOCKING_GAPS`，详见 `TASK8C_ACCEPTANCE.md`。当前 backend 仍为 localStorage；Task 8D 仅可从一致的 activation_prepared 证据继续，负责真正两阶段切换、controlled reload、正式 IndexedDB boot 与完整 Recovery Screen。Task 8E 才负责集成和发布验收。
