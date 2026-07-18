@@ -3,7 +3,8 @@ import type {
   StorageActivationJournalStatus,
   StorageActivationJournalV1,
   StorageAdapter,
-  StorageMetadataRecord
+  StorageMetadataRecord,
+  StorageTransaction
 } from "./contracts";
 import { canonicalJsonStringify } from "./json-utils";
 import { StorageError } from "./errors";
@@ -79,7 +80,7 @@ export class ActivationJournalRepository {
 
   async createOrReuse(input: CreateActivationJournalInput): Promise<{ journal: StorageActivationJournalV1; reused: boolean }> {
     const candidate = createActivationJournal(input);
-    const result = await this.adapter.transaction(["migrationMetadata"], "readwrite", async (tx) => {
+    const result = await runJournalTransaction(this.adapter, async (tx) => {
       const existing = await tx.get("migrationMetadata", candidate.id);
       if (!existing) {
         await tx.put("migrationMetadata", candidate);
@@ -103,7 +104,7 @@ export class ActivationJournalRepository {
     nextStatus: StorageActivationJournalStatus,
     options: { updatedAt: string; bootstrapRevisionPrepared?: number; errorCode?: string }
   ): Promise<StorageActivationJournalV1> {
-    const next = await this.adapter.transaction(["migrationMetadata"], "readwrite", async (tx) => {
+    const next = await runJournalTransaction(this.adapter, async (tx) => {
       const current = await tx.get("migrationMetadata", activationJournalId(activationId));
       if (!isStorageActivationJournal(current)) throw journalConflict("Activation journal is missing or invalid.");
       if (!expectedStatuses.includes(current.status)) {
@@ -133,8 +134,28 @@ export class ActivationJournalRepository {
   }
 }
 
+async function runJournalTransaction<T>(
+  adapter: StorageAdapter,
+  operation: (transaction: StorageTransaction) => Promise<T>
+): Promise<T> {
+  try {
+    return await adapter.transaction(["migrationMetadata"], "readwrite", operation);
+  } catch (error) {
+    if (
+      error instanceof StorageError &&
+      error.code === "STORAGE_TRANSACTION_FAILED" &&
+      error.cause instanceof StorageError &&
+      error.cause.code === "STORAGE_CONFLICT"
+    ) {
+      throw error.cause;
+    }
+    throw error;
+  }
+}
+const JOURNAL_JSON_OPTIONS = { adapter: "indexedDB" as const, code: "STORAGE_VALIDATION_FAILED" as const, recoverable: false };
+
 function sameJournalIdentity(left: StorageActivationJournalV1, right: StorageActivationJournalV1): boolean {
-  return canonicalJsonStringify(journalIdentity(left)) === canonicalJsonStringify(journalIdentity(right));
+  return canonicalJsonStringify(journalIdentity(left), JOURNAL_JSON_OPTIONS) === canonicalJsonStringify(journalIdentity(right), JOURNAL_JSON_OPTIONS);
 }
 
 function journalIdentity(value: StorageActivationJournalV1): Record<string, unknown> {
@@ -154,7 +175,7 @@ function journalIdentity(value: StorageActivationJournalV1): Record<string, unkn
 }
 
 function canonicalJournal(value: StorageActivationJournalV1): string {
-  return canonicalJsonStringify(value);
+  return canonicalJsonStringify(value, JOURNAL_JSON_OPTIONS);
 }
 
 function journalConflict(message: string): StorageError {
@@ -162,6 +183,7 @@ function journalConflict(message: string): StorageError {
     code: "STORAGE_CONFLICT",
     adapter: "indexedDB",
     store: "migrationMetadata",
+    message,
     recoverable: false,
     cause: new Error(message)
   });
