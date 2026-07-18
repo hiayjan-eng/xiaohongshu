@@ -1,6 +1,8 @@
 import type { AppState } from "@revival/shared-types";
 import {
   LEGACY_APP_STATE_STORAGE_KEY,
+  RUNTIME_APP_METADATA_KEY,
+  RUNTIME_ORDER_MANIFEST_KEY,
   LegacyLocalStorageSnapshotReader,
   createMemoryAdapter,
   createMigrationPreview,
@@ -26,7 +28,7 @@ import {
 import { FakeReadonlyStorage, makeLargeLegacyAppState, makeLegacyAppState, makeLegacyStorage } from "./legacy-backup-fixtures";
 import { TestHarness } from "./test-harness";
 
-const CASE_COUNT = 20;
+const CASE_COUNT = 21;
 
 export function runMigrationPreviewTests(harness: TestHarness): void {
   harness.test("Migration preview: valid legacy envelope creates a read-only migration plan", async () => {
@@ -46,6 +48,19 @@ export function runMigrationPreviewTests(harness: TestHarness): void {
     harness.assert(report.issues.every((issue) => !issue.message.includes("xsec_token")), "messages are sanitized");
   });
 
+  harness.test("Migration preview: runtime metadata and order manifest are required for activation readiness", async () => {
+    const valid = await createPreview(await createEnvelope());
+    harness.assert(valid.preservationChecks.some((check) => check.field === "runtimeMetadata" && check.status === "passed"), "runtime metadata preserved");
+    harness.assert(valid.preservationChecks.some((check) => check.field === "runtimeOrder" && check.status === "passed"), "runtime order preserved");
+    const envelope = cloneEnvelope(await createEnvelope());
+    envelope.normalizedSnapshot!.records.settings = (envelope.normalizedSnapshot!.records.settings ?? []).filter((setting) =>
+      setting.key !== RUNTIME_APP_METADATA_KEY && setting.key !== RUNTIME_ORDER_MANIFEST_KEY
+    );
+    const blocked = await createPreview(envelope);
+    harness.assert(hasIssue(blocked.issues, "RUNTIME_METADATA_NOT_PRESERVED"), "missing runtime metadata blocks");
+    harness.assert(hasIssue(blocked.issues, "RUNTIME_ORDER_NOT_PRESERVED"), "missing runtime order blocks");
+    harness.equal(blocked.summary.canProceed, false, "activation readiness blocked");
+  });
   harness.test("Migration preview: user summary and MigrationReport are JSON-safe", async () => {
     const report = await createPreview(await createEnvelope());
     const userSummary = createMigrationPreviewUserSummary(report);
