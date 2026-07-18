@@ -112,6 +112,12 @@ export class ActivationBootCoordinator {
       if (!activationId || !migrationId || marker.activeBackend !== "indexedDB") {
         throw activationError("ACTIVATION_BACKEND_CONFLICT", false);
       }
+      this.options.writeGate.markSwitching();
+      await this.inject("after_reload_before_open");
+      this.emit("boot_opening_indexeddb");
+      await this.options.targetRuntime.open().catch((cause) => { throw activationError("ACTIVATION_BOOT_OPEN_FAILED", true, cause); });
+      await this.inject("after_open_before_health");
+
       let journal = await this.options.journalRepository.read(activationId);
       let metadata = await this.readMetadata(migrationId);
       if (!journal || !metadata || journal.migrationId !== migrationId) {
@@ -123,12 +129,6 @@ export class ActivationBootCoordinator {
       if (marker.state === "activating" && metadata.activeStorageSwitched !== (journal.status === "committed")) {
         throw activationError("ACTIVATION_BACKEND_CONFLICT", false);
       }
-
-      this.options.writeGate.markSwitching();
-      await this.inject("after_reload_before_open");
-      this.emit("boot_opening_indexeddb");
-      await this.options.targetRuntime.open().catch((cause) => { throw activationError("ACTIVATION_BOOT_OPEN_FAILED", true, cause); });
-      await this.inject("after_open_before_health");
 
       this.emit("boot_health_check");
       const health = await this.options.targetRuntime.healthCheck().catch((cause) => {
