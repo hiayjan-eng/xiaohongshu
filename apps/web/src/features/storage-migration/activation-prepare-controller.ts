@@ -43,6 +43,7 @@ export interface ActivationPrepareControllerOptions {
   markerStorage?: BootstrapMarkerStorageLike;
   readonlyStorageFactory?: typeof createReadonlyBrowserStorage;
   broadcastFactory?: () => StorageRuntimeBroadcast;
+  reloader?: ControlledReloader;
   now?: () => Date;
 }
 
