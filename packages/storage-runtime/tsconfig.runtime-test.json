@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.test.json",
+  "compilerOptions": {
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "outDir": "../../node_modules/.cache/storage-runtime-test",
+    "noEmit": false,
+    "isolatedModules": false,
+    "declaration": false,
+    "sourceMap": false
+  }
+}
