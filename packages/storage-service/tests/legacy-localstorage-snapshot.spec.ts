@@ -75,7 +75,7 @@ export function runLegacyLocalStorageSnapshotTests(harness: TestHarness): void {
     harness.assert(Boolean(snapshot?.records.settings?.find((setting) => setting.key === "achievements")), "achievements setting mapped");
     const runtimeMetadata = snapshot?.records.settings?.find((setting) => setting.key === RUNTIME_APP_METADATA_KEY);
     const orderManifest = snapshot?.records.settings?.find((setting) => setting.key === RUNTIME_ORDER_MANIFEST_KEY);
-    harness.equal(parseRuntimeAppMetadata(runtimeMetadata).value?.user.id, "user-fixture", "runtime user metadata mapped");
+    harness.equal(parseRuntimeAppMetadata(runtimeMetadata).value?.user.id, "user-test", "runtime user metadata mapped");
     harness.equal(parseRuntimeOrderManifest(orderManifest).value?.orders.savedItems[0], "saved-001", "saved item order mapped");
     harness.equal(parseRuntimeOrderManifest(orderManifest).value?.orders.importBatchItems[0], "batch-item-001", "batch item order mapped");
     harness.equal(snapshot?.records.savedItems?.[0]?.title, "小红书封面设计技巧 ✨", "title preserved");
