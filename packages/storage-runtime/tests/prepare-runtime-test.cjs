@@ -3,7 +3,7 @@ const path = require("node:path");
 
 const cacheRoot = path.resolve(__dirname, "../node_modules/.cache/storage-runtime-test");
 const scopedRoot = path.join(cacheRoot, "node_modules/@revival");
-const packages = ["shared-types", "classification-service", "ai-service", "database"];
+const packages = ["shared-types", "classification-service", "ai-service", "database", "storage-service"];
 
 fs.mkdirSync(scopedRoot, { recursive: true });
 fs.writeFileSync(path.join(cacheRoot, "package.json"), JSON.stringify({ type: "commonjs" }));
