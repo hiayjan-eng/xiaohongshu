@@ -267,3 +267,9 @@ The execution order is now locked to:
 Resume rereads the persisted backup, verifies immutable fields, byte length, serialized envelope SHA-256, parsed envelope, and source checksum alignment before continuing from checkpoints. Rollback can be retried after `rollback_failed`; already-cleared stores remain empty, remaining stores continue clearing, and backup/metadata are retained.
 
 Task 7B must use Web Locks for IndexedDB. If Web Locks are unavailable, the UI must block migration instead of falling back to memory or localStorage locks.
+
+## Task 8 补充：迁移完成后的激活协议
+
+MigrationExecutor 的 `completed` 只代表目标数据写入和校验完成，不能直接改变产品 Runtime。激活前必须验证 source drift、Backup、MigrationMetadata、目标 Store SHA-256、Runtime settings/order manifests、schema 和浏览器能力，并在 authority Web Lock 内进行第二次 source checksum。
+
+激活使用 Bootstrap Marker 与 Activation Journal 的两阶段协议。Marker 或 IndexedDB boot 异常时进入 Recovery Screen；不得静默回到可写 localStorage。`activeStorageSwitched=true` 只在 boot verification 成功后的 IndexedDB commit transaction 中写入，之后 Task 7C rollback 永久拒绝该 migration。
