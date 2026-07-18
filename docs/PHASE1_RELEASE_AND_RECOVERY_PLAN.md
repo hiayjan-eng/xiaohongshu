@@ -135,3 +135,6 @@ Phase 1 永久保留到未来独立清理阶段：
 ## 10. 发布报告
 
 最终报告必须区分：代码发布、默认 Runtime、用户是否迁移、用户是否激活、active backend、旧数据保留、Backup/Journal 状态、测试 Profile 与主浏览器。不得把“激活 UI 已上线”描述成“用户数据已切换”。
+## Task 8C 发布与恢复门
+
+Task 8C 分支不可合并或部署。Prepare 后 Marker/Journal 只是“已准备，尚未切换”，`activeStorageSwitched=false`，原 localStorage 不删除。Prepare 可在一致证据下取消，保留 Backup、MigrationMetadata、Journal 和目标数据；Marker/Journal 冲突或中间失败进入 recovery_required 并冻结普通写入。Task 8D 完成真实激活和 Recovery，Task 8E 通过隔离 Profile 全链路验收后才能讨论 main 集成与 production。
