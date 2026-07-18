@@ -1107,10 +1107,14 @@ function validatePreservation(context: ValidationContext, envelope: LegacyBackup
     canonicalCompare(runtimeMetadata.value?.user, parsed.user);
   addPreservationCheck(context, "settings", RUNTIME_APP_METADATA_KEY, "runtimeMetadata", metadataPreserved ? "passed" : "failed", "RUNTIME_METADATA_NOT_PRESERVED");
   const orderManifest = parseRuntimeOrderManifest((snapshot.records.settings ?? []).find((setting) => setting.key === RUNTIME_ORDER_MANIFEST_KEY));
-  const orderPreserved = orderManifest.valid && RUNTIME_ORDERED_COLLECTIONS.every((collection) => {
-    const expectedIds = (snapshot.records[collection] ?? []).map((record) => record.id);
-    return canonicalCompare(orderManifest.value?.orders[collection], expectedIds);
-  });
+  const sourceOrderManifest = parseRuntimeOrderManifest((envelope.normalizedSnapshot?.records.settings ?? []).find((setting) => setting.key === RUNTIME_ORDER_MANIFEST_KEY));
+  const orderPreserved = orderManifest.valid && sourceOrderManifest.valid &&
+    canonicalCompare(orderManifest.value?.orders, sourceOrderManifest.value?.orders) &&
+    RUNTIME_ORDERED_COLLECTIONS.every((collection) => {
+      const targetIds = (snapshot.records[collection] ?? []).map((record) => record.id).sort();
+      const manifestIds = [...(orderManifest.value?.orders[collection] ?? [])].sort();
+      return canonicalCompare(manifestIds, targetIds);
+    });
   addPreservationCheck(context, "settings", RUNTIME_ORDER_MANIFEST_KEY, "runtimeOrder", orderPreserved ? "passed" : "failed", "RUNTIME_ORDER_NOT_PRESERVED");
 }
 
