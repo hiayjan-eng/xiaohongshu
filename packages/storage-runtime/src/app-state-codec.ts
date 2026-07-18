@@ -10,6 +10,7 @@ import {
   parseRuntimeOrderManifest,
   type RuntimeOrderedCollection,
   type StorageRecordMap,
+  type StorageSnapshot,
   type StoredSetting
 } from "@revival/storage-service";
 import {
