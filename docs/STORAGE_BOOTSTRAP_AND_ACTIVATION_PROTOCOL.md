@@ -224,3 +224,6 @@ Phase 1 不实现这个能力，也不提供按钮。
 ## 14. Task 8C 实际落地
 
 Task 8C 已创建 `collection-revival-storage-bootstrap:v1` 契约，但只有用户显式完成 Prepare 才写入。当前状态仅允许 `legacy_active`、`activation_prepared`、`recovery_required`，且 `activeBackend` 固定为 `localStorage`。实际 Prepare 顺序为 Journal `preparing` -> Marker `activation_prepared` read-back -> Journal `prepared` read-back；Marker 已写而 Journal 定稿失败时，Marker 再递增 revision 并进入 `recovery_required`。广播通道为 `collection-revival-storage-runtime:v1`，BroadcastChannel 缺失时使用瞬时 storage-event 通知 key。Task 8D 才能增加 `activating`、`indexeddb_active`、controlled reload 和正式 IndexedDB boot。
+## 15. Task 8D 两阶段正式激活
+
+Task 8D 已落地 `activating` 与 `indexeddb_active`。正式启用必须经过四项确认、Web Lock、完整 final recheck、Journal `switching` read-back、Marker `activating` read-back和受控 reload。启动后由 `AppBootstrap` 严格选择 `IndexedDbRuntime`，完成 open、healthCheck、hydrate 与提交前 checksum 校验后，才在同一 IndexedDB 事务中写入 `activeStorageSwitched=true`、Journal `committed` 与 runtime activation metadata，随后 final Marker。已提交后的正常启动校验提交证据和当前运行时健康，不再把可变用户数据与激活前快照强行比对。任何冲突进入 Recovery Screen，不会静默回到可写 localStorage。

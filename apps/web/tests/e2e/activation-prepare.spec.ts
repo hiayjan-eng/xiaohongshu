@@ -14,9 +14,9 @@ test.describe("Task 8C activation prepare", () => {
   });
 
   test.afterEach(async ({ page }) => {
-    await page.goto("/settings/data-migration");
+    await page.evaluate((key) => localStorage.removeItem(key), MARKER_KEY).catch(() => undefined);
+    await page.reload().catch(() => undefined);
     await deleteDatabase(page);
-    await page.evaluate((key) => localStorage.removeItem(key), MARKER_KEY);
   });
 
   test("completed migration passes full preflight, prepares without activation, and can cancel", async ({ page }) => {
@@ -35,7 +35,7 @@ test.describe("Task 8C activation prepare", () => {
     const passed = page.getByTestId("activation-preflight-passed");
     await expect(passed).toBeVisible({ timeout: 30_000 });
     await expect(passed).toContainText("所有启用条件已经通过");
-    await expect(passed).toContainText("旧本地存储");
+    await expect(passed).toContainText("已完成，尚未启用");
     await capture(page, "desktop-preflight-ready");
 
     const reportDownload = page.waitForEvent("download");
@@ -91,8 +91,8 @@ test.describe("Task 8C activation prepare", () => {
     await page.getByTestId("activation-preflight-idle").getByRole("button", { name: "检查启用条件" }).click();
     const drift = page.getByTestId("activation-source-drift");
     await expect(drift).toBeVisible({ timeout: 30_000 });
-    await expect(drift).toContainText("当前收藏在迁移后发生了变化");
-    await expect(drift).toContainText("主题");
+    await expect(drift).toContainText("迁移后数据发生了变化");
+    await expect(drift).toContainText("当前收藏发生变化");
     await capture(page, "desktop-source-drift");
     await expect(drift.getByRole("button", { name: "确认准备启用" })).toHaveCount(0);
     expect(await page.evaluate((key) => localStorage.getItem(key), MARKER_KEY)).toBeNull();
@@ -202,8 +202,8 @@ test.describe("Task 8C activation prepare", () => {
 
     await page.evaluate((key) => localStorage.setItem(key, "{broken"), MARKER_KEY);
     await page.reload();
-    await expect(page.getByTestId("app-storage-recovery-required")).toBeVisible();
-    await expect(page.getByTestId("app-storage-recovery-required")).toContainText("不会猜测数据源");
+    await expect(page.getByTestId("storage-recovery-screen")).toBeVisible();
+    await expect(page.getByTestId("storage-recovery-screen")).toContainText("不会静默切回旧存储");
     await capture(page, "desktop-marker-recovery-required");
   });
 

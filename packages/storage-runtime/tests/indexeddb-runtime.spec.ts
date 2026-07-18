@@ -297,6 +297,29 @@ export function registerIndexedDbRuntimeTests(harness: TestHarness): void {
     }
   });
 
+  harness.test("10,000 record IndexedDB boot and hydrate remain equivalent", async () => {
+    const name = nextName("large-10000");
+    const adapter = createAdapter(name);
+    const initial = makeLargeBundle(10000);
+    try {
+      await seedAdapter(adapter, initial);
+      const runtime = new IndexedDbRuntime({ adapter, expectedSchemaVersion: 1 });
+      const startedAt = Date.now();
+      await runtime.open();
+      const health = await runtime.healthCheck();
+      const loaded = await runtime.loadAppState();
+      const elapsedMs = Date.now() - startedAt;
+      harness.equal(health.ok, true, "large health check");
+      harness.equal(loaded.state.savedItems.length, 10000, "ten thousand IndexedDB count");
+      harness.equal(loaded.state.savedItems[9999]?.id, initial.state.savedItems[9999]?.id, "last order exact");
+      harness.equal(compareRuntimeStateBundles(initial, { state: loaded.state, settings: loaded.settings }).equivalent, true, "large IndexedDB equivalent");
+      harness.assert(elapsedMs < 120000, "large boot stays within the non-brittle safety ceiling");
+      await runtime.close();
+    } finally {
+      await adapter.close();
+      await deleteIndexedDbDatabase(name, fakeIndexedDB);
+    }
+  });
   harness.test("10,000 record codec round-trip is iterative and order exact", () => {
     const bundle = makeLargeBundle(10000);
     const dehydrated = dehydrateRuntimeState(bundle, "2026-07-18T00:00:00.000Z");

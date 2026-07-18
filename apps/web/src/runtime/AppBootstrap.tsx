@@ -44,6 +44,8 @@ function MigrationRouteBootstrap({ runtimeFactory }: Required<AppBootstrapProps>
 function StorageMarkerBootstrap({ runtimeFactory }: Required<AppBootstrapProps>) {
   const [selection, setSelection] = useState<StorageRuntimeSelection>();
   const [writeGate] = useState(() => new StorageWriteGate());
+  const [reloadRequired, setReloadRequired] = useState(false);
+  const selectionRef = useRef<StorageRuntimeSelection | undefined>(undefined);
 
   useEffect(() => {
     let active = true;
@@ -54,6 +56,15 @@ function StorageMarkerBootstrap({ runtimeFactory }: Required<AppBootstrapProps>)
       if (next.mode === "legacy") writeGate.reopen();
       else if (next.mode === "activation_prepared") writeGate.markPrepared();
       else writeGate.markSwitching();
+      const current = selectionRef.current;
+      if (current?.mode === "legacy" && next.mode === "activation_prepared") return;
+      if ((current?.mode === "legacy" || current?.mode === "activation_prepared") &&
+          (next.mode === "activation_boot" || next.mode === "indexeddb_active")) {
+        setReloadRequired(true);
+        return;
+      }
+      selectionRef.current = next;
+      setReloadRequired(false);
       setSelection(next);
     };
     const onStorage = (event: StorageEvent) => {
@@ -77,6 +88,7 @@ function StorageMarkerBootstrap({ runtimeFactory }: Required<AppBootstrapProps>)
   }, [writeGate]);
 
   if (!selection) return <AppBootScreen mode="loading" />;
+  if (reloadRequired) return <AppBootScreen mode="activation_switching" onReload={() => window.location.reload()} />;
   if (selection.mode === "legacy") return <RuntimeAppBootstrap runtimeFactory={runtimeFactory} writeGate={writeGate} />;
   if (selection.mode === "activation_prepared") {
     return <AppBootScreen mode="activation_prepared" onOpenDataManagement={() => navigateTo("/settings/data-migration")} />;

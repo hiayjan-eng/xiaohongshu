@@ -19,12 +19,16 @@ const LEGACY_KEYS = ["collection-revival-system:v1", "collection-revival-theme",
     await deleteDatabase(page).catch(() => undefined);
   });
 
-  test("formal activation reloads, commits IndexedDB authority and keeps legacy bytes unchanged", async ({ page }) => {
+  test("formal activation reloads, commits IndexedDB authority and keeps legacy bytes unchanged", async ({ page, context }) => {
     test.slow();
     const errors = collectConsoleErrors(page);
     await seedMigrationFixture(page);
     await completeMigration(page);
     const legacyBefore = await readLegacy(page);
+    const oldLegacyTab = await context.newPage();
+    await oldLegacyTab.goto("/");
+    await expect(oldLegacyTab.locator("main")).toBeVisible();
+    await expect(oldLegacyTab.getByTestId("app-write-gate-switching")).toHaveCount(0);
 
     await page.getByTestId("activation-preflight-idle").getByRole("button", { name: "检查启用条件" }).click();
     await expect(page.getByTestId("activation-preflight-passed")).toBeVisible({ timeout: 30_000 });
@@ -45,11 +49,17 @@ const LEGACY_KEYS = ["collection-revival-system:v1", "collection-revival-theme",
 
     await formal.getByRole("button", { name: "开始正式启用" }).click();
     await expect(page.locator(".app-shell")).toBeVisible({ timeout: 45_000 });
-    await expect.poll(() => readMarker(page), { timeout: 20_000 }).toMatchObject({ state: "indexeddb_active", activeBackend: "indexedDB", revision: 3 });
+    await expect.poll(() => readMarkerAcrossNavigation(page), { timeout: 20_000 }).toMatchObject({ state: "indexeddb_active", activeBackend: "indexedDB", revision: 3 });
     const metadata = await readRecords(page, "migrationMetadata") as Array<Record<string, unknown>>;
     expect(metadata.some((entry) => entry.executionStatus === "completed" && entry.activeStorageSwitched === true)).toBe(true);
     expect(metadata.some((entry) => entry.recordType === "activation" && entry.status === "committed")).toBe(true);
     expect(await readLegacy(page)).toEqual(legacyBefore);
+    await expect(oldLegacyTab.getByTestId("app-write-gate-switching")).toBeVisible({ timeout: 20_000 });
+    await oldLegacyTab.reload();
+    await expect(oldLegacyTab.locator("main")).toBeVisible({ timeout: 30_000 });
+    await expect(oldLegacyTab.getByTestId("storage-recovery-screen")).toHaveCount(0);
+    await expect.poll(() => readMarkerAcrossNavigation(oldLegacyTab), { timeout: 20_000 }).toMatchObject({ state: "indexeddb_active", activeBackend: "indexedDB" });
+    await oldLegacyTab.close();
     await capture(page, "desktop-indexeddb-active");
 
     await page.goto("/settings");
@@ -67,6 +77,13 @@ const LEGACY_KEYS = ["collection-revival-system:v1", "collection-revival-theme",
     await page.reload();
     await expect(page.getByTestId("theme-dawn")).toHaveAttribute("aria-pressed", "true", { timeout: 30_000 });
     expect(await readLegacy(page)).toEqual(legacyBefore);
+
+    await page.goto("/settings/data-migration");
+    const task7Boundary = page.getByTestId("migration-recovery-recovery_blocked");
+    await expect(task7Boundary).toBeVisible({ timeout: 30_000 });
+    await expect(task7Boundary.getByRole("button", { name: /继续升级|恢复到升级前|继续恢复/ })).toHaveCount(0);
+    await expect(page.getByTestId("start-migration-execution")).toHaveCount(0);
+    await page.goto("/settings");
 
     await page.setViewportSize({ width: 390, height: 844 });
     await capture(page, "mobile-storage-status");
@@ -129,6 +146,15 @@ async function completeMigration(page: Page) {
 
 async function readMarker(page: Page): Promise<Record<string, unknown> | null> {
   return page.evaluate((key) => { const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : null; }, MARKER_KEY);
+}
+
+async function readMarkerAcrossNavigation(page: Page): Promise<Record<string, unknown> | null> {
+  try {
+    return await readMarker(page);
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("Execution context was destroyed")) return null;
+    throw error;
+  }
 }
 
 async function readRecords(page: Page, storeName: string): Promise<unknown[]> {

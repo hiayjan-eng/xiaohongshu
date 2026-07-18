@@ -138,3 +138,6 @@ Phase 1 永久保留到未来独立清理阶段：
 ## Task 8C 发布与恢复门
 
 Task 8C 分支不可合并或部署。Prepare 后 Marker/Journal 只是“已准备，尚未切换”，`activeStorageSwitched=false`，原 localStorage 不删除。Prepare 可在一致证据下取消，保留 Backup、MigrationMetadata、Journal 和目标数据；Marker/Journal 冲突或中间失败进入 recovery_required 并冻结普通写入。Task 8D 完成真实激活和 Recovery，Task 8E 通过隔离 Profile 全链路验收后才能讨论 main 集成与 production。
+## Task 8D 发布前恢复门
+
+正式激活后，`activeStorageSwitched=true`、Journal committed 和 Marker active 共同确定 IndexedDB authority。Task 7C rollback 永久阻断，Recovery 只允许重试 IndexedDB、补完已提交 Marker和导出证据；不允许直接返回可写 localStorage。旧 localStorage 三个产品 key继续保留，但仅作只读历史。Task 8E 必须在隔离 Profile 验证完整激活、连续刷新、CRUD、跨标签页和故障恢复后，才可请求 main 合并或部署授权；Task 8D 本身没有发布权限。

@@ -188,3 +188,6 @@ Task 8B 必须扩展 legacy mapping，在 settings Store 写入：
 ## Task 8C 审计回填
 
 设计中的关键高风险边界已经落地：固定 drift keys、完整 Runtime 等价、Store SHA-256、正式 Web Locks、单一写 gate、Marker revision/read-back、Journal create-or-reuse/read-back，以及 Marker 成功但 Journal finalization 失败时的 recovery_required。多标签页并发 Prepare 已在真实浏览器上下文收敛为单 Marker/单 Journal。仍延后的是 Task 8D 的 activating/indexeddb_active、正式启动 Recovery、controlled reload 和 commit transaction；Task 8E 负责真实 Profile、更多故障注入和发布门。
+## Task 8D 审计回填
+
+原审计的启动门、Runtime selector、commit 协议、Marker/Journal 中间失败和 Recovery Screen 阻塞项已经落地。`activeStorageSwitched=true` 与 Journal committed 在同一 IndexedDB 事务提交，Marker 在事务后 final；normal active boot 不读取 legacy AppState，也不提供 writable fallback。StorageWriteGate 与广播冻结旧标签页，Task 7 在 commit 后禁止 execute/resume/rollback。剩余非阻塞风险是 Task 8E 的更宽真实浏览器 fault matrix、物理设备大数据性能和 transient UI 截图，不影响当前分支继续进入隔离验收。

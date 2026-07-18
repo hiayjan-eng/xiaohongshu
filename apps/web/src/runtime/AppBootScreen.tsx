@@ -1,11 +1,12 @@
 import type { StorageRuntimeHealthIssue, StorageRuntimeWarning } from "@revival/storage-runtime";
 
 type AppBootScreenProps = {
-  mode: "loading" | "degraded" | "failed" | "activation_prepared" | "storage_recovery_required";
+  mode: "loading" | "degraded" | "failed" | "activation_prepared" | "activation_switching" | "storage_recovery_required";
   issues?: Array<StorageRuntimeHealthIssue | StorageRuntimeWarning>;
   errorCode?: string;
   onRetry?: () => void;
   onOpenDataManagement?: () => void;
+  onReload?: () => void;
 };
 
 export function AppBootScreen(props: AppBootScreenProps) {
@@ -18,6 +19,22 @@ export function AppBootScreen(props: AppBootScreenProps) {
           <h1>正在打开收藏复活</h1>
           <p>正在读取这个浏览器里的收藏数据。</p>
           <div className="app-boot-progress" aria-hidden="true"><span /></div>
+        </section>
+      </main>
+    );
+  }
+
+  if (props.mode === "activation_switching") {
+    return (
+      <main className="app-boot-screen" data-testid="app-write-gate-switching">
+        <section className="app-boot-panel warning" role="alert">
+          <p className="app-boot-kicker">本地数据保护</p>
+          <h1>数据源正在切换</h1>
+          <p>此页面已停止接收旧存储写入。请刷新页面，由启动检查从新存储重新打开，旧内存数据不会写入 IndexedDB。</p>
+          <div className="app-boot-actions">
+            <button type="button" className="primary-button" onClick={props.onReload}>刷新并重新打开</button>
+          </div>
+          <details className="app-boot-details"><summary>查看当前状态</summary><code>ACTIVATION_RELOAD_REQUIRED</code></details>
         </section>
       </main>
     );

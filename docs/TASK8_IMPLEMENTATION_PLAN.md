@@ -230,3 +230,6 @@ Task 8B 已完成 IndexedDbRuntime、Runtime metadata/order manifest、hydrate/d
 ## Task 8C 完成记录
 
 Task 8C 已实现 Source Drift、目标完整等价预检、Web Locks writer lock、Runtime write gate、多标签页通知、Bootstrap Marker、Activation Journal、Prepare/Cancel 和启动只读识别。验收状态为 `PASS_WITH_NON_BLOCKING_GAPS`，详见 `TASK8C_ACCEPTANCE.md`。当前 backend 仍为 localStorage；Task 8D 仅可从一致的 activation_prepared 证据继续，负责真正两阶段切换、controlled reload、正式 IndexedDB boot 与完整 Recovery Screen。Task 8E 才负责集成和发布验收。
+## Task 8D 完成记录
+
+Task 8D 已实现正式确认、final recheck、switching/activating、controlled reload、严格 Runtime selector、IndexedDB activation boot、原子 commit、跨标签页冻结、Recovery Screen 与 Storage Status。验收状态为 `PASS_WITH_NON_BLOCKING_GAPS`；核心安全路径完整，更多真实浏览器故障注入、物理浏览器 10,000 条性能记录和全部瞬时阶段截图留给 Task 8E。当前未合并、未发布、未操作真实用户数据，Task 8E 负责隔离 Profile 全链路验收、最终审计和发布决策。

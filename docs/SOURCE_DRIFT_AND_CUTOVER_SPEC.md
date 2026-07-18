@@ -128,3 +128,6 @@ commit 后 localStorage 主数据、theme、achievements保持原字节，只是
 ## Task 8C 实现结论
 
 Source Drift 只比较 `collection-revival-system:v1`、`collection-revival-theme` 和 `collection-revival-achievements`。Marker、瞬时 runtime 通知、developer/QA、未知 key 与扩展状态均排除。检查同时验证 raw Backup SHA-256、当前和来源 Runtime bundle 的 canonical SHA-256，并分别报告 app_state、theme、achievements。任何来源损坏、漂移、Backup 冲突、目标 Store checksum 或完整 Runtime 等价失败都会阻止 Prepare，且不会写 Marker 或 Journal。Task 8C 只产生 prepared 证据，不执行 cutover。
+## Task 8D Cutover 落地结论
+
+正式切换复用 Task 8C 全量 preflight，并在锁内再次检查 source drift、Backup、target Store SHA-256、schema、Runtime hydrate/equivalence 和未解决会话。顺序固定为 Journal switching、Marker activating、广播、释放锁、受控 reload、IndexedDB boot、原子 commit、Marker finalization。prepared checksum 只约束 commit 前 cutover；commit 后合法业务写会改变 Runtime bundle，正常启动改验提交证据、schema、health 与 hydrate 完整性。
