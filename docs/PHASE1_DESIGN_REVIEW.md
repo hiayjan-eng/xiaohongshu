@@ -65,7 +65,7 @@ Phase 1 应该被收窄为：建立可扩展的本地数据层、只读盘点旧
 1. IndexedDB 封装使用浏览器原生 API 还是引入 `idb` 这类轻量库。建议 Phase 1 先评估现有依赖和 bundle 影响，再决定。
 2. `collection-revival-real-user-tests:v1` 是否作为核心用户数据迁移，还是只进入备份快照。建议默认进入备份，并在 settings store 里保留一份可选迁移。
 3. 成就数据目前单独保存在 `collection-revival-achievements`，Phase 1 应迁移到 settings key-value，还是单独 store。建议先放入 settings store，避免过度拆 store。
-4. activeStorage 标识保存在哪里。建议使用一个很小的 localStorage 标识 `collection-revival-active-storage`，并在 IndexedDB `migrationMetadata` 中保存镜像；若 IndexedDB 打开失败，自动回退 localStorage。
+4. activeStorage 标识保存在哪里。Task 8 已将候选收敛为 `collection-revival-storage-bootstrap:v1` Bootstrap Marker，并在 IndexedDB `migrationMetadata` 保存 Activation Journal。Marker 缺失时兼容 legacy；正式激活后 IndexedDB 打开失败必须进入 Recovery Screen，禁止自动回到可写 localStorage。
 5. 迁移期间是否允许继续导入。建议第一版锁定写操作，提示“迁移完成后再继续导入”，避免双写冲突。
 6. 多标签页同时迁移如何互斥。建议使用本地迁移锁、BroadcastChannel 和过期时间。
 7. localStorage JSON 已损坏时如何处理。建议迁移入口读取 raw string 并生成“无法解析但可导出备份”的报告，不调用会覆盖 demo 的 `loadAppState`。
