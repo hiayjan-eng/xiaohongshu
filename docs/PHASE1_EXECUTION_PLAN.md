@@ -326,3 +326,9 @@ Task 6.1 修复 Task 6 独立审计中发现的 blocking gap 和明确 high risk
 - `rollback_failed` 支持再次显式 rollback。
 
 当前结论：Task 6.1 允许进入 Task 7A 的只读设置页预览实现；Task 7B 必须使用 `WebLocksMigrationLockProvider`，不得开启任何 test-only lock option。合并 main、真实用户迁移和 activeStorage 切换仍属于后续单独任务。
+
+## Task 8 实施拆分补充
+
+Task 8 不作为单一 Codex goal 实施，固定拆为：8A Runtime/LocalStorage 兼容、8B IndexedDB Runtime 与 AppState 等价、8C source drift 与 activation prepare、8D 两阶段激活与 Recovery Screen、8E 全链路验收和发布。8A 至 8C 不切换 activeStorage；8D 仅在隔离 Profile 验证；8E 通过并获得用户新授权后才允许合并和发布。
+
+完整输入、测试和停止条件以 `TASK8_IMPLEMENTATION_PLAN.md` 为准。
