@@ -49,7 +49,7 @@ import {
 } from "./features/storage-migration";
 import { ThemeProvider } from "./theme/ThemeProvider";
 import { getThemePreset, THEME_STORAGE_KEY, type ThemePresetId } from "./theme/themePresets";
-import { createBrowserStorageRuntimeBroadcast, StorageWriteGate } from "@revival/storage-runtime";
+import { createBrowserStorageRuntimeBroadcast, StorageBootstrapMarkerStore, StorageWriteGate } from "@revival/storage-runtime";
 import type { ActiveStorageRuntime, StorageRuntimeProductSettings, StorageWriteGateState } from "@revival/storage-runtime";
 import { RuntimePersistCoordinator, type RuntimePersistStatus } from "./runtime/runtime-persist-coordinator";
 import {
@@ -302,7 +302,10 @@ export function AppContent({ initialState, initialSettings, runtime, writeGate }
       } else if (message.type === "activation_prepared") {
         writeGate.markPrepared();
       } else {
-        writeGate.reopen();
+        void new StorageBootstrapMarkerStore(window.localStorage).read().then((marker) => {
+          if (marker.status === "valid" && marker.marker.state === "legacy_active") writeGate.reopen();
+          else writeGate.markPrepared();
+        });
       }
     });
     return () => {
