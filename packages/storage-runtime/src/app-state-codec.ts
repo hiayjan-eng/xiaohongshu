@@ -135,6 +135,22 @@ export function hydrateRuntimeState(input: DehydratedRuntimeState): HydratedRunt
   return { state, settings, warnings };
 }
 
+export function hydrateRuntimeSnapshot(snapshot: StorageSnapshot): HydratedRuntimeState {
+  const records = snapshot.records;
+  return hydrateRuntimeState({
+    stores: {
+      savedItems: clone(records.savedItems ?? []),
+      actionCards: clone(records.actionCards ?? []),
+      planCards: clone(records.planCards ?? []),
+      classificationCorrections: clone(records.classificationCorrections ?? []),
+      searchLogs: clone(records.searchLogs ?? []),
+      smartAlbums: clone(records.smartAlbums ?? []),
+      importBatches: clone(records.importBatches ?? []),
+      importBatchItems: clone(records.importBatchItems ?? [])
+    },
+    settings: clone(records.settings ?? [])
+  });
+}
 export function validateAppState(
   state: AppState,
   errorCode: StorageRuntimeErrorCode = "RUNTIME_ENTITY_REFERENCE_BROKEN"
