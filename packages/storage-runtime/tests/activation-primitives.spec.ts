@@ -13,7 +13,9 @@ import {
 import {
   ACTIVATION_LEGACY_SOURCE_KEYS,
   STORAGE_BOOTSTRAP_MARKER_KEY,
+  STORAGE_RUNTIME_STORAGE_EVENT_KEY,
   StorageBootstrapMarkerStore,
+  StorageEventBroadcastChannel,
   StorageRuntimeBroadcast,
   StorageWriteGate,
   checkSourceDrift,
@@ -91,6 +93,21 @@ export function registerActivationPrimitiveTests(harness: TestHarness): void {
     broadcast.close();
   });
 
+  harness.test("StorageRuntimeBroadcast: storage-event fallback emits only transient internal messages", () => {
+    const eventWindow = new FakeStorageEventWindow();
+    const storage = new FakeRuntimeBroadcastStorage(eventWindow);
+    const channel = new StorageEventBroadcastChannel(eventWindow, storage);
+    const broadcast = new StorageRuntimeBroadcast(channel);
+    const received: string[] = [];
+    broadcast.subscribe((message) => received.push(message.type));
+    broadcast.publish({ type: "activation_prepared", activationId: "activation-1", revision: 1 });
+    harness.equal(storage.values.has(STORAGE_RUNTIME_STORAGE_EVENT_KEY), false, "transient key removed");
+    harness.deepEqual(received, ["activation_prepared"], "fallback message received");
+    harness.equal(storage.setCalls, 1, "one transient write");
+    harness.equal(storage.removeCalls, 1, "one transient cleanup");
+    broadcast.close();
+  });
+
   harness.test("Activation capabilities: critical browser APIs block while safe notification fallbacks warn", () => {
     const blocked = inspectBrowserActivationCapabilities({ webLocks: false, webCrypto: true, indexedDB: true, indexedDbDatabases: true, broadcastChannel: true, storageEvent: true, localStorageReadable: true, adapterAvailable: true });
     harness.assert(blocked.blocking.includes("WEB_LOCKS_UNAVAILABLE"), "Web Locks blocking");
@@ -151,6 +168,30 @@ class FakeStorage implements ReadonlyStorageLike {
   getItem(key: string): string | null { this.reads += 1; return this.values.get(key) ?? null; }
   setItem(key: string, value: string): void { this.writes += 1; this.values.set(key, value); }
   removeItem(key: string): void { this.writes += 1; this.values.delete(key); }
+}
+
+class FakeStorageEventWindow {
+  private listener?: (event: StorageEvent) => void;
+  addEventListener(_type: "storage", listener: (event: StorageEvent) => void): void { this.listener = listener; }
+  removeEventListener(): void { this.listener = undefined; }
+  emit(key: string, newValue: string | null): void { this.listener?.({ key, newValue } as StorageEvent); }
+}
+
+class FakeRuntimeBroadcastStorage {
+  readonly values = new Map<string, string>();
+  setCalls = 0;
+  removeCalls = 0;
+  constructor(private readonly eventWindow: FakeStorageEventWindow) {}
+  setItem(key: string, value: string): void {
+    this.setCalls += 1;
+    this.values.set(key, value);
+    this.eventWindow.emit(key, value);
+  }
+  removeItem(key: string): void {
+    this.removeCalls += 1;
+    this.values.delete(key);
+    this.eventWindow.emit(key, null);
+  }
 }
 
 class FakeBroadcastChannel implements BroadcastChannelLike {
