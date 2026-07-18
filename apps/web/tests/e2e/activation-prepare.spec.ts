@@ -22,19 +22,21 @@ test.describe("Task 8C activation prepare", () => {
   test("completed migration passes full preflight, prepares without activation, and can cancel", async ({ page }) => {
     test.slow();
     await seedMigrationFixture(page);
+
+    const errors = collectConsoleErrors(page);
+    await completeMigration(page);
     const sourceBefore = await page.evaluate(() => ({
       state: localStorage.getItem("collection-revival-system:v1"),
       theme: localStorage.getItem("collection-revival-theme"),
       achievements: localStorage.getItem("collection-revival-achievements")
     }));
-    const errors = collectConsoleErrors(page);
-    await completeMigration(page);
 
     await page.getByTestId("activation-preflight-idle").getByRole("button", { name: "检查启用条件" }).click();
     const passed = page.getByTestId("activation-preflight-passed");
     await expect(passed).toBeVisible({ timeout: 30_000 });
     await expect(passed).toContainText("所有启用条件已经通过");
     await expect(passed).toContainText("旧本地存储");
+    await capture(page, "desktop-preflight-ready");
 
     const reportDownload = page.waitForEvent("download");
     await passed.getByRole("button", { name: "下载安全报告" }).click();
@@ -49,6 +51,7 @@ test.describe("Task 8C activation prepare", () => {
     const confirmation = page.getByTestId("activation-prepare-confirmation");
     const boxes = confirmation.getByRole("checkbox");
     await expect(boxes).toHaveCount(4);
+    await capture(page, "desktop-prepare-confirmation");
     for (let index = 0; index < 4; index += 1) await boxes.nth(index).check();
     await confirmation.getByRole("button", { name: "准备启用" }).click();
 
@@ -56,6 +59,7 @@ test.describe("Task 8C activation prepare", () => {
     await expect(prepared).toBeVisible({ timeout: 30_000 });
     await expect(prepared).toContainText("尚未切换");
     await expect(prepared).toContainText("localStorage");
+    await capture(page, "desktop-activation-prepared");
     const marker = await readMarker(page);
     expect(marker).toMatchObject({ state: "activation_prepared", activeBackend: "localStorage", revision: 1 });
     const metadata = await readRecords(page, "migrationMetadata") as Array<Record<string, unknown>>;
@@ -71,6 +75,7 @@ test.describe("Task 8C activation prepare", () => {
     page.once("dialog", (dialog) => dialog.accept());
     await prepared.getByRole("button", { name: "取消准备" }).click();
     await expect(page.getByTestId("activation-preflight-idle")).toBeVisible({ timeout: 20_000 });
+    await capture(page, "desktop-prepare-cancelled");
     expect(await readMarker(page)).toMatchObject({ state: "legacy_active", activeBackend: "localStorage", revision: 2 });
     const afterCancel = await readRecords(page, "migrationMetadata") as Array<Record<string, unknown>>;
     expect(afterCancel.some((entry) => entry.recordType === "activation" && entry.status === "cancelled")).toBe(true);
@@ -88,10 +93,78 @@ test.describe("Task 8C activation prepare", () => {
     await expect(drift).toBeVisible({ timeout: 30_000 });
     await expect(drift).toContainText("当前收藏在迁移后发生了变化");
     await expect(drift).toContainText("主题");
+    await capture(page, "desktop-source-drift");
     await expect(drift.getByRole("button", { name: "确认准备启用" })).toHaveCount(0);
     expect(await page.evaluate((key) => localStorage.getItem(key), MARKER_KEY)).toBeNull();
     const metadata = await readRecords(page, "migrationMetadata") as Array<Record<string, unknown>>;
     expect(metadata.filter((entry) => entry.recordType === "activation")).toHaveLength(0);
+  });
+
+  test("target data mismatch blocks prepare without changing authority", async ({ page }) => {
+    test.slow();
+    await seedMigrationFixture(page);
+    await completeMigration(page);
+    await page.evaluate((databaseName) => new Promise<void>((resolve, reject) => {
+      const request = indexedDB.open(databaseName);
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const database = request.result;
+        const transaction = database.transaction("savedItems", "readwrite");
+        const store = transaction.objectStore("savedItems");
+        const read = store.get("saved-migration-001");
+        read.onsuccess = () => store.put({ ...read.result, userNote: "safe-target-drift" });
+        transaction.oncomplete = () => { database.close(); resolve(); };
+        transaction.onerror = () => reject(transaction.error);
+      };
+    }), DATABASE_NAME);
+    await page.getByTestId("activation-preflight-idle").getByRole("button", { name: "检查启用条件" }).click();
+    const mismatch = page.getByTestId("activation-target-mismatch");
+    await expect(mismatch).toBeVisible({ timeout: 30_000 });
+    await expect(mismatch).toContainText("新存储与当前收藏不完全一致");
+    await expect(mismatch.getByRole("button", { name: "确认准备启用" })).toHaveCount(0);
+    expect(await readMarker(page)).toBeNull();
+    const metadata = await readRecords(page, "migrationMetadata") as Array<Record<string, unknown>>;
+    expect(metadata.filter((entry) => entry.recordType === "activation")).toHaveLength(0);
+    await capture(page, "desktop-target-mismatch");
+  });
+
+  test("two tabs preparing concurrently converge on one Marker and one Journal", async ({ page, context }) => {
+    test.slow();
+    await seedMigrationFixture(page);
+    await completeMigration(page);
+    const second = await context.newPage();
+    try {
+      await second.goto("/settings/data-migration");
+      await expect(second.getByTestId("activation-preflight-idle")).toBeVisible({ timeout: 20_000 });
+      await Promise.all([
+        page.getByTestId("activation-preflight-idle").getByRole("button", { name: "检查启用条件" }).click(),
+        second.getByTestId("activation-preflight-idle").getByRole("button", { name: "检查启用条件" }).click()
+      ]);
+      await Promise.all([
+        expect(page.getByTestId("activation-preflight-passed")).toBeVisible({ timeout: 30_000 }),
+        expect(second.getByTestId("activation-preflight-passed")).toBeVisible({ timeout: 30_000 })
+      ]);
+      await page.getByTestId("activation-preflight-passed").getByRole("button", { name: "确认准备启用" }).click();
+      await second.getByTestId("activation-preflight-passed").getByRole("button", { name: "确认准备启用" }).click();
+      for (const target of [page, second]) {
+        const boxes = target.getByTestId("activation-prepare-confirmation").getByRole("checkbox");
+        for (let index = 0; index < 4; index += 1) await boxes.nth(index).check();
+      }
+      await Promise.all([
+        page.getByTestId("activation-prepare-confirmation").getByRole("button", { name: "准备启用" }).click(),
+        second.getByTestId("activation-prepare-confirmation").getByRole("button", { name: "准备启用" }).click()
+      ]);
+      await Promise.all([
+        expect(page.getByTestId("activation-prepared")).toBeVisible({ timeout: 30_000 }),
+        expect(second.getByTestId("activation-prepared")).toBeVisible({ timeout: 30_000 })
+      ]);
+      expect(await readMarker(page)).toMatchObject({ state: "activation_prepared", revision: 1 });
+      const metadata = await readRecords(page, "migrationMetadata") as Array<Record<string, unknown>>;
+      expect(metadata.filter((entry) => entry.recordType === "activation")).toHaveLength(1);
+      await capture(second, "desktop-concurrent-prepare");
+    } finally {
+      await second.close();
+    }
   });
 
   test("prepared or corrupt Marker blocks ordinary app boot without opening IndexedDB authority", async ({ page }) => {
@@ -107,11 +180,13 @@ test.describe("Task 8C activation prepare", () => {
     await expect(page.getByTestId("app-activation-prepared")).toBeVisible();
     await expect(page.getByTestId("app-activation-prepared")).toContainText("尚未切换");
     expect((await page.evaluate(() => indexedDB.databases())).some((entry) => entry.name === DATABASE_NAME)).toBe(false);
+    await capture(page, "desktop-prepared-startup-block");
 
     await page.evaluate((key) => localStorage.setItem(key, "{broken"), MARKER_KEY);
     await page.reload();
     await expect(page.getByTestId("app-storage-recovery-required")).toBeVisible();
     await expect(page.getByTestId("app-storage-recovery-required")).toContainText("不会猜测数据源");
+    await capture(page, "desktop-marker-recovery-required");
   });
 
   test("mobile activation preflight and confirmation do not overflow horizontally", async ({ page }) => {
@@ -127,6 +202,12 @@ test.describe("Task 8C activation prepare", () => {
     expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1)).toBe(false);
   });
 });
+
+async function capture(page: Page, name: string): Promise<void> {
+  const directory = "test-results/task8c-activation-preflight";
+  await fs.mkdir(directory, { recursive: true });
+  await page.screenshot({ path: `${directory}/${name}.png`, fullPage: true });
+}
 
 async function completeMigration(page: Page) {
   await page.goto("/settings/data-migration");
