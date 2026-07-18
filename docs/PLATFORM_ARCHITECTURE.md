@@ -268,6 +268,12 @@ iOS 设计：
 
 ## 18. 部署结构
 
+## Task 8 补充：正式 Runtime 与启动边界
+
+Task 8 审计确认，`packages/database` 当前的 localStorage I/O 与 `packages/storage-service` 的 Adapter 职责重叠。目标结构采用过渡 Runtime：Web 暂时继续消费完整 AppState，但启动、hydrate、差异写入、事务和 health 统一由 `ActiveStorageRuntime` 管理。`packages/database` 保留纯 normalize、legacy codec 和 record factory，不再由页面直接调用 `loadAppState/persistAppState`。
+
+任一时刻只有一个权威 writer。正式激活后 IndexedDB 打不开时进入启动级 Recovery Screen，不得静默回到可写 localStorage。Bootstrap Marker 位于独立最小 localStorage key，Activation Journal 位于 IndexedDB `migrationMetadata`；两阶段协议和源漂移保护见 `STORAGE_BOOTSTRAP_AND_ACTIVATION_PROTOCOL.md` 与 `SOURCE_DRIFT_AND_CUTOVER_SPEC.md`。
+
 当前：
 
 - Vercel production：`https://xiaohongshu-green.vercel.app`
