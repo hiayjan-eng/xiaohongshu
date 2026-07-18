@@ -285,7 +285,7 @@ export function inspectMarkerJournalConsistency(
   return { markerState, activeJournalCount: active.length, consistent };
 }
 
-async function verifyTargetStoreChecksums(adapter: StorageAdapter, metadata: MigrationExecutionMetadataRecord): Promise<boolean> {
+export async function verifyTargetStoreChecksums(adapter: StorageAdapter, metadata: MigrationExecutionMetadataRecord): Promise<boolean> {
   for (const store of MIGRATION_EXECUTION_STORE_ORDER) {
     const expected = metadata.targetChecksums[store];
     if (!expected) return false;
