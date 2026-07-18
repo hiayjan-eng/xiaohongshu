@@ -1,7 +1,10 @@
 import { useEffect, useReducer, useRef, useState } from "react";
 import {
   LocalStorageRuntime,
+  StorageBootstrapMarkerStore,
   StorageRuntimeError,
+  StorageWriteGate,
+  createBrowserStorageRuntimeBroadcast,
   type ActiveStorageRuntime
 } from "@revival/storage-runtime";
 import { AppContent } from "../App";
@@ -18,10 +21,63 @@ export function AppBootstrap({ runtimeFactory = createDefaultRuntime }: AppBoots
     return <MigrationRouteShell />;
   }
 
-  return <RuntimeAppBootstrap runtimeFactory={runtimeFactory} />;
+  return <StorageMarkerBootstrap runtimeFactory={runtimeFactory} />;
 }
 
-function RuntimeAppBootstrap({ runtimeFactory }: Required<AppBootstrapProps>) {
+type MarkerBootState = "checking" | "legacy" | "activation_prepared" | "recovery_required";
+
+function StorageMarkerBootstrap({ runtimeFactory }: Required<AppBootstrapProps>) {
+  const [markerState, setMarkerState] = useState<MarkerBootState>("checking");
+  const [writeGate] = useState(() => new StorageWriteGate());
+
+  useEffect(() => {
+    let active = true;
+    const readMarker = async () => {
+      const result = await new StorageBootstrapMarkerStore(window.localStorage).read();
+      if (!active) return;
+      if (result.status === "missing" || (result.status === "valid" && result.marker.state === "legacy_active")) {
+        writeGate.reopen();
+        setMarkerState("legacy");
+      } else if (result.status === "valid" && result.marker.state === "activation_prepared") {
+        writeGate.markPrepared();
+        setMarkerState("activation_prepared");
+      } else {
+        writeGate.markPrepared();
+        setMarkerState("recovery_required");
+      }
+    };
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === "collection-revival-storage-bootstrap:v1") void readMarker();
+    };
+    const broadcast = createBrowserStorageRuntimeBroadcast();
+    const unsubscribe = broadcast.subscribe((message) => {
+      if (message.type === "activation_prepared") {
+        writeGate.markPrepared();
+        setMarkerState("activation_prepared");
+      } else if (message.type === "activation_prepare_cancelled") {
+        writeGate.reopen();
+        setMarkerState("legacy");
+      } else {
+        writeGate.enterPreflight();
+      }
+    });
+    window.addEventListener("storage", onStorage);
+    void readMarker();
+    return () => {
+      active = false;
+      unsubscribe();
+      broadcast.close();
+      window.removeEventListener("storage", onStorage);
+    };
+  }, [writeGate]);
+
+  if (markerState === "checking") return <AppBootScreen mode="loading" />;
+  if (markerState === "activation_prepared") return <AppBootScreen mode="activation_prepared" onOpenDataManagement={() => navigateTo("/settings/data-migration")} />;
+  if (markerState === "recovery_required") return <AppBootScreen mode="storage_recovery_required" onOpenDataManagement={() => navigateTo("/settings/data-migration")} />;
+  return <RuntimeAppBootstrap runtimeFactory={runtimeFactory} writeGate={writeGate} />;
+}
+
+function RuntimeAppBootstrap({ runtimeFactory, writeGate }: Required<AppBootstrapProps> & { writeGate: StorageWriteGate }) {
   const [runtime] = useState(runtimeFactory);
   const [boot, dispatch] = useReducer(appBootReducer, initialAppBootState);
   const [retryVersion, setRetryVersion] = useState(0);
@@ -71,6 +127,7 @@ function RuntimeAppBootstrap({ runtimeFactory }: Required<AppBootstrapProps>) {
         initialState={boot.loadResult.state}
         initialSettings={boot.loadResult.settings}
         runtime={runtime}
+        writeGate={writeGate}
       />
     );
   }
