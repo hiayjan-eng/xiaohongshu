@@ -6,6 +6,10 @@ import {
   LEGACY_QA_WRITE_TEST_STORAGE_KEY,
   LEGACY_REAL_USER_TEST_STORAGE_KEY,
   LEGACY_THEME_STORAGE_KEY,
+  RUNTIME_APP_METADATA_KEY,
+  RUNTIME_ORDER_MANIFEST_KEY,
+  parseRuntimeAppMetadata,
+  parseRuntimeOrderManifest,
   LegacyLocalStorageSnapshotReader,
   computeSha256,
   createLegacyBackupBlob,
@@ -69,6 +73,11 @@ export function runLegacyLocalStorageSnapshotTests(harness: TestHarness): void {
     harness.equal(snapshot?.counts.searchLogs, 1, "search log count");
     harness.assert(Boolean(snapshot?.records.settings?.find((setting) => setting.key === "theme")), "theme setting mapped");
     harness.assert(Boolean(snapshot?.records.settings?.find((setting) => setting.key === "achievements")), "achievements setting mapped");
+    const runtimeMetadata = snapshot?.records.settings?.find((setting) => setting.key === RUNTIME_APP_METADATA_KEY);
+    const orderManifest = snapshot?.records.settings?.find((setting) => setting.key === RUNTIME_ORDER_MANIFEST_KEY);
+    harness.equal(parseRuntimeAppMetadata(runtimeMetadata).value?.user.id, "user-fixture", "runtime user metadata mapped");
+    harness.equal(parseRuntimeOrderManifest(orderManifest).value?.orders.savedItems[0], "saved-001", "saved item order mapped");
+    harness.equal(parseRuntimeOrderManifest(orderManifest).value?.orders.importBatchItems[0], "batch-item-001", "batch item order mapped");
     harness.equal(snapshot?.records.savedItems?.[0]?.title, "小红书封面设计技巧 ✨", "title preserved");
     harness.assert(Boolean(envelope.checksums.raw), "raw checksum");
     harness.assert(Boolean(envelope.checksums.normalized), "normalized checksum");
