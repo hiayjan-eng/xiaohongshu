@@ -1,4 +1,5 @@
 import { MEMORY_TARGET_CAPABILITIES, createMemoryAdapter } from "../src/index";
+import { getActivationJournalCaseCount, runActivationJournalTests } from "./activation-journal.spec";
 import { getContractCaseCount, runStorageAdapterContractTests } from "./adapter-contract-suite";
 import { getIndexedDbSpecificCaseCount, runIndexedDbAdapterContractTests, runIndexedDbAdapterSpecificTests } from "./indexeddb-adapter.spec";
 import { getLegacyLocalStorageSnapshotCaseCount, runLegacyLocalStorageSnapshotTests } from "./legacy-localstorage-snapshot.spec";
@@ -23,10 +24,11 @@ async function main(): Promise<void> {
   runMigrationPreviewTests(harness);
   runMigrationLockTests(harness);
   runMigrationExecutorTests(harness);
+  runActivationJournalTests(harness);
 
   const result = await harness.run();
   console.log(`storage adapter contract suite: ${result.testCount} tests, ${result.assertionCount} assertions`);
-  console.log(`registered coverage: ${getContractCaseCount()} contract cases, ${getMemorySpecificCaseCount()} memory-specific cases, ${getIndexedDbSpecificCaseCount()} indexeddb-specific cases, ${getLegacyLocalStorageSnapshotCaseCount()} legacy snapshot cases, ${getMigrationPreviewCaseCount()} migration preview cases, ${getMigrationLockCaseCount()} migration lock cases, ${getMigrationExecutorCaseCount()} migration executor cases`);
+  console.log(`registered coverage: ${getContractCaseCount()} contract cases, ${getMemorySpecificCaseCount()} memory-specific cases, ${getIndexedDbSpecificCaseCount()} indexeddb-specific cases, ${getLegacyLocalStorageSnapshotCaseCount()} legacy snapshot cases, ${getMigrationPreviewCaseCount()} migration preview cases, ${getMigrationLockCaseCount()} migration lock cases, ${getMigrationExecutorCaseCount()} migration executor cases, ${getActivationJournalCaseCount()} activation journal cases`);
 }
 
 void main().catch((error) => {
