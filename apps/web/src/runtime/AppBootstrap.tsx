@@ -2,72 +2,31 @@ import { useEffect, useReducer, useRef, useState } from "react";
 import {
   LocalStorageRuntime,
   StorageRuntimeError,
-  type ActiveStorageRuntime,
-  type StorageRuntimeHealthReport,
-  type StorageRuntimeLoadResult
+  type ActiveStorageRuntime
 } from "@revival/storage-runtime";
 import { AppContent } from "../App";
 import { MigrationDataUpgradePage } from "../features/storage-migration";
 import { AppBootScreen } from "./AppBootScreen";
-
-export type AppBootStatus =
-  | "idle"
-  | "opening_runtime"
-  | "checking_runtime"
-  | "loading_state"
-  | "ready"
-  | "degraded"
-  | "failed";
-
-export type AppBootState = {
-  status: AppBootStatus;
-  healthReport?: StorageRuntimeHealthReport;
-  loadResult?: StorageRuntimeLoadResult;
-  safeErrorCode?: string;
-  persistEnabled: boolean;
-};
-
-type AppBootAction =
-  | { type: "phase"; status: "opening_runtime" | "checking_runtime" | "loading_state" }
-  | { type: "ready"; healthReport: StorageRuntimeHealthReport; loadResult: StorageRuntimeLoadResult }
-  | { type: "degraded"; healthReport: StorageRuntimeHealthReport; loadResult: StorageRuntimeLoadResult }
-  | { type: "failed"; code: string };
-
-export const initialAppBootState: AppBootState = {
-  status: "idle",
-  persistEnabled: false
-};
-
-export function appBootReducer(state: AppBootState, action: AppBootAction): AppBootState {
-  switch (action.type) {
-    case "phase":
-      return { status: action.status, persistEnabled: false };
-    case "ready":
-      return {
-        status: "ready",
-        healthReport: action.healthReport,
-        loadResult: action.loadResult,
-        persistEnabled: true
-      };
-    case "degraded":
-      return {
-        status: "degraded",
-        healthReport: action.healthReport,
-        loadResult: action.loadResult,
-        persistEnabled: false
-      };
-    case "failed":
-      return { status: "failed", safeErrorCode: action.code, persistEnabled: false };
-    default:
-      return state;
-  }
-}
+import { appBootReducer, initialAppBootState } from "./app-boot-state";
 
 type AppBootstrapProps = {
   runtimeFactory?: () => ActiveStorageRuntime;
 };
 
 export function AppBootstrap({ runtimeFactory = createDefaultRuntime }: AppBootstrapProps) {
+  if (isDirectMigrationRoute()) {
+    return (
+      <MigrationDataUpgradePage
+        onBackToSettings={() => navigateTo("/settings")}
+        onReturnToImport={() => navigateTo("/import")}
+      />
+    );
+  }
+
+  return <RuntimeAppBootstrap runtimeFactory={runtimeFactory} />;
+}
+
+function RuntimeAppBootstrap({ runtimeFactory }: Required<AppBootstrapProps>) {
   const [runtime] = useState(runtimeFactory);
   const [boot, dispatch] = useReducer(appBootReducer, initialAppBootState);
   const [retryVersion, setRetryVersion] = useState(0);
@@ -83,6 +42,8 @@ export function AppBootstrap({ runtimeFactory = createDefaultRuntime }: AppBoots
         if (retryVersion > 0) await runtime.close();
         if (!isCurrent()) return;
         dispatch({ type: "phase", status: "opening_runtime" });
+        await waitForRuntimeTestGate();
+        if (!isCurrent()) return;
         await runtime.open();
         if (!isCurrent()) return;
         dispatch({ type: "phase", status: "checking_runtime" });
@@ -92,7 +53,8 @@ export function AppBootstrap({ runtimeFactory = createDefaultRuntime }: AppBoots
         const loadResult = await runtime.loadAppState();
         if (!isCurrent()) return;
         const blocked = !healthReport.ok || loadResult.warnings.some((warning) => warning.blocking);
-        dispatch({ type: blocked ? "degraded" : "ready", healthReport, loadResult });
+        if (blocked) dispatch({ type: "degraded", healthReport, loadResult });
+        else dispatch({ type: "ready", healthReport, loadResult });
       } catch (error) {
         if (!isCurrent()) return;
         const code = error instanceof StorageRuntimeError ? error.code : "RUNTIME_LOAD_FAILED";
@@ -107,15 +69,6 @@ export function AppBootstrap({ runtimeFactory = createDefaultRuntime }: AppBoots
       });
     };
   }, [retryVersion, runtime]);
-
-  if (isDirectMigrationRoute()) {
-    return (
-      <MigrationDataUpgradePage
-        onBackToSettings={() => navigateTo("/settings")}
-        onReturnToImport={() => navigateTo("/old-import")}
-      />
-    );
-  }
 
   if (boot.status === "ready" && boot.loadResult) {
     return (
@@ -162,4 +115,9 @@ function isDirectMigrationRoute(): boolean {
 
 function navigateTo(path: string): void {
   window.location.assign(path);
+}
+
+async function waitForRuntimeTestGate(): Promise<void> {
+  const gate = (window as typeof window & { __REVIVAL_RUNTIME_BOOT_GATE__?: Promise<void> }).__REVIVAL_RUNTIME_BOOT_GATE__;
+  if (gate) await gate;
 }
