@@ -43,8 +43,8 @@ export class RuntimePersistCoordinator {
   }
 
   async freezeForActivationPreflight(): Promise<void> {
-    await this.flush();
     this.writeGate?.enterPreflight();
+    await this.flush();
   }
 
   dispose(): void {
@@ -58,7 +58,6 @@ export class RuntimePersistCoordinator {
   private enqueue(operation: () => Promise<string>): Promise<void> {
     this.writeGate?.assertWritable();
     const queued = this.tail.then(async () => {
-      this.writeGate?.assertWritable();
       this.emit({ status: "saving" });
       try {
         const persistedAt = await operation();
