@@ -98,6 +98,21 @@ export function registerActivationSwitchBootTests(harness: TestHarness): void {
     } finally { await fixture.close(); }
   });
 
+  harness.test("Committed IndexedDB boot accepts later runtime writes while retaining activation evidence", async () => {
+    const fixture = await setupBoot();
+    try {
+      const first = await fixture.boot.boot();
+      const nextSettings = { ...first.loadResult.settings, themeId: "dawn" };
+      await first.runtime.persistProductSettings(first.loadResult.settings, nextSettings);
+      await first.runtime.close();
+
+      const second = await fixture.boot.boot();
+      harness.equal(second.loadResult.settings.themeId, "dawn", "post-activation setting survives reload");
+      harness.equal(second.committedDuringBoot, false, "committed activation is not repeated");
+      harness.equal(second.marker.state, "indexeddb_active", "active marker remains authoritative");
+      harness.deepEqual(fixture.legacySnapshot(), fixture.legacyBefore, "legacy keys remain byte exact");
+    } finally { await fixture.close(); }
+  });
   harness.test("Activation boot commit survives Marker failure and Recovery finalizes without rewriting business data", async () => {
     const fixture = await setupBoot();
     try {
