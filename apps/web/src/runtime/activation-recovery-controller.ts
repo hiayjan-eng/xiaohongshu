@@ -5,6 +5,7 @@ import {
   computeSha256,
   metadataId,
   type MigrationExecutionMetadataRecord,
+  type MigrationLockProvider,
   type StorageActivationJournalV1,
   type StorageAdapter
 } from "@revival/storage-service";
@@ -54,7 +55,9 @@ export class BrowserActivationRecoveryController {
     this.markerStorage = options.markerStorage ?? globalThis.localStorage;
     this.now = options.now ?? (() => new Date());
     this.adapter = this.executionRuntime.createTargetAdapter();
-    this.lockProvider = this.executionRuntime.createLockProvider();
+    this.lockProvider = this.executionRuntime.isWebLocksAvailable()
+      ? this.executionRuntime.createLockProvider()
+      : unavailableLockProvider();
     this.runtime = new IndexedDbRuntime({ adapter: this.adapter, expectedSchemaVersion: MIGRATION_TARGET_SCHEMA_VERSION, now: this.now });
     this.journals = new ActivationJournalRepository(this.adapter);
     this.broadcast = createBrowserStorageRuntimeBroadcast();
@@ -200,4 +203,11 @@ export class BrowserActivationRecoveryController {
 function dateStamp(value: string): string {
   const date = new Date(value);
   return (Number.isNaN(date.getTime()) ? new Date() : date).toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+}
+function unavailableLockProvider(): MigrationLockProvider {
+  return {
+    kind: "web-locks",
+    isAvailable: () => false,
+    acquire: async () => { throw new Error("ACTIVATION_CAPABILITY_UNAVAILABLE"); }
+  };
 }
