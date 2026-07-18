@@ -223,3 +223,7 @@ phase1-task8-activation-design-audit
 - 任何 source drift、Marker/Journal 冲突、无锁或 schema mismatch 都阻止激活。
 - 任一阶段现有测试稳定失败，不修改不相关产品代码，状态不得标 READY。
 - 合并、生产发布和用户主浏览器升级分别需要独立确认。
+
+## Task 8B 完成门
+
+Task 8B 已完成 IndexedDbRuntime、Runtime metadata/order manifest、hydrate/dehydrate、实体差异事务写入、引用预检、change-set read-back 和 round-trip 等价测试。schema v1 未变化，Web 未启用 IndexedDB。下一阶段 Task 8C 只能处理 activation preflight、source drift、Marker/Journal 和切换恢复，不得重新实现 Runtime 数据读写。
