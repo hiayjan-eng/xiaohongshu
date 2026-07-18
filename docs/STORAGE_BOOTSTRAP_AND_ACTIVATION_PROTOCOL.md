@@ -221,3 +221,6 @@ Phase 1 不实现这个能力，也不提供按钮。
 入口只在 `completed_not_activated` 且 Backup、Metadata、schema、source drift、browser capabilities 全部通过时显示。
 
 步骤：重新核对、四项确认、激活准备、重新加载、启动验证、成功。成功页显示当前数据源 IndexedDB、旧数据仍保留、启用时间、实体数量和健康状态；Phase 1 不提供删除旧数据。
+## 14. Task 8C 实际落地
+
+Task 8C 已创建 `collection-revival-storage-bootstrap:v1` 契约，但只有用户显式完成 Prepare 才写入。当前状态仅允许 `legacy_active`、`activation_prepared`、`recovery_required`，且 `activeBackend` 固定为 `localStorage`。实际 Prepare 顺序为 Journal `preparing` -> Marker `activation_prepared` read-back -> Journal `prepared` read-back；Marker 已写而 Journal 定稿失败时，Marker 再递增 revision 并进入 `recovery_required`。广播通道为 `collection-revival-storage-runtime:v1`，BroadcastChannel 缺失时使用瞬时 storage-event 通知 key。Task 8D 才能增加 `activating`、`indexeddb_active`、controlled reload 和正式 IndexedDB boot。
