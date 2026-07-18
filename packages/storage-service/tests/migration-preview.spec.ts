@@ -9,6 +9,7 @@ import {
   createMigrationPreviewUserSummary,
   createMigrationReport,
   validateMigrationSource,
+  validateMigratedSnapshotIntegrity,
   type LegacyBackupEnvelope,
   type MigrationIssueCode,
   type MigrationPreviewOptions
@@ -28,7 +29,7 @@ import {
 import { FakeReadonlyStorage, makeLargeLegacyAppState, makeLegacyAppState, makeLegacyStorage } from "./legacy-backup-fixtures";
 import { TestHarness } from "./test-harness";
 
-const CASE_COUNT = 21;
+const CASE_COUNT = 22;
 
 export function runMigrationPreviewTests(harness: TestHarness): void {
   harness.test("Migration preview: valid legacy envelope creates a read-only migration plan", async () => {
@@ -60,6 +61,16 @@ export function runMigrationPreviewTests(harness: TestHarness): void {
     harness.assert(hasIssue(blocked.issues, "RUNTIME_METADATA_NOT_PRESERVED"), "missing runtime metadata blocks");
     harness.assert(hasIssue(blocked.issues, "RUNTIME_ORDER_NOT_PRESERVED"), "missing runtime order blocks");
     harness.equal(blocked.summary.canProceed, false, "activation readiness blocked");
+  });
+  harness.test("Migration final integrity uses manifest order rather than IndexedDB getAll order", async () => {
+    const envelope = await createEnvelopeFromState(makeLegacyAppState({
+      savedItems: [makeSavedItem("saved-z"), makeSavedItem("saved-a")]
+    }));
+    const target = structuredClone(envelope.normalizedSnapshot!);
+    target.sourceStorage = "indexedDB";
+    target.records.savedItems = [...(target.records.savedItems ?? [])].reverse();
+    const result = validateMigratedSnapshotIntegrity(envelope, target);
+    harness.assert(!hasIssue(result.issues, "RUNTIME_ORDER_NOT_PRESERVED"), "runtime order preserved by manifest");
   });
   harness.test("Migration preview: user summary and MigrationReport are JSON-safe", async () => {
     const report = await createPreview(await createEnvelope());
