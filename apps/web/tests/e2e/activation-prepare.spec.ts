@@ -154,14 +154,32 @@ test.describe("Task 8C activation prepare", () => {
         page.getByTestId("activation-prepare-confirmation").getByRole("button", { name: "准备启用" }).click(),
         second.getByTestId("activation-prepare-confirmation").getByRole("button", { name: "准备启用" }).click()
       ]);
-      await Promise.all([
-        expect(page.getByTestId("activation-prepared")).toBeVisible({ timeout: 30_000 }),
-        expect(second.getByTestId("activation-prepared")).toBeVisible({ timeout: 30_000 })
-      ]);
+      await expect.poll(async () =>
+        await page.getByTestId("activation-prepared").count() +
+        await page.getByTestId("activation-another-tab-active").count() +
+        await second.getByTestId("activation-prepared").count() +
+        await second.getByTestId("activation-another-tab-active").count()
+      , { timeout: 30_000 }).toBe(2);
+      const pages = [page, second];
+      const preparedPages = [];
+      const waitingPages = [];
+      for (const target of pages) {
+        if (await target.getByTestId("activation-prepared").count()) preparedPages.push(target);
+        if (await target.getByTestId("activation-another-tab-active").count()) waitingPages.push(target);
+      }
+      expect(preparedPages.length).toBeGreaterThanOrEqual(1);
+      expect(preparedPages.length + waitingPages.length).toBe(2);
       expect(await readMarker(page)).toMatchObject({ state: "activation_prepared", revision: 1 });
       const metadata = await readRecords(page, "migrationMetadata") as Array<Record<string, unknown>>;
       expect(metadata.filter((entry) => entry.recordType === "activation")).toHaveLength(1);
-      await capture(second, "desktop-concurrent-prepare");
+      if (waitingPages[0]) {
+        await expect(waitingPages[0].getByTestId("activation-another-tab-active")).toContainText("另一个页面正在处理");
+        await capture(waitingPages[0], "desktop-concurrent-prepare");
+        await waitingPages[0].getByTestId("activation-another-tab-active").getByRole("button", { name: "重新检查" }).click();
+        await expect(waitingPages[0].getByTestId("activation-prepared")).toBeVisible({ timeout: 30_000 });
+      } else {
+        await capture(second, "desktop-concurrent-prepare");
+      }
     } finally {
       await second.close();
     }
