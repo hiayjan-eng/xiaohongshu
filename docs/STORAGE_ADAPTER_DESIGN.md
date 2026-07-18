@@ -416,3 +416,7 @@ The hardened execution contract is:
 - Rollback after `rollback_failed` can be retried; backup and metadata are preserved.
 
 Task 7B must inject `WebLocksMigrationLockProvider` and must not enable any test-only lock option.
+
+## IndexedDbRuntime 使用边界
+
+Adapter 仍只负责通用持久化和事务；IndexedDbRuntime 负责 AppState hydrate/dehydrate、引用预检、实体 diff、顺序 manifest 和写后校验。一次业务 persist 使用一个多 Store readwrite transaction，完成后再用 readonly transaction 校验 change set。Runtime 不 clear 全库、不修改 backups/migrationMetadata、不选择 active storage，也不自动 fallback。
