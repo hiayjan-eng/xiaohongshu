@@ -87,6 +87,19 @@ export function registerActivationPrepareTests(harness: TestHarness): void {
     } finally { await fixture.close(); }
   });
 
+  harness.test("Activation Prepare: Journal finalization failure persists a recovery_required Marker", async () => {
+    const fixture = await setup({ failJournalFinalize: true });
+    try {
+      await harness.rejects(() => fixture.preparer.prepare(CONFIRMATIONS), "ACTIVATION_PREPARE_FAILED", "journal finalize failure");
+      const marker = await new StorageBootstrapMarkerStore(fixture.markerStorage).read();
+      harness.equal(marker.status === "valid" ? marker.marker.state : "", "recovery_required", "recovery marker");
+      harness.equal(marker.status === "valid" ? marker.marker.revision : 0, 2, "recovery revision");
+      harness.equal(marker.status === "valid" ? marker.marker.activeBackend : "", "localStorage", "legacy authority retained");
+      harness.equal(fixture.gate.state, "activation_prepared", "writes remain frozen");
+      harness.equal(fixture.lock.released, 1, "lock released after recovery marker");
+    } finally { await fixture.close(); }
+  });
+
   harness.test("Cancel Prepare: consistent Marker and Journal return to legacy_active without clearing target evidence", async () => {
     const fixture = await setup();
     try {
@@ -113,10 +126,17 @@ export function registerActivationPrepareTests(harness: TestHarness): void {
   });
 }
 
-async function setup(options: { eligible?: boolean; failFlush?: boolean; lockKind?: "web-locks" | "memory" } = {}) {
+async function setup(options: { eligible?: boolean; failFlush?: boolean; failJournalFinalize?: boolean; lockKind?: "web-locks" | "memory" } = {}) {
   const adapter = createMemoryAdapter();
   await adapter.open();
   const repository = new ActivationJournalRepository(adapter);
+  if (options.failJournalFinalize) {
+    const transition = repository.transition.bind(repository);
+    repository.transition = (async (...args: Parameters<typeof transition>) => {
+      if (args[2] === "prepared") throw new Error("safe injected journal finalization failure");
+      return transition(...args);
+    }) as typeof repository.transition;
+  }
   const markerStorage = new FakeMarkerStorage();
   const gate = new StorageWriteGate();
   const broadcastChannel = new FakeBroadcastChannel();
