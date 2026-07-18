@@ -21,6 +21,7 @@ import {
 } from "./contracts";
 import { StorageError } from "./errors";
 import { assertNoDangerousJsonKeys, canonicalJsonStringify, cloneJsonSafe, DANGEROUS_JSON_KEYS } from "./json-utils";
+import { createRuntimeMetadataSettings } from "./runtime-metadata";
 
 export interface ReadonlyStorageLike {
   readonly length: number;
@@ -638,7 +639,10 @@ function createNormalizedStorageSnapshot(
   addRecords(records, counts, "classificationCorrections", collectStoreRecords("classificationCorrections", state.classificationCorrections, context));
   addRecords(records, counts, "searchLogs", collectStoreRecords("searchLogs", state.searchLogs, context));
 
-  const settings = collectLegacySettings(rawRecords, context, createdAt, options);
+  const settings = [
+    ...collectLegacySettings(rawRecords, context, createdAt, options),
+    ...createRuntimeMetadataSettings(state as unknown as AppState, createdAt)
+  ];
   addRecords(records, counts, "settings", settings);
 
   checkBrokenReferences(records, context);
