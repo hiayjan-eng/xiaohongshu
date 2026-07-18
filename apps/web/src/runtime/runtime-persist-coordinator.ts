@@ -44,6 +44,10 @@ export class RuntimePersistCoordinator {
     this.disposed = true;
   }
 
+  activate(): void {
+    this.disposed = false;
+  }
+
   private enqueue(operation: () => Promise<string>): Promise<void> {
     const queued = this.tail.then(async () => {
       this.emit({ status: "saving" });
