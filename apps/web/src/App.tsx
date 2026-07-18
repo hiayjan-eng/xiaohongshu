@@ -202,6 +202,7 @@ type AppContentProps = {
   initialState: AppState;
   initialSettings: StorageRuntimeProductSettings;
   runtime: ActiveStorageRuntime;
+  writeGate: StorageWriteGate;
 };
 
 export function AppContent({ initialState, initialSettings, runtime, writeGate }: AppContentProps) {
