@@ -84,6 +84,18 @@ export function registerIndexedDbRuntimeTests(harness: TestHarness): void {
     harness.equal(runtime.capabilities.persistent, true, "persistent");
   });
 
+  harness.test("IndexedDbRuntime rejects an adapter reporting the wrong schema version", async () => {
+    const name = nextName("schema-mismatch");
+    const adapter = new SchemaReportingIndexedDbAdapter(name);
+    try {
+      const runtime = new IndexedDbRuntime({ adapter, expectedSchemaVersion: 1 });
+      await harness.rejects(() => runtime.open(), "RUNTIME_TARGET_SCHEMA_MISMATCH", "schema mismatch");
+      harness.equal(runtime.lifecycle, "failed", "schema mismatch fails runtime");
+    } finally {
+      await adapter.close();
+      await deleteIndexedDbDatabase(name, fakeIndexedDB);
+    }
+  });
   harness.test("IndexedDbRuntime loads a complete ordered round-trip and healthCheck is read-only", async () => {
     const name = nextName("roundtrip");
     const adapter = createAdapter(name);
@@ -295,6 +307,15 @@ export function registerIndexedDbRuntimeTests(harness: TestHarness): void {
   });
 }
 
+class SchemaReportingIndexedDbAdapter extends IndexedDbAdapter {
+  constructor(databaseName: string) {
+    super({ databaseName, schemaVersion: 1, indexedDBFactory: fakeIndexedDB, keyRangeFactory: FakeIDBKeyRange });
+  }
++
+  override async getSchemaVersion(): Promise<number> {
+    return 2;
+  }
+}
 class VerificationFailingIndexedDbAdapter extends IndexedDbAdapter {
   failNextVerification = false;
   private corruptNextRead = false;
