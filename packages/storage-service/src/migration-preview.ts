@@ -24,6 +24,13 @@ import {
   type LegacySnapshotIssue,
   verifyLegacyBackupEnvelope
 } from "./legacy-localstorage-snapshot";
+import {
+  RUNTIME_APP_METADATA_KEY,
+  RUNTIME_ORDERED_COLLECTIONS,
+  RUNTIME_ORDER_MANIFEST_KEY,
+  parseRuntimeAppMetadata,
+  parseRuntimeOrderManifest
+} from "./runtime-metadata";
 
 export type MigrationIssueSeverity = "blocking" | "warning" | "info";
 
@@ -76,6 +83,8 @@ export type MigrationIssueCode =
   | "CLASSIFICATION_CORRECTION_NOT_PRESERVED"
   | "THEME_NOT_PRESERVED"
   | "ACHIEVEMENT_NOT_PRESERVED"
+  | "RUNTIME_METADATA_NOT_PRESERVED"
+  | "RUNTIME_ORDER_NOT_PRESERVED"
   | "INTERNAL_DATA_EXCLUDED"
   | "DERIVED_DATA_WILL_REBUILD"
   | "TEXT_REPAIR_PENDING"
@@ -119,6 +128,8 @@ export const MIGRATION_ISSUE_SEVERITY: Readonly<Record<MigrationIssueCode, Migra
   CLASSIFICATION_CORRECTION_NOT_PRESERVED: "blocking",
   THEME_NOT_PRESERVED: "warning",
   ACHIEVEMENT_NOT_PRESERVED: "warning",
+  RUNTIME_METADATA_NOT_PRESERVED: "blocking",
+  RUNTIME_ORDER_NOT_PRESERVED: "blocking",
   INTERNAL_DATA_EXCLUDED: "info",
   DERIVED_DATA_WILL_REBUILD: "info",
   TEXT_REPAIR_PENDING: "warning",
@@ -1090,6 +1101,17 @@ function validatePreservation(context: ValidationContext, envelope: LegacyBackup
   const settingKeys = new Set((snapshot.records.settings ?? []).map((setting) => setting.key));
   addPreservationCheck(context, "settings", "setting-theme", "theme", settingKeys.has("theme") ? "passed" : "failed", "THEME_NOT_PRESERVED");
   addPreservationCheck(context, "settings", "setting-achievements", "achievements", settingKeys.has("achievements") ? "passed" : "failed", "ACHIEVEMENT_NOT_PRESERVED");
+  const runtimeMetadata = parseRuntimeAppMetadata((snapshot.records.settings ?? []).find((setting) => setting.key === RUNTIME_APP_METADATA_KEY));
+  const expectedSchema = typeof parsed.schemaVersion === "number" ? parsed.schemaVersion : snapshot.sourceSchemaVersion;
+  const metadataPreserved = runtimeMetadata.valid && runtimeMetadata.value?.appSchemaVersion === expectedSchema &&
+    canonicalCompare(runtimeMetadata.value?.user, parsed.user);
+  addPreservationCheck(context, "settings", RUNTIME_APP_METADATA_KEY, "runtimeMetadata", metadataPreserved ? "passed" : "failed", "RUNTIME_METADATA_NOT_PRESERVED");
+  const orderManifest = parseRuntimeOrderManifest((snapshot.records.settings ?? []).find((setting) => setting.key === RUNTIME_ORDER_MANIFEST_KEY));
+  const orderPreserved = orderManifest.valid && RUNTIME_ORDERED_COLLECTIONS.every((collection) => {
+    const expectedIds = (snapshot.records[collection] ?? []).map((record) => record.id);
+    return canonicalCompare(orderManifest.value?.orders[collection], expectedIds);
+  });
+  addPreservationCheck(context, "settings", RUNTIME_ORDER_MANIFEST_KEY, "runtimeOrder", orderPreserved ? "passed" : "failed", "RUNTIME_ORDER_NOT_PRESERVED");
 }
 
 function compareById<K extends StorageEntityName>(
