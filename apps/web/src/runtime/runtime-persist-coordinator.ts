@@ -1,6 +1,7 @@
 import type {
   ActiveStorageRuntime,
-  StorageRuntimeProductSettings
+  StorageRuntimeProductSettings,
+  StorageWriteGate
 } from "@revival/storage-runtime";
 import type { AppState } from "@revival/shared-types";
 
@@ -16,7 +17,8 @@ export class RuntimePersistCoordinator {
 
   constructor(
     private readonly runtime: ActiveStorageRuntime,
-    private readonly onStatusChange: (status: RuntimePersistStatus) => void
+    private readonly onStatusChange: (status: RuntimePersistStatus) => void,
+    private readonly writeGate?: StorageWriteGate
   ) {}
 
   enqueueAppState(previous: AppState, next: AppState): Promise<void> {
@@ -40,6 +42,11 @@ export class RuntimePersistCoordinator {
     return this.tail;
   }
 
+  async freezeForActivationPreflight(): Promise<void> {
+    await this.flush();
+    this.writeGate?.enterPreflight();
+  }
+
   dispose(): void {
     this.disposed = true;
   }
@@ -49,7 +56,9 @@ export class RuntimePersistCoordinator {
   }
 
   private enqueue(operation: () => Promise<string>): Promise<void> {
+    this.writeGate?.assertWritable();
     const queued = this.tail.then(async () => {
+      this.writeGate?.assertWritable();
       this.emit({ status: "saving" });
       try {
         const persistedAt = await operation();
