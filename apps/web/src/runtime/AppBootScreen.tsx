@@ -1,7 +1,7 @@
 import type { StorageRuntimeHealthIssue, StorageRuntimeWarning } from "@revival/storage-runtime";
 
 type AppBootScreenProps = {
-  mode: "loading" | "degraded" | "failed";
+  mode: "loading" | "degraded" | "failed" | "activation_prepared" | "storage_recovery_required";
   issues?: Array<StorageRuntimeHealthIssue | StorageRuntimeWarning>;
   errorCode?: string;
   onRetry?: () => void;
@@ -23,6 +23,22 @@ export function AppBootScreen(props: AppBootScreenProps) {
     );
   }
 
+  if (props.mode === "activation_prepared" || props.mode === "storage_recovery_required") {
+    const recovery = props.mode === "storage_recovery_required";
+    return (
+      <main className="app-boot-screen" data-testid={recovery ? "app-storage-recovery-required" : "app-activation-prepared"}>
+        <section className={`app-boot-panel ${recovery ? "danger" : "warning"}`} role="alert">
+          <p className="app-boot-kicker">本地数据保护</p>
+          <h1>{recovery ? "存储准备记录需要检查" : "新存储已经准备，尚未切换"}</h1>
+          <p>{recovery ? "启动标记无法安全确认，系统不会猜测数据源，也不会自动修复或清理。当前没有执行正式切换。" : "当前正式数据源仍是旧本地存储。普通编辑已冻结，请前往数据管理取消准备；正式启用属于下一阶段。"}</p>
+          <div className="app-boot-actions">
+            <button type="button" className="primary-button" onClick={props.onOpenDataManagement}>前往数据管理</button>
+          </div>
+          <details className="app-boot-details"><summary>查看当前状态</summary><code>{recovery ? "ACTIVATION_MARKER_INVALID" : "ACTIVATION_PREPARED"}</code></details>
+        </section>
+      </main>
+    );
+  }
   const degraded = props.mode === "degraded";
   const code = props.errorCode ?? props.issues?.find((issue) => issue.blocking)?.code;
   return (
