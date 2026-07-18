@@ -55,8 +55,7 @@ function StorageMarkerBootstrap({ runtimeFactory }: Required<AppBootstrapProps>)
         writeGate.markPrepared();
         setMarkerState("activation_prepared");
       } else if (message.type === "activation_prepare_cancelled") {
-        writeGate.reopen();
-        setMarkerState("legacy");
+        void readMarker();
       } else {
         writeGate.enterPreflight();
       }
