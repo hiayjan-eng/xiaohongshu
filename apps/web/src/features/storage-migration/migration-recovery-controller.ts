@@ -9,6 +9,7 @@ import {
   type StorageAdapter,
   type StorageEntityName
 } from "@revival/storage-service";
+import { StorageBootstrapMarkerStore } from "@revival/storage-runtime";
 import {
   MIGRATION_TARGET_DATABASE_NAME,
   MIGRATION_TARGET_SCHEMA_VERSION,
@@ -166,6 +167,7 @@ export class MigrationRecoveryController {
         recoverable: true
       });
     }
+    await this.assertActivationPrepareDoesNotBlock();
     this.assertRecoveryOperationReady(inspection);
     return this.runRecoveryOperation("resume", onLifecycle, async (executor, signal) =>
       executor.resume({ migrationId: inspection.migrationId, userConfirmed: true, signal })
@@ -184,12 +186,23 @@ export class MigrationRecoveryController {
         recoverable: true
       });
     }
+    await this.assertActivationPrepareDoesNotBlock();
     this.assertRecoveryOperationReady(inspection);
     return this.runRecoveryOperation("rollback", onLifecycle, async (executor) =>
       executor.rollback({ migrationId: inspection.migrationId })
     );
   }
 
+  private async assertActivationPrepareDoesNotBlock(): Promise<void> {
+    if (typeof globalThis.localStorage === "undefined") return;
+    const marker = await new StorageBootstrapMarkerStore(globalThis.localStorage).read();
+    if (marker.status === "missing" || (marker.status === "valid" && marker.marker.state === "legacy_active")) return;
+    throw new MigrationExecutionError({
+      code: "MIGRATION_RESUME_CONFLICT",
+      message: "Activation prepare must be cancelled before migration recovery can continue.",
+      recoverable: true
+    });
+  }
   async prepareStoredBackupDownload(migrationId: string): Promise<PreparedMigrationDownload> {
     return this.withExecutor(async (executor) => {
       const backup = await executor.readPersistedBackup(migrationId);
