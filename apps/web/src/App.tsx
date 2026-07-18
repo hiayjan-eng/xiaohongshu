@@ -239,8 +239,8 @@ export function AppContent({ initialState, initialSettings, runtime, writeGate, 
   const [unlockedAchievements, setUnlockedAchievements] = useState<UnlockedAchievementMap>(() => ({ ...initialSettings.achievements }));
   const [runtimePersistStatus, setRuntimePersistStatus] = useState<RuntimePersistStatus>({ status: "idle" });
   const persistCoordinator = useMemo(
-    () => new RuntimePersistCoordinator(runtime, setRuntimePersistStatus),
-    [runtime]
+    () => new RuntimePersistCoordinator(runtime, setRuntimePersistStatus, writeGate),
+    [runtime, writeGate]
   );
   const [writeGateState, setWriteGateState] = useState<StorageWriteGateState>(writeGate.state);
   const previousStateRef = useRef(initialState);
@@ -1707,6 +1707,8 @@ export function AppContent({ initialState, initialSettings, runtime, writeGate, 
               setDeveloperMode={setDeveloperMode}
               openInternalTool={(view) => setActiveView(view)}
               openDataMigration={openDataMigration}
+              runtimeKind={runtime.kind}
+              activatedAt={activatedAt}
             />
           )}
 
@@ -3672,6 +3674,8 @@ function SettingsView(props: {
   setDeveloperMode: (value: boolean) => void;
   openInternalTool: (view: "qa" | "real-test") => void;
   openDataMigration: () => void;
+  runtimeKind: "localStorage" | "indexedDB";
+  activatedAt?: string;
 }) {
   const [devOpen, setDevOpen] = useState(false);
   function toggleDeveloperMode(value: boolean) {
