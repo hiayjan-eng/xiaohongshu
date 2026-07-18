@@ -1,4 +1,5 @@
 export const STORAGE_RUNTIME_BROADCAST_CHANNEL = "collection-revival-storage-runtime:v1";
+export const STORAGE_RUNTIME_STORAGE_EVENT_KEY = "collection-revival-storage-runtime-event:v1";
 
 export type StorageRuntimeBroadcastMessage =
   | { type: "activation_preflight_started"; activationId: string; revision: number }
@@ -10,6 +11,16 @@ export interface BroadcastChannelLike {
   addEventListener(type: "message", listener: (event: MessageEvent) => void): void;
   removeEventListener(type: "message", listener: (event: MessageEvent) => void): void;
   close(): void;
+}
+
+export interface StorageEventWindowLike {
+  addEventListener(type: "storage", listener: (event: StorageEvent) => void): void;
+  removeEventListener(type: "storage", listener: (event: StorageEvent) => void): void;
+}
+
+export interface RuntimeBroadcastStorageLike {
+  setItem(key: string, value: string): void;
+  removeItem(key: string): void;
 }
 
 export class StorageRuntimeBroadcast {
@@ -38,7 +49,49 @@ export class StorageRuntimeBroadcast {
 
 export function createBrowserStorageRuntimeBroadcast(): StorageRuntimeBroadcast {
   const Constructor = typeof BroadcastChannel === "undefined" ? undefined : BroadcastChannel;
-  return new StorageRuntimeBroadcast(Constructor ? new Constructor(STORAGE_RUNTIME_BROADCAST_CHANNEL) : undefined);
+  if (Constructor) return new StorageRuntimeBroadcast(new Constructor(STORAGE_RUNTIME_BROADCAST_CHANNEL));
+  if (typeof window !== "undefined" && typeof localStorage !== "undefined") {
+    return new StorageRuntimeBroadcast(new StorageEventBroadcastChannel(window, localStorage));
+  }
+  return new StorageRuntimeBroadcast();
+}
+
+export class StorageEventBroadcastChannel implements BroadcastChannelLike {
+  private readonly listeners = new Set<(event: MessageEvent) => void>();
+  private readonly onStorage = (event: StorageEvent): void => {
+    if (event.key !== STORAGE_RUNTIME_STORAGE_EVENT_KEY || !event.newValue) return;
+    try {
+      const parsed = JSON.parse(event.newValue) as { message?: unknown };
+      for (const listener of this.listeners) listener({ data: parsed.message } as MessageEvent);
+    } catch {
+      // Malformed notification payloads are ignored; they never carry product data.
+    }
+  };
+
+  constructor(
+    private readonly eventWindow: StorageEventWindowLike,
+    private readonly storage: RuntimeBroadcastStorageLike
+  ) {
+    this.eventWindow.addEventListener("storage", this.onStorage);
+  }
+
+  postMessage(message: unknown): void {
+    const payload = JSON.stringify({ nonce: cryptoRandomId(), message });
+    this.storage.setItem(STORAGE_RUNTIME_STORAGE_EVENT_KEY, payload);
+    this.storage.removeItem(STORAGE_RUNTIME_STORAGE_EVENT_KEY);
+  }
+
+  addEventListener(_type: "message", listener: (event: MessageEvent) => void): void { this.listeners.add(listener); }
+  removeEventListener(_type: "message", listener: (event: MessageEvent) => void): void { this.listeners.delete(listener); }
+  close(): void {
+    this.eventWindow.removeEventListener("storage", this.onStorage);
+    this.listeners.clear();
+  }
+}
+
+function cryptoRandomId(): string {
+  const randomUUID = globalThis.crypto?.randomUUID;
+  return typeof randomUUID === "function" ? randomUUID.call(globalThis.crypto) : `${Date.now()}-${Math.random()}`;
 }
 
 export function isStorageRuntimeBroadcastMessage(value: unknown): value is StorageRuntimeBroadcastMessage {
