@@ -373,3 +373,4 @@ function upsertById<T extends { id: string }>(items: T[], item: T): T[] {
   return items.map((entry) => (entry.id === item.id ? item : entry));
 }
 export * from "./activation-journal";
+export * from "./activation-commit";
