@@ -149,7 +149,7 @@ test.describe("Task 8A boot state and persist coordinator", () => {
     await pending;
     expect(runtime.calls).toEqual(["state:1"]);
     expect(gate.state).toBe("activation_preflight");
-    await expect(coordinator.enqueueProductSettings({ themeId: "sprout", achievements: {} }, { themeId: "dawn", achievements: {} })).rejects.toMatchObject({ code: "ACTIVATION_WRITE_GATE_FAILED" });
+    expect(() => coordinator.enqueueProductSettings({ themeId: "sprout", achievements: {} }, { themeId: "dawn", achievements: {} })).toThrow(expect.objectContaining({ code: "ACTIVATION_WRITE_GATE_FAILED" }));
     expect(runtime.calls).toEqual(["state:1"]);
   });
 
@@ -157,7 +157,7 @@ test.describe("Task 8A boot state and persist coordinator", () => {
     const runtime = new CoordinatorRuntime();
     const gate = new StorageWriteGate("activation_prepared");
     const coordinator = new RuntimePersistCoordinator(runtime, () => undefined, gate);
-    await expect(coordinator.enqueueProductSettings({ themeId: "sprout", achievements: {} }, { themeId: "dawn", achievements: {} })).rejects.toMatchObject({ code: "ACTIVATION_WRITE_GATE_FAILED" });
+    expect(() => coordinator.enqueueProductSettings({ themeId: "sprout", achievements: {} }, { themeId: "dawn", achievements: {} })).toThrow(expect.objectContaining({ code: "ACTIVATION_WRITE_GATE_FAILED" }));
     gate.reopen();
     await coordinator.enqueueProductSettings({ themeId: "sprout", achievements: {} }, { themeId: "dawn", achievements: {} });
     expect(runtime.calls).toEqual(["theme:dawn"]);

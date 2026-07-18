@@ -215,9 +215,11 @@ test.describe("Task 8C activation prepare", () => {
     await page.getByTestId("activation-preflight-idle").getByRole("button", { name: "检查启用条件" }).click();
     await expect(page.getByTestId("activation-preflight-passed")).toBeVisible({ timeout: 30_000 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1)).toBe(false);
+    await capture(page, "mobile-preflight-ready");
     await page.getByTestId("activation-preflight-passed").getByRole("button", { name: "确认准备启用" }).click();
     await expect(page.getByTestId("activation-prepare-confirmation")).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1)).toBe(false);
+    await capture(page, "mobile-prepare-confirmation");
   });
 });
 
