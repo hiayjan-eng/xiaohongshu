@@ -45,13 +45,20 @@ export function createRuntimeStateDiff(
 ): RuntimeStateDiff {
   const before = dehydrateRuntimeState(previous, operationTimestamp);
   const after = dehydrateRuntimeState(next, operationTimestamp);
-  const stores = {} as RuntimeStateDiff["stores"];
-  const changedStoreNames: RuntimeEntityStoreName[] = [];
-  for (const store of RUNTIME_ORDERED_COLLECTIONS) {
-    const storeDiff = diffStore(store, before.stores[store], after.stores[store]);
-    stores[store] = storeDiff as RuntimeStateDiff["stores"][typeof store];
-    if (storeDiff.create.length || storeDiff.update.length || storeDiff.deleteIds.length) changedStoreNames.push(store);
-  }
+  const stores: RuntimeStateDiff["stores"] = {
+    savedItems: diffStore("savedItems", before.stores.savedItems, after.stores.savedItems),
+    actionCards: diffStore("actionCards", before.stores.actionCards, after.stores.actionCards),
+    planCards: diffStore("planCards", before.stores.planCards, after.stores.planCards),
+    classificationCorrections: diffStore("classificationCorrections", before.stores.classificationCorrections, after.stores.classificationCorrections),
+    searchLogs: diffStore("searchLogs", before.stores.searchLogs, after.stores.searchLogs),
+    smartAlbums: diffStore("smartAlbums", before.stores.smartAlbums, after.stores.smartAlbums),
+    importBatches: diffStore("importBatches", before.stores.importBatches, after.stores.importBatches),
+    importBatchItems: diffStore("importBatchItems", before.stores.importBatchItems, after.stores.importBatchItems)
+  };
+  const changedStoreNames = RUNTIME_ORDERED_COLLECTIONS.filter((store) => {
+    const storeDiff = stores[store];
+    return storeDiff.create.length > 0 || storeDiff.update.length > 0 || storeDiff.deleteIds.length > 0;
+  });
 
   const beforeSettings = new Map(before.settings.map((setting) => [setting.key, setting]));
   const afterSettings = new Map(after.settings.map((setting) => [setting.key, setting]));
@@ -92,8 +99,8 @@ function diffStore<K extends RuntimeEntityStoreName>(
   let unchangedCount = 0;
   for (const record of next) {
     const old = before.get(record.id);
-    if (!old) create.push(record as StorageRecordMap[K]);
-    else if (canonicalRuntimeValue(old) !== canonicalRuntimeValue(record)) update.push(record as StorageRecordMap[K]);
+    if (!old) create.push(record as unknown as StorageRecordMap[K]);
+    else if (canonicalRuntimeValue(old) !== canonicalRuntimeValue(record)) update.push(record as unknown as StorageRecordMap[K]);
     else unchangedCount += 1;
   }
   const deleteIds = previous.filter((record) => !after.has(record.id)).map((record) => record.id);
