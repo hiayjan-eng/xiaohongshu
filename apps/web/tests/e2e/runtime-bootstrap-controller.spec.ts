@@ -1,10 +1,11 @@
 import { expect, test } from "@playwright/test";
+import { StorageWriteGate } from "@revival/storage-runtime";
 import type {
   ActiveStorageRuntime,
   StorageRuntimeHealthReport,
   StorageRuntimeLoadResult,
   StorageRuntimePersistResult,
-  StorageRuntimeProductSettings
+  StorageRuntimeProductSettings,
 } from "@revival/storage-runtime";
 import type { AppState } from "@revival/shared-types";
 import { createInitialDemoData } from "@revival/database";
@@ -135,5 +136,30 @@ test.describe("Task 8A boot state and persist coordinator", () => {
     await coordinator.flush();
     expect(runtime.calls).toEqual(["state:1"]);
     expect(statuses).toEqual([]);
+  });
+
+  test("activation write gate flushes queued writes before freezing and blocks later state or setting writes", async () => {
+    const runtime = new CoordinatorRuntime();
+    const gate = new StorageWriteGate();
+    const coordinator = new RuntimePersistCoordinator(runtime, () => undefined, gate);
+    const first = createInitialDemoData();
+    const second = { ...first, searchLogs: [{ id: "one", userId: "user", query: "one", resultCount: 1, createdAt: "2026-07-18T00:00:00.000Z" }] };
+    const pending = coordinator.enqueueAppState(first, second);
+    await coordinator.freezeForActivationPreflight();
+    await pending;
+    expect(runtime.calls).toEqual(["state:1"]);
+    expect(gate.state).toBe("activation_preflight");
+    await expect(coordinator.enqueueProductSettings({ themeId: "sprout", achievements: {} }, { themeId: "dawn", achievements: {} })).rejects.toMatchObject({ code: "ACTIVATION_WRITE_GATE_FAILED" });
+    expect(runtime.calls).toEqual(["state:1"]);
+  });
+
+  test("activation cancellation reopens the existing persist coordinator", async () => {
+    const runtime = new CoordinatorRuntime();
+    const gate = new StorageWriteGate("activation_prepared");
+    const coordinator = new RuntimePersistCoordinator(runtime, () => undefined, gate);
+    await expect(coordinator.enqueueProductSettings({ themeId: "sprout", achievements: {} }, { themeId: "dawn", achievements: {} })).rejects.toMatchObject({ code: "ACTIVATION_WRITE_GATE_FAILED" });
+    gate.reopen();
+    await coordinator.enqueueProductSettings({ themeId: "sprout", achievements: {} }, { themeId: "dawn", achievements: {} });
+    expect(runtime.calls).toEqual(["theme:dawn"]);
   });
 });
