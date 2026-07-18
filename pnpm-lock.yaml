@@ -148,6 +148,10 @@ importers:
       '@revival/storage-service':
         specifier: workspace:*
         version: link:../storage-service
+    devDependencies:
+      fake-indexeddb:
+        specifier: ^6.2.5
+        version: 6.2.5
 
   packages/storage-service:
     dependencies:
