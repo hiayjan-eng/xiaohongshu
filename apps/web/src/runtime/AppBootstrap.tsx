@@ -89,6 +89,7 @@ function StorageMarkerBootstrap({ runtimeFactory }: Required<AppBootstrapProps>)
 
 function IndexedDbRuntimeBootstrap({ initialSelection }: { initialSelection: StorageRuntimeSelection }) {
   const controllerRef = useRef<BrowserActivationRecoveryController | undefined>(undefined);
+  const lifecycleGenerationRef = useRef(0);
   const [ready, setReady] = useState<ActivationBootReadyResult>();
   const [stage, setStage] = useState<ActivationBootStage>(initialSelection.mode === "indexeddb_active" ? "boot_opening_indexeddb" : "boot_verifying");
   const [report, setReport] = useState<SafeActivationRecoveryReport>();
@@ -116,8 +117,13 @@ function IndexedDbRuntimeBootstrap({ initialSelection }: { initialSelection: Sto
   }
 
   useEffect(() => {
+    const generation = ++lifecycleGenerationRef.current;
     void runBoot();
-    return () => { void controllerRef.current?.close(); };
+    return () => {
+      queueMicrotask(() => {
+        if (lifecycleGenerationRef.current === generation) void controllerRef.current?.close();
+      });
+    };
   }, []);
 
   if (ready) {
@@ -129,14 +135,20 @@ function IndexedDbRuntimeBootstrap({ initialSelection }: { initialSelection: Sto
 
 function RecoveryOnlyBootstrap({ safeErrorCode }: { safeErrorCode?: string }) {
   const controllerRef = useRef<BrowserActivationRecoveryController | undefined>(undefined);
+  const lifecycleGenerationRef = useRef(0);
   const [report, setReport] = useState<SafeActivationRecoveryReport>();
   const [actionError, setActionError] = useState<string>();
   const [ready, setReady] = useState<ActivationBootReadyResult>();
   const [busy, setBusy] = useState(true);
   const controller = controllerRef.current ?? (controllerRef.current = new BrowserActivationRecoveryController());
   useEffect(() => {
+    const generation = ++lifecycleGenerationRef.current;
     void controller.inspect(safeErrorCode).then(setReport).catch((error) => setActionError(safeCode(error))).finally(() => setBusy(false));
-    return () => { void controller.close(); };
+    return () => {
+      queueMicrotask(() => {
+        if (lifecycleGenerationRef.current === generation) void controller.close();
+      });
+    };
   }, [controller, safeErrorCode]);
   if (ready) return <AppContent initialState={ready.loadResult.state} initialSettings={ready.loadResult.settings} runtime={ready.runtime} writeGate={controller.writeGate} activatedAt={ready.marker.activatedAt} />;
   return <RecoveryView controller={controller} report={report} busy={busy} actionError={actionError} onReady={setReady} onReport={setReport} onError={setActionError} />;
