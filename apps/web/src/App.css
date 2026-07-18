@@ -208,6 +208,10 @@ button {
   min-height: 100vh;
 }
 
+.migration-route-main {
+  min-width: 0;
+}
+
 .sidebar {
   position: sticky;
   top: 0;
