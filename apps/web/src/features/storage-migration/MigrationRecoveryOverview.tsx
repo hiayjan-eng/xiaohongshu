@@ -11,6 +11,7 @@ interface MigrationRecoveryOverviewProps {
   storedBackupFilename?: string;
   refreshing: boolean;
   error?: MigrationUiError;
+  activationPrepared?: boolean;
   onResume: () => void;
   onRollback: () => void;
   onReinspectLegacy: () => void;
@@ -60,6 +61,12 @@ export function MigrationRecoveryOverview(props: MigrationRecoveryOverviewProps)
         </div>
       )}
 
+      {props.activationPrepared && (
+        <div className="migration-inline-warning" data-testid="activation-prepared-recovery-lock">
+          <strong>启用准备已完成</strong>
+          <p>请先在下方取消准备，之后才能继续恢复或重新处理这次迁移。</p>
+        </div>
+      )}
       {props.error && (
         <div className="migration-inline-error" role="alert">
           <strong>{props.error.message}</strong>
@@ -68,8 +75,8 @@ export function MigrationRecoveryOverview(props: MigrationRecoveryOverviewProps)
       )}
 
       <div className="migration-recovery-actions">
-        {recovery.disposition === "resume_available" && inspection?.canResume && <button className="primary-button" type="button" onClick={props.onResume}>继续升级</button>}
-        {(recovery.disposition === "rollback_available" || recovery.disposition === "resume_available" || recovery.disposition === "completed_not_activated") && inspection?.canRollback && (
+        {!props.activationPrepared && recovery.disposition === "resume_available" && inspection?.canResume && <button className="primary-button" type="button" onClick={props.onResume}>继续升级</button>}
+        {!props.activationPrepared && (recovery.disposition === "rollback_available" || recovery.disposition === "resume_available" || recovery.disposition === "completed_not_activated") && inspection?.canRollback && (
           <button className="secondary-button" type="button" onClick={props.onRollback}>恢复到升级前</button>
         )}
         {recovery.disposition === "rollback_failed" && inspection?.canRollback && <button className="migration-warning-button" type="button" onClick={props.onRollback}>继续恢复</button>}
