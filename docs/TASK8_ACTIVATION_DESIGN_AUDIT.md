@@ -181,3 +181,7 @@ Task 8B 必须扩展 legacy mapping，在 settings Store 写入：
 ## 11. 审计停止结论
 
 本轮只产出设计。未修改 App、packages 运行代码或测试，未创建 Marker，未打开用户数据库，未迁移真实数据，未切换 activeStorage，未合并或部署。
+
+## Task 8B 审计更新
+
+原审计指出 IndexedDB 缺 user、App schemaVersion 和数组顺序，现已由 settings Store 中的版本化 Runtime metadata 与 order manifest 关闭。缺 metadata 的旧测试数据库会被阻止，不会猜测或回读 localStorage。Task 8B 尚未建立 Marker、Journal、source drift 或 authoritative source 切换，因此仍不可直接激活或部署。
