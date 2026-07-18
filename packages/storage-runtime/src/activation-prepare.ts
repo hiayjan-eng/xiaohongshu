@@ -187,6 +187,7 @@ export class ActivationPreparer {
         }).catch(() => undefined);
       }
       if (markerWritten) {
+        await this.markRecoveryRequired(activationId, migrationId, safeCode(cause)).catch(() => undefined);
         this.options.writeGate.markPrepared();
         this.emit("recovery_required");
       } else {
@@ -235,6 +236,20 @@ export class ActivationPreparer {
       this.lockHeld = false;
       await lock?.release();
     }
+  }
+
+  private async markRecoveryRequired(activationId: string, migrationId: string, errorCode: string): Promise<void> {
+    const current = await this.markerStore.read();
+    if (current.status !== "valid" || current.marker.state !== "activation_prepared" ||
+        current.marker.activationId !== activationId || current.marker.migrationId !== migrationId) return;
+    const updatedAt = this.now().toISOString();
+    await this.markerStore.writeExpectedRevision(current.marker.revision, {
+      ...current.marker,
+      revision: current.marker.revision + 1,
+      state: "recovery_required",
+      updatedAt,
+      errorCode
+    });
   }
 
   private assertLockProvider(): void {
