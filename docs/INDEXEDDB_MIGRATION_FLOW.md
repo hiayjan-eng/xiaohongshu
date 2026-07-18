@@ -273,3 +273,7 @@ Task 7B must use Web Locks for IndexedDB. If Web Locks are unavailable, the UI m
 MigrationExecutor 的 `completed` 只代表目标数据写入和校验完成，不能直接改变产品 Runtime。激活前必须验证 source drift、Backup、MigrationMetadata、目标 Store SHA-256、Runtime settings/order manifests、schema 和浏览器能力，并在 authority Web Lock 内进行第二次 source checksum。
 
 激活使用 Bootstrap Marker 与 Activation Journal 的两阶段协议。Marker 或 IndexedDB boot 异常时进入 Recovery Screen；不得静默回到可写 localStorage。`activeStorageSwitched=true` 只在 boot verification 成功后的 IndexedDB commit transaction 中写入，之后 Task 7C rollback 永久拒绝该 migration。
+
+## Task 8B Runtime Readiness
+
+Legacy normalized Snapshot 现在把 Runtime App Metadata 与 Order Manifest 作为 settings records 纳入 MigrationPlan。Preview 与 Final semantic verification 验证 user/schema 和八组数组顺序；缺失或不一致会阻止 completed。Rollback 清理 settings 时同步移除 Runtime records，backups 和 migrationMetadata 仍保留。该准备不改变 Raw Backup/Envelope，也不代表 activeStorage 已切换。
