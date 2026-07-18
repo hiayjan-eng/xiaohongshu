@@ -146,9 +146,13 @@ export class ActivationBootCoordinator {
       }
 
       this.emit("boot_verifying");
-      const checksum = await computeRuntimeBundleChecksum({ state: loadResult.state, settings: loadResult.settings });
-      if (checksum !== marker.targetRuntimeChecksum) {
-        throw activationError("ACTIVATION_BOOT_VERIFICATION_FAILED", false);
+      // The prepared checksum is a cutover invariant. After activation commits,
+      // normal IndexedDB writes legitimately change the runtime bundle.
+      if (!metadata.activeStorageSwitched) {
+        const checksum = await computeRuntimeBundleChecksum({ state: loadResult.state, settings: loadResult.settings });
+        if (checksum !== marker.targetRuntimeChecksum) {
+          throw activationError("ACTIVATION_BOOT_VERIFICATION_FAILED", false);
+        }
       }
       if (!metadata.activeStorageSwitched && !await verifyTargetStoreChecksums(this.options.targetAdapter, metadata)) {
         throw activationError("ACTIVATION_BOOT_VERIFICATION_FAILED", false);
