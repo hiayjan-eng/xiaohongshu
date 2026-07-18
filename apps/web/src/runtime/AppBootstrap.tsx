@@ -106,7 +106,7 @@ function IndexedDbRuntimeBootstrap({ initialSelection }: { initialSelection: Sto
   }, []);
 
   if (ready) {
-    return <AppContent initialState={ready.loadResult.state} initialSettings={ready.loadResult.settings} runtime={ready.runtime} writeGate={controller().writeGate} />;
+    return <AppContent initialState={ready.loadResult.state} initialSettings={ready.loadResult.settings} runtime={ready.runtime} writeGate={controller().writeGate} activatedAt={ready.marker.activatedAt} />;
   }
   if (!report) return <ActivationBootProgressScreen stage={stage} />;
   return <RecoveryView controller={controller()} report={report} busy={busy} actionError={actionError} onReady={setReady} onReport={setReport} onError={setActionError} />;
@@ -123,7 +123,7 @@ function RecoveryOnlyBootstrap({ safeErrorCode }: { safeErrorCode?: string }) {
     void controller.inspect(safeErrorCode).then(setReport).catch((error) => setActionError(safeCode(error))).finally(() => setBusy(false));
     return () => { void controller.close(); };
   }, [controller, safeErrorCode]);
-  if (ready) return <AppContent initialState={ready.loadResult.state} initialSettings={ready.loadResult.settings} runtime={ready.runtime} writeGate={controller.writeGate} />;
+  if (ready) return <AppContent initialState={ready.loadResult.state} initialSettings={ready.loadResult.settings} runtime={ready.runtime} writeGate={controller.writeGate} activatedAt={ready.marker.activatedAt} />;
   return <RecoveryView controller={controller} report={report} busy={busy} actionError={actionError} onReady={setReady} onReport={setReport} onError={setActionError} />;
 }
 
