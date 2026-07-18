@@ -8,7 +8,7 @@ import {
 } from "../src/index";
 import { expectStorageError, TestHarness } from "./test-harness";
 
-const CASE_COUNT = 8;
+const CASE_COUNT = 10;
 
 export function runActivationJournalTests(harness: TestHarness): void {
   harness.test("Activation Journal: record type, schema and safe immutable fields", async () => {
@@ -80,6 +80,33 @@ export function runActivationJournalTests(harness: TestHarness): void {
     } finally { await close(); }
   });
 
+  harness.test("Activation Journal: prepared advances through switching, boot verification and committed", async () => {
+    const { repository, close } = await setup();
+    try {
+      await repository.createOrReuse(input());
+      await repository.transition("activation-1", ["preparing"], "prepared", { updatedAt: "2026-07-18T00:01:00.000Z", bootstrapRevisionPrepared: 1 });
+      const switching = await repository.transition("activation-1", ["prepared"], "switching", { updatedAt: "2026-07-18T00:02:00.000Z", markerRevisionActivating: 2 });
+      const verifying = await repository.transition("activation-1", ["switching"], "boot_verifying", { updatedAt: "2026-07-18T00:03:00.000Z" });
+      const committed = await repository.transition("activation-1", ["boot_verifying"], "committed", { updatedAt: "2026-07-18T00:04:00.000Z", markerRevisionCommitted: 3 });
+      harness.equal(switching.switchingAt, "2026-07-18T00:02:00.000Z", "switching timestamp");
+      harness.equal(verifying.bootVerifyingAt, "2026-07-18T00:03:00.000Z", "verification timestamp");
+      harness.equal(committed.committedAt, "2026-07-18T00:04:00.000Z", "commit timestamp");
+      harness.equal(committed.markerRevisionCommitted, 3, "committed marker revision");
+    } finally { await close(); }
+  });
+
+  harness.test("Activation Journal: committed is terminal and cannot be cancelled", async () => {
+    const { repository, close } = await setup();
+    try {
+      await repository.createOrReuse(input());
+      await repository.transition("activation-1", ["preparing"], "prepared", { updatedAt: "2026-07-18T00:01:00.000Z", bootstrapRevisionPrepared: 1 });
+      await repository.transition("activation-1", ["prepared"], "switching", { updatedAt: "2026-07-18T00:02:00.000Z" });
+      await repository.transition("activation-1", ["switching"], "boot_verifying", { updatedAt: "2026-07-18T00:03:00.000Z" });
+      await repository.transition("activation-1", ["boot_verifying"], "committed", { updatedAt: "2026-07-18T00:04:00.000Z" });
+      await expectStorageError(harness, () => repository.transition("activation-1", ["committed"], "cancelled", { updatedAt: "2026-07-18T00:05:00.000Z" }), "STORAGE_CONFLICT", "committed terminal");
+      harness.equal((await repository.read("activation-1"))?.status, "committed", "commit retained");
+    } finally { await close(); }
+  });
   harness.test("Activation Journal: migration records remain distinguishable", async () => {
     const { adapter, repository, close } = await setup();
     try {
