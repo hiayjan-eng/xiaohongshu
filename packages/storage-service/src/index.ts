@@ -31,6 +31,8 @@ export * from "./migration-executor-errors";
 export * from "./migration-lock";
 export * from "./migration-preview";
 export * from "./repositories";
+export * from "./runtime-metadata";
+export { canonicalJsonStringify } from "./json-utils";
 
 export interface AchievementRecord {
   id: string;
