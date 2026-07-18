@@ -4,7 +4,7 @@ import type { ActivationPreflightReport, ActivationPrepareConfirmations, Activat
 import { ActivationPrepareController } from "./activation-prepare-controller";
 import { triggerPreparedBackupDownload } from "./MigrationBackupStep";
 
-type Status = "idle" | "checking" | "eligible" | "blocked" | "confirming" | "preparing" | "prepared" | "cancelling" | "error";
+type Status = "idle" | "checking" | "eligible" | "blocked" | "confirming" | "preparing" | "prepared" | "cancelling" | "another_tab_active" | "error";
 type State = { status: Status; report?: ActivationPreflightReport; stage?: ActivationPrepareStage; confirmations: ActivationPrepareConfirmations; errorCode?: string; reportFilename?: string };
 type Action =
   | { type: "CHECK" }
@@ -119,6 +119,16 @@ export function ActivationPreparePanel({ onPreparedChange }: ActivationPreparePa
     );
   }
 
+  if (state.status === "another_tab_active") {
+    return (
+      <section className="migration-stage-card activation-panel activation-panel--warning" role="status" data-testid="activation-another-tab-active">
+        <div className="activation-heading"><LockKeyhole aria-hidden="true" /><div><p className="migration-kicker">写入保护已生效</p><h2>另一个页面正在处理启用准备</h2></div></div>
+        <p>当前页面没有取得唯一写入锁，因此没有写入 Marker 或 Journal。请等待另一个页面完成后重新检查。</p>
+        <button className="secondary-button" type="button" onClick={() => void checkConditions()}>重新检查</button>
+      </section>
+    );
+  }
+
   if (state.status === "error") {
     return (
       <section className="migration-stage-card activation-panel activation-panel--danger" role="alert" data-testid="activation-recovery-required">
@@ -172,7 +182,7 @@ function reducer(state: State, action: Action): State {
     case "PREPARED": return { ...state, status: "prepared", stage: "activation_prepared" };
     case "CANCEL": return { ...state, status: "cancelling", stage: "cancelling_prepare" };
     case "CANCELLED": return { ...initialState, status: "idle" };
-    case "ERROR": return { ...state, status: "error", errorCode: action.code };
+    case "ERROR": return { ...state, status: action.code === "MIGRATION_LOCK_UNAVAILABLE" ? "another_tab_active" : "error", errorCode: action.code };
     case "REPORT_DOWNLOADED": return { ...state, reportFilename: action.filename };
   }
 }
