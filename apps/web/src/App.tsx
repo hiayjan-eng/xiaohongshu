@@ -301,7 +301,10 @@ export function AppContent({ initialState, initialSettings, runtime, writeGate }
         void persistCoordinator.freezeForActivationPreflight().catch(() => undefined);
       } else if (message.type === "activation_prepared") {
         writeGate.markPrepared();
-      } else {
+      } else if (message.type === "storage_activation_started" || message.type === "storage_backend_activated" || message.type === "storage_recovery_required") {
+        writeGate.markSwitching();
+        void persistCoordinator.flush().catch(() => undefined);
+      } else if (message.type === "activation_prepare_cancelled") {
         void new StorageBootstrapMarkerStore(window.localStorage).read().then((marker) => {
           if (marker.status === "valid" && marker.marker.state === "legacy_active") writeGate.reopen();
           else writeGate.markPrepared();
@@ -1414,11 +1417,11 @@ export function AppContent({ initialState, initialSettings, runtime, writeGate }
   if (writeGateState !== "open") {
     return (
       <ThemeProvider themeId={themeId}>
-        <main className="app-boot-screen" data-testid={writeGateState === "activation_prepared" ? "app-write-gate-prepared" : "app-write-gate-preflight"}>
+        <main className="app-boot-screen" data-testid={writeGateState === "activation_switching" ? "app-write-gate-switching" : writeGateState === "activation_prepared" ? "app-write-gate-prepared" : "app-write-gate-preflight"}>
           <section className="app-boot-panel warning" role="alert">
             <p className="app-boot-kicker">本地数据保护</p>
-            <h1>{writeGateState === "activation_prepared" ? "新存储已经准备，尚未切换" : "正在检查新存储启用条件"}</h1>
-            <p>{writeGateState === "activation_prepared" ? "当前正式数据源仍是旧本地存储。普通编辑已冻结，请前往数据管理取消准备或等待下一阶段。" : "正在保存已有修改并核对数据。此页面暂时不能继续编辑，当前数据源仍是旧本地存储。"}</p>
+            <h1>{writeGateState === "activation_switching" ? "正在切换数据源" : writeGateState === "activation_prepared" ? "新存储已经准备，尚未切换" : "正在检查新存储启用条件"}</h1>
+            <p>{writeGateState === "activation_switching" ? "此页面已停止接收旧存储写入。数据源切换完成后请刷新，页面不会把旧内存状态写入 IndexedDB。" : writeGateState === "activation_prepared" ? "当前正式数据源仍是旧本地存储。普通编辑已冻结，请前往数据管理取消准备或正式启用。" : "正在保存已有修改并核对数据。此页面暂时不能继续编辑，当前数据源仍是旧本地存储。"}</p>
             <button className="primary-button" type="button" onClick={() => window.location.assign("/settings/data-migration")}>前往数据管理</button>
           </section>
         </main>
