@@ -1,4 +1,4 @@
-﻿import { defineConfig } from "@playwright/test";
+import { defineConfig } from "@playwright/test";
 
 const port = Number(process.env.E2E_PORT ?? 5173);
 const baseURL = process.env.E2E_BASE_URL ?? `http://localhost:${port}`;
@@ -11,6 +11,7 @@ export default defineConfig({
     timeout: 8_000
   },
   fullyParallel: false,
+  workers: process.env.CI ? 1 : undefined,
   retries: process.env.CI ? 1 : 0,
   reporter: [
     ["list"],
