@@ -36,11 +36,6 @@ test("captures Task 8A desktop boot states", async ({ page }) => {
   await expect(page.locator(".app-shell")).toBeVisible();
   await page.screenshot({ path: path.join(screenshotDirectory, "mobile-390-ready.png"), fullPage: true });
 
-  await page.evaluate((key) => window.localStorage.setItem(key, "{broken-json"), STORAGE_KEY);
-  await page.reload();
-  await page.evaluate(() => (window as unknown as { __releaseRuntimeBoot: () => void }).__releaseRuntimeBoot());
-  await expect(page.getByTestId("app-boot-degraded")).toBeVisible();
-  await page.screenshot({ path: path.join(screenshotDirectory, "mobile-390-degraded.png"), fullPage: true });
 });
 
 test("captures Task 8A desktop degraded and failed states", async ({ page }) => {
@@ -49,6 +44,8 @@ test("captures Task 8A desktop degraded and failed states", async ({ page }) => 
   await page.goto("/dashboard");
   await expect(page.getByTestId("app-boot-degraded")).toBeVisible();
   await page.screenshot({ path: path.join(screenshotDirectory, "desktop-1440-degraded.png"), fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({ path: path.join(screenshotDirectory, "mobile-390-degraded.png"), fullPage: true });
 });
 
 test("captures Task 8A desktop failed state", async ({ page }) => {
