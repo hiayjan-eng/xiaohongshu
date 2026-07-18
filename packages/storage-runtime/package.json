@@ -1,0 +1,16 @@
+{
+  "name": "@revival/storage-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsc -p tsconfig.test.json --noEmit && tsc -p tsconfig.runtime-test.json && node -e \"require('node:fs').writeFileSync('node_modules/.cache/storage-runtime-test/package.json', '{\\\"type\\\":\\\"commonjs\\\"}')\" && node node_modules/.cache/storage-runtime-test/packages/storage-runtime/tests/run-tests.js"
+  },
+  "dependencies": {
+    "@revival/database": "workspace:*",
+    "@revival/shared-types": "workspace:*"
+  }
+}
