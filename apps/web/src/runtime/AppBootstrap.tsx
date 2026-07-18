@@ -5,9 +5,9 @@ import {
   type ActiveStorageRuntime
 } from "@revival/storage-runtime";
 import { AppContent } from "../App";
-import { MigrationDataUpgradePage } from "../features/storage-migration";
 import { AppBootScreen } from "./AppBootScreen";
 import { appBootReducer, initialAppBootState } from "./app-boot-state";
+import { MigrationRouteShell } from "./MigrationRouteShell";
 
 type AppBootstrapProps = {
   runtimeFactory?: () => ActiveStorageRuntime;
@@ -15,12 +15,7 @@ type AppBootstrapProps = {
 
 export function AppBootstrap({ runtimeFactory = createDefaultRuntime }: AppBootstrapProps) {
   if (isDirectMigrationRoute()) {
-    return (
-      <MigrationDataUpgradePage
-        onBackToSettings={() => navigateTo("/settings")}
-        onReturnToImport={() => navigateTo("/import")}
-      />
-    );
+    return <MigrationRouteShell />;
   }
 
   return <RuntimeAppBootstrap runtimeFactory={runtimeFactory} />;
