@@ -86,8 +86,23 @@ export interface MigrationMetadata {
 export type StorageActivationJournalStatus =
   | "preparing"
   | "prepared"
+  | "switching"
+  | "boot_verifying"
+  | "committed"
   | "cancelled"
-  | "prepare_failed";
+  | "prepare_failed"
+  | "activation_failed";
+
+export interface SafeBootVerificationSummary {
+  verified: boolean;
+  checkedAt: string;
+  runtimeKind: "indexedDB";
+  schemaVersion: number;
+  targetRuntimeChecksumVerified: boolean;
+  referencesVerified: boolean;
+  blockingIssueCodes: string[];
+  warningCodes: string[];
+}
 
 export interface SafeActivationPreflightSummary {
   eligible: boolean;
@@ -116,8 +131,15 @@ export interface StorageActivationJournalV1 {
   createdAt: string;
   updatedAt: string;
   preparedAt?: string;
+  switchingAt?: string;
+  bootVerifyingAt?: string;
+  committedAt?: string;
   cancelledAt?: string;
   failedAt?: string;
+  activationFailedAt?: string;
+  markerRevisionActivating?: number;
+  markerRevisionCommitted?: number;
+  bootVerificationSummary?: SafeBootVerificationSummary;
   errorCode?: string;
 }
 
