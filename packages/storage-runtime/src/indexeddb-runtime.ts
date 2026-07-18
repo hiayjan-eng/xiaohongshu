@@ -133,7 +133,7 @@ export class IndexedDbRuntime implements ActiveStorageRuntime {
 
   async loadAppState(): Promise<StorageRuntimeLoadResult> {
     this.ensureOpen();
-    if (this.current) return makeLoadResult(this.current, [], this.now(), this.expectedSchemaVersion);
+    if (this.current) return makeLoadResult(this.current, [], this.now, this.expectedSchemaVersion);
     if (this.loadPromise) return clone(await this.loadPromise);
     this.loadPromise = this.performLoad();
     try {
@@ -187,7 +187,7 @@ export class IndexedDbRuntime implements ActiveStorageRuntime {
       const hydrated = hydrateRuntimeState(dehydrated);
       this.current = { state: clone(hydrated.state), settings: clone(hydrated.settings) };
       this.state = "ready";
-      return makeLoadResult(this.current, hydrated.warnings, this.now(), this.expectedSchemaVersion);
+      return makeLoadResult(this.current, hydrated.warnings, this.now, this.expectedSchemaVersion);
     } catch (cause) {
       this.state = "degraded";
       if (cause instanceof StorageRuntimeError) throw cause;
