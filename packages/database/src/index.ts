@@ -21,6 +21,60 @@ import {
 
 export const STORAGE_KEY = "collection-revival-system:v1";
 
+export type LegacyAppStateReadStatus =
+  | "loaded"
+  | "missing"
+  | "invalid_json"
+  | "invalid_data"
+  | "unsupported_schema";
+
+export interface LegacyAppStateReadResult {
+  status: LegacyAppStateReadStatus;
+  state?: AppState;
+  sourceSchemaVersion?: number;
+}
+
+/** Reads and normalizes legacy state without writing fallback data. */
+export function readLegacyAppState(storage: Pick<Storage, "getItem">): LegacyAppStateReadResult {
+  const raw = storage.getItem(STORAGE_KEY);
+  if (raw === null) return { status: "missing" };
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { status: "invalid_json" };
+  }
+
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { status: "invalid_data" };
+  }
+
+  const sourceSchemaVersion = (parsed as { schemaVersion?: unknown }).schemaVersion;
+  if (
+    sourceSchemaVersion !== undefined &&
+    (!Number.isInteger(sourceSchemaVersion) || Number(sourceSchemaVersion) < 1 || Number(sourceSchemaVersion) > APP_SCHEMA_VERSION)
+  ) {
+    return {
+      status: "unsupported_schema",
+      sourceSchemaVersion: typeof sourceSchemaVersion === "number" ? sourceSchemaVersion : undefined
+    };
+  }
+
+  try {
+    return {
+      status: "loaded",
+      state: normalizeAppState(parsed as AppState),
+      sourceSchemaVersion: typeof sourceSchemaVersion === "number" ? sourceSchemaVersion : undefined
+    };
+  } catch {
+    return {
+      status: "invalid_data",
+      sourceSchemaVersion: typeof sourceSchemaVersion === "number" ? sourceSchemaVersion : undefined
+    };
+  }
+}
+
 export function loadAppState(storage?: Pick<Storage, "getItem" | "setItem">): AppState {
   if (!storage) return createInitialDemoData();
 
@@ -352,7 +406,7 @@ function createId(prefix: string): string {
 }
 
 
-function normalizeAppState(state: AppState): AppState {
+export function normalizeAppState(state: AppState): AppState {
   const savedItems = (state.savedItems ?? []).map(normalizeSavedItem);
   const actionCards = (state.actionCards ?? []).map((card) => normalizeActionCard(card, savedItems.find((item) => item.id === card.savedItemId)));
   return {
