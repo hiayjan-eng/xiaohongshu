@@ -4,7 +4,10 @@ export const STORAGE_RUNTIME_STORAGE_EVENT_KEY = "collection-revival-storage-run
 export type StorageRuntimeBroadcastMessage =
   | { type: "activation_preflight_started"; activationId: string; revision: number }
   | { type: "activation_prepared"; activationId: string; revision: number }
-  | { type: "activation_prepare_cancelled"; activationId: string; revision: number };
+  | { type: "activation_prepare_cancelled"; activationId: string; revision: number }
+  | { type: "storage_activation_started"; activationId: string; revision: number }
+  | { type: "storage_backend_activated"; activationId: string; revision: number; backend: "indexedDB" }
+  | { type: "storage_recovery_required"; activationId?: string; revision?: number; errorCode: string };
 
 export interface BroadcastChannelLike {
   postMessage(message: unknown): void;
@@ -97,7 +100,15 @@ function cryptoRandomId(): string {
 export function isStorageRuntimeBroadcastMessage(value: unknown): value is StorageRuntimeBroadcastMessage {
   if (!value || typeof value !== "object") return false;
   const candidate = value as Partial<StorageRuntimeBroadcastMessage>;
-  return (candidate.type === "activation_preflight_started" || candidate.type === "activation_prepared" || candidate.type === "activation_prepare_cancelled") &&
-    typeof candidate.activationId === "string" && candidate.activationId.length > 0 &&
-    Number.isInteger(candidate.revision) && Number(candidate.revision) >= 0;
+  if (candidate.type === "storage_recovery_required") {
+    return (candidate.activationId === undefined || typeof candidate.activationId === "string") &&
+      (candidate.revision === undefined || (Number.isInteger(candidate.revision) && Number(candidate.revision) >= 0)) &&
+      typeof candidate.errorCode === "string" && candidate.errorCode.length > 0;
+  }
+  const known = candidate.type === "activation_preflight_started" || candidate.type === "activation_prepared" ||
+    candidate.type === "activation_prepare_cancelled" || candidate.type === "storage_activation_started" ||
+    candidate.type === "storage_backend_activated";
+  return known && typeof candidate.activationId === "string" && candidate.activationId.length > 0 &&
+    Number.isInteger(candidate.revision) && Number(candidate.revision) >= 0 &&
+    (candidate.type !== "storage_backend_activated" || candidate.backend === "indexedDB");
 }
