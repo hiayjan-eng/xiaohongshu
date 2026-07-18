@@ -1,5 +1,13 @@
 # Runtime Storage Architecture
 
+## Task 8A 已落地基线
+
+Task 8A 已新增独立的 `@revival/storage-runtime` 包，并把 `LocalStorageRuntime` 接入 Web 异步启动门。当前唯一权威来源仍为 localStorage，普通业务页面只有在 Runtime 完成 `open -> healthCheck -> loadAppState` 后才渲染。实际契约、生命周期和测试结果以 `docs/TASK8A_ACCEPTANCE.md` 为准。
+
+这一实现没有创建 Bootstrap Marker、IndexedDbRuntime 或 activeStorage 选择器。直接访问 `/settings/data-migration` 仍走 Task 7 的只读入口，避免损坏主 AppState 时失去原始备份能力。主题和成就由 Runtime 的产品设置接口管理；developerMode、QA、真实试用和扩展状态继续留在边界外。
+
+后续 Task 8B 必须复用同一 Runtime 契约完成 IndexedDB 的 AppState 等价性，但仍不得切换运行时。下文包含面向 Task 8B 至 8D 的目标设计，其中 Marker、authority revision、实体 diff 和原子多 Store 写入均属于后续能力，不应误读为 Task 8A 已实现。
+
 ## 1. 决策
 
 Phase 1 采用过渡 Runtime 方案：UI 暂时继续消费完整 `AppState`，Runtime 负责异步启动、单一权威源、差异持久化和错误阻断；后续再按业务模块迁移到 Repository。
