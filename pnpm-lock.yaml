@@ -43,6 +43,9 @@ importers:
       '@revival/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types
+      '@revival/storage-runtime':
+        specifier: workspace:*
+        version: link:../../packages/storage-runtime
       '@revival/storage-service':
         specifier: workspace:*
         version: link:../../packages/storage-service
@@ -133,6 +136,15 @@ importers:
         version: link:../shared-types
 
   packages/shared-types: {}
+
+  packages/storage-runtime:
+    dependencies:
+      '@revival/database':
+        specifier: workspace:*
+        version: link:../database
+      '@revival/shared-types':
+        specifier: workspace:*
+        version: link:../shared-types
 
   packages/storage-service:
     dependencies:
