@@ -110,3 +110,45 @@ async function capture(page: Page, name: string): Promise<void> {
   await fs.mkdir(directory, { recursive: true });
   await page.screenshot({ path: `${directory}/${name}.png`, fullPage: true });
 }
+async function completeMigration(page: Page) {
+  await page.goto("/settings/data-migration");
+  await page.getByTestId("start-migration-inspection").click();
+  await expect(page.getByTestId("migration-preview-step")).toBeVisible();
+  await page.getByTestId("open-backup-step").click();
+  const download = page.waitForEvent("download");
+  await page.getByTestId("download-legacy-backup").click();
+  await download;
+  await page.getByTestId("continue-to-migration-confirmation").click();
+  const confirmation = page.getByTestId("migration-confirmation-step");
+  const checkboxes = confirmation.getByRole("checkbox");
+  for (let index = 0; index < await checkboxes.count(); index += 1) await checkboxes.nth(index).check();
+  await page.getByTestId("start-migration-execution").click();
+  await expect(page.getByTestId("migration-completed-not-activated")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("activation-preflight-idle")).toBeVisible();
+}
+
+async function readMarker(page: Page): Promise<Record<string, unknown> | null> {
+  return page.evaluate((key) => { const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : null; }, MARKER_KEY);
+}
+
+async function readRecords(page: Page, storeName: string): Promise<unknown[]> {
+  return page.evaluate(({ storeName }) => new Promise<unknown[]>((resolve, reject) => {
+    const request = indexedDB.open("collection-revival-local");
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const database = request.result;
+      const records = database.transaction(storeName, "readonly").objectStore(storeName).getAll();
+      records.onsuccess = () => { database.close(); resolve(records.result); };
+      records.onerror = () => reject(records.error);
+    };
+  }), { storeName });
+}
+
+async function deleteDatabase(page: Page) {
+  await page.evaluate(() => new Promise<void>((resolve, reject) => {
+    const request = indexedDB.deleteDatabase("collection-revival-local");
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+    request.onblocked = () => reject(new Error("Task 8D test database deletion was blocked."));
+  }));
+}
