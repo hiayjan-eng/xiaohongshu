@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import { expect, type Page } from "@playwright/test";
 import { ACHIEVEMENT_STORAGE_KEY, STORAGE_KEY } from "./helpers";
 
@@ -15,6 +16,43 @@ export async function seedCompactLegacyFixture(page: Page, itemCount: number): P
   await seedLegacyStateOnce(page, state);
 }
 
+export async function persistTask8eOrderOnly(page: Page): Promise<{ beforeFirstId: string; afterFirstId: string }> {
+  const runtimeModuleUrl = viteFsModuleUrl("../../../../packages/storage-runtime/src/index.ts");
+  const serviceModuleUrl = viteFsModuleUrl("../../../../packages/storage-service/src/index.ts");
+  return page.evaluate(async ({ runtimeModuleUrl, serviceModuleUrl, databaseName }) => {
+    type RuntimeState = { savedItems: Array<{ id: string }> };
+    type RuntimeLoad = { state: RuntimeState; settings: unknown };
+    type RuntimeInstance = {
+      open(): Promise<void>;
+      close(): Promise<void>;
+      loadAppState(): Promise<RuntimeLoad>;
+      persistAppState(before: RuntimeState, after: RuntimeState): Promise<void>;
+    };
+    const serviceModule = await import(serviceModuleUrl) as {
+      IndexedDbAdapter: new (options: { databaseName: string; schemaVersion: number }) => unknown;
+    };
+    const runtimeModule = await import(runtimeModuleUrl) as {
+      IndexedDbRuntime: new (options: { adapter: unknown; expectedSchemaVersion: number }) => RuntimeInstance;
+    };
+    const adapter = new serviceModule.IndexedDbAdapter({ databaseName, schemaVersion: 1 });
+    const runtime = new runtimeModule.IndexedDbRuntime({ adapter, expectedSchemaVersion: 1 });
+    await runtime.open();
+    try {
+      const loaded = await runtime.loadAppState();
+      const beforeFirstId = loaded.state.savedItems[0]?.id ?? "";
+      const reordered = { ...loaded.state, savedItems: [...loaded.state.savedItems].reverse() };
+      await runtime.persistAppState(loaded.state, reordered);
+      return { beforeFirstId, afterFirstId: reordered.savedItems[0]?.id ?? "" };
+    } finally {
+      await runtime.close();
+    }
+  }, { runtimeModuleUrl, serviceModuleUrl, databaseName: TASK8E_DATABASE_NAME });
+}
+
+function viteFsModuleUrl(relativePath: string): string {
+  const absolutePath = fileURLToPath(new URL(relativePath, import.meta.url)).replaceAll("\\", "/");
+  return `/@fs/${absolutePath}`;
+}
 export async function seedLegacyStateOnce(page: Page, state: unknown): Promise<void> {
   await page.evaluate(({ state, storageKey, achievementKey, themeKey }) => {
     localStorage.setItem(storageKey, JSON.stringify(state));
@@ -28,31 +66,20 @@ export function makeCompactLegacyState(itemCount: number) {
     const number = String(index + 1).padStart(5, "0");
     return {
       id: `large-${number}`,
-      userId: "task8e-user",
+      userId: "u",
       sourcePlatform: "manual",
-      sourceUrl: `https://example.test/n/${number}`,
-      rawShareText: "",
-      rawTitle: `Task8E saved ${number}`,
-      cleanedTitle: `Task8E saved ${number}`,
-      displayTitle: `Task8E saved ${number}`,
+      sourceUrl: `https://e.test/${number}`,
+      displayTitle: `Task8E ${number}`,
       textNormalizationVersion: 3,
-      title: `Task8E 收藏 ${number}`,
-      userNote: index === 0 ? "保留这条人工备注" : "",
+      title: `Task8E ${number}`,
+      userNote: index === 0 ? "manual note" : "",
       contentDomain: "技能学习",
       contentSubDomain: "通用技能",
       savedIntent: "以后查阅",
-      secondaryIntents: [],
-      confidence: "high",
-      whyThisDomain: "测试数据",
-      whyThisIntent: "测试数据",
-      category: "技能学习",
-      subCategory: "通用技能",
-      intent: "以后查阅",
-      whyThisCategory: "测试数据",
       summary: "",
       keywords: ["Task8E", number],
       entities: [],
-      searchableText: `Task8E 收藏 ${number}`,
+      searchableText: `Task8E ${number}`,
       status: "not_started",
       createdAt: NOW,
       updatedAt: NOW
@@ -75,8 +102,43 @@ export function makeCompactLegacyState(itemCount: number) {
       priority: "medium", priorityScore: 50, status: "confirmed", confirmedAt: NOW,
       autoCollectEnabled: true, mediumMatchRequiresApproval: true, createdAt: NOW, updatedAt: NOW
     }] : [],
-    actionCards: [],
-    planCards: [],
+    actionCards: itemCount > 0 ? [{
+      id: "large-action-1",
+      savedItemId: savedItems[0].id,
+      category: "技能学习",
+      subCategory: "通用技能",
+      title: "Task8E 大数据行动卡",
+      goal: "验证激活后的行动记录",
+      whySaved: "独立验收",
+      nextAction: "查看第一条收藏",
+      openOriginalFocus: ["第一条收藏"],
+      output: "一条验收记录",
+      estimatedTime: "10分钟",
+      difficulty: "低",
+      doneCriteria: "行动记录可读取",
+      avoidDoing: "不修改真实数据",
+      ifInfoMissing: "保留原记录",
+      followUp: "完成刷新验证",
+      fields: {},
+      tasks: [],
+      createdAt: NOW,
+      updatedAt: NOW
+    }] : [],
+    planCards: itemCount > 0 ? [{
+      id: "large-plan-1",
+      savedItemId: savedItems[0].id,
+      actionCardId: "large-action-1",
+      title: "Task8E 大数据计划卡",
+      sourceTitle: savedItems[0].title,
+      plannedDate: "2026-07-19",
+      estimatedMinutes: 10,
+      oneNextStep: "查看第一条收藏",
+      doneCriteria: "计划记录可读取",
+      status: "planned",
+      reminderEnabled: false,
+      createdAt: NOW,
+      updatedAt: NOW
+    }] : [],
     classificationCorrections: [],
     searchLogs: []
   };
