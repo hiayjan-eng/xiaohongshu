@@ -6,6 +6,7 @@ import {
   captureTask8e,
   deleteTask8eDatabase,
   installLegacyBootProbe,
+  persistTask8eOrderOnly,
   prepareActivation,
   readLegacyBytes,
   readTask8eMarker,
@@ -219,6 +220,7 @@ test.describe("Task 8E physical Chromium scale", () => {
       await deleteTask8eDatabase(page);
       await page.evaluate((key) => localStorage.removeItem(key), TASK8E_MARKER_KEY);
       await seedCompactLegacyFixture(page, itemCount);
+      const legacyBefore = await readLegacyBytes(page);
 
       let started = Date.now();
       await page.goto("/dashboard");
@@ -237,13 +239,53 @@ test.describe("Task 8E physical Chromium scale", () => {
       await activatePreparedStorage(page);
       timings.activationBootMs = Date.now() - started;
       expect((await readTask8eRecords(page, "savedItems")).length).toBe(itemCount);
+      expect((await readTask8eRecords(page, "actionCards")).length).toBe(1);
+      expect((await readTask8eRecords(page, "planCards")).length).toBe(1);
+      expect(await readLegacyBytes(page)).toEqual(legacyBefore);
+
+      if (itemCount === 3_000) {
+        await page.goto("/albums/large-album-1");
+        await expect(page.getByTestId("album-detail")).toBeVisible({ timeout: 30_000 });
+        await page.goto("/dashboard");
+        await expect(page.getByTestId("today-plan-cards")).toContainText("Task8E");
+        started = Date.now();
+        await page.goto("/import");
+        await page.getByTestId("import-source-url").fill("https://example.test/task8e-large-import");
+        await page.getByTestId("import-title").fill("Task8E large fixture import");
+        await submitQuickImportForm(page);
+        await expect(page.getByTestId("import-success-panel")).toBeVisible();
+        await expect.poll(async () => (await readTask8eRecords(page, "savedItems")).length).toBe(itemCount + 1);
+        timings.smallDiffPersistMs = Date.now() - started;
+      } else {
+        started = Date.now();
+        await page.goto("/settings");
+        await page.getByTestId("theme-dawn").click();
+        await expect.poll(async () => {
+          const settings = await readTask8eRecords<{ key: string; value: unknown }>(page, "settings");
+          return settings.find((setting) => setting.key === "collection-revival-theme")?.value;
+        }).toBe("dawn");
+        timings.smallDiffPersistMs = Date.now() - started;
+
+        started = Date.now();
+        const orderResult = await persistTask8eOrderOnly(page);
+        expect(orderResult.beforeFirstId).not.toBe(orderResult.afterFirstId);
+        const settings = await readTask8eRecords<{ key: string; value: unknown }>(page, "settings");
+        const manifest = settings.find((setting) => setting.key === "runtime:order-manifest:v1")?.value as { orders?: { savedItems?: string[] } } | undefined;
+        expect(manifest?.orders?.savedItems?.[0]).toBe(orderResult.afterFirstId);
+        expect((await readTask8eRecords(page, "savedItems")).length).toBe(itemCount);
+        timings.orderOnlyPersistMs = Date.now() - started;
+      }
+      expect(await readLegacyBytes(page)).toEqual(legacyBefore);
 
       started = Date.now();
       await page.reload();
       await expect(page.locator(".app-shell")).toBeVisible({ timeout: 180_000 });
       timings.refreshBootMs = Date.now() - started;
-      await page.goto(`/search?q=${itemCount}`);
-      await expect(page.getByPlaceholder("试试搜：大理、剪辑、低卡晚餐、周末去处、AI工具")).toHaveValue(String(itemCount));
+      started = Date.now();
+      await page.locator(".global-search input").fill(String(itemCount));
+      await page.locator(".global-search").getByRole("button", { name: "搜索", exact: true }).click();
+      await expect(page.locator(".search-page-form input")).toHaveValue(String(itemCount), { timeout: 180_000 });
+      timings.searchReadyMs = Date.now() - started;
       expect(await readTask8eMarker(page)).toMatchObject({ state: "indexeddb_active" });
       expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1)).toBe(false);
       await captureTask8e(page, `physical-${itemCount}-active`);
