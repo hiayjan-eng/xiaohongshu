@@ -61,14 +61,14 @@ export function dehydrateRuntimeState(
   validateAppState(bundle.state, "RUNTIME_DEHYDRATION_FAILED");
   validateProductSettings(bundle.settings, "RUNTIME_DEHYDRATION_FAILED");
   const stores: RuntimeEntityRecords = {
-    savedItems: clone(bundle.state.savedItems),
-    actionCards: clone(bundle.state.actionCards),
-    planCards: clone(bundle.state.planCards ?? []),
-    classificationCorrections: clone(bundle.state.classificationCorrections ?? []),
-    searchLogs: clone(bundle.state.searchLogs),
-    smartAlbums: clone(bundle.state.smartAlbums ?? []),
-    importBatches: clone(bundle.state.importBatches ?? []),
-    importBatchItems: clone(bundle.state.importBatchItems ?? [])
+    savedItems: cloneForStorage(bundle.state.savedItems),
+    actionCards: cloneForStorage(bundle.state.actionCards),
+    planCards: cloneForStorage(bundle.state.planCards ?? []),
+    classificationCorrections: cloneForStorage(bundle.state.classificationCorrections ?? []),
+    searchLogs: cloneForStorage(bundle.state.searchLogs),
+    smartAlbums: cloneForStorage(bundle.state.smartAlbums ?? []),
+    importBatches: cloneForStorage(bundle.state.importBatches ?? []),
+    importBatchItems: cloneForStorage(bundle.state.importBatchItems ?? [])
   };
   const runtimeSettings = createRuntimeMetadataSettings(bundle.state, updatedAt);
   return {
@@ -209,6 +209,10 @@ export function findRuntimeReferenceIssues(state: AppState): RuntimeReferenceIss
 
 export function canonicalRuntimeValue(value: unknown): string {
   return canonicalJsonStringify(value, { adapter: "indexedDB", code: "STORAGE_VALIDATION_FAILED" });
+}
+
+function cloneForStorage<T>(value: T): T {
+  return JSON.parse(canonicalRuntimeValue(value)) as T;
 }
 
 function orderRecords<T extends { id: string }>(records: T[], ids: string[]): T[] {
