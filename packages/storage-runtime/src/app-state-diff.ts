@@ -11,7 +11,8 @@ import {
 } from "./local-storage-runtime";
 import {
   canonicalRuntimeValue,
-  dehydrateRuntimeState,
+  cloneRuntimeStorageValue,
+  dehydrateRuntimeSettings,
   type RuntimeEntityRecords,
   type RuntimeEntityStoreName,
   type RuntimeStateBundle
@@ -43,25 +44,25 @@ export function createRuntimeStateDiff(
   next: RuntimeStateBundle,
   operationTimestamp: string
 ): RuntimeStateDiff {
-  const before = dehydrateRuntimeState(previous, operationTimestamp);
-  const after = dehydrateRuntimeState(next, operationTimestamp);
+  const beforeStores = runtimeEntityRecords(previous);
+  const afterStores = runtimeEntityRecords(next);
   const stores: RuntimeStateDiff["stores"] = {
-    savedItems: diffStore("savedItems", before.stores.savedItems, after.stores.savedItems),
-    actionCards: diffStore("actionCards", before.stores.actionCards, after.stores.actionCards),
-    planCards: diffStore("planCards", before.stores.planCards, after.stores.planCards),
-    classificationCorrections: diffStore("classificationCorrections", before.stores.classificationCorrections, after.stores.classificationCorrections),
-    searchLogs: diffStore("searchLogs", before.stores.searchLogs, after.stores.searchLogs),
-    smartAlbums: diffStore("smartAlbums", before.stores.smartAlbums, after.stores.smartAlbums),
-    importBatches: diffStore("importBatches", before.stores.importBatches, after.stores.importBatches),
-    importBatchItems: diffStore("importBatchItems", before.stores.importBatchItems, after.stores.importBatchItems)
+    savedItems: diffStore("savedItems", beforeStores.savedItems, afterStores.savedItems),
+    actionCards: diffStore("actionCards", beforeStores.actionCards, afterStores.actionCards),
+    planCards: diffStore("planCards", beforeStores.planCards, afterStores.planCards),
+    classificationCorrections: diffStore("classificationCorrections", beforeStores.classificationCorrections, afterStores.classificationCorrections),
+    searchLogs: diffStore("searchLogs", beforeStores.searchLogs, afterStores.searchLogs),
+    smartAlbums: diffStore("smartAlbums", beforeStores.smartAlbums, afterStores.smartAlbums),
+    importBatches: diffStore("importBatches", beforeStores.importBatches, afterStores.importBatches),
+    importBatchItems: diffStore("importBatchItems", beforeStores.importBatchItems, afterStores.importBatchItems)
   };
   const changedStoreNames = RUNTIME_ORDERED_COLLECTIONS.filter((store) => {
     const storeDiff = stores[store];
     return storeDiff.create.length > 0 || storeDiff.update.length > 0 || storeDiff.deleteIds.length > 0;
   });
 
-  const beforeSettings = new Map(before.settings.map((setting) => [setting.key, setting]));
-  const afterSettings = new Map(after.settings.map((setting) => [setting.key, setting]));
+  const beforeSettings = new Map(dehydrateRuntimeSettings(previous, operationTimestamp).map((setting) => [setting.key, setting]));
+  const afterSettings = new Map(dehydrateRuntimeSettings(next, operationTimestamp).map((setting) => [setting.key, setting]));
   const changed = (key: string): boolean => !sameSetting(beforeSettings.get(key), afterSettings.get(key));
   const metadataChanged = changed(RUNTIME_APP_METADATA_KEY);
   const orderManifestChanged = changed(RUNTIME_ORDER_MANIFEST_KEY);
@@ -92,6 +93,9 @@ function diffStore<K extends RuntimeEntityStoreName>(
   previous: RuntimeEntityRecords[K],
   next: RuntimeEntityRecords[K]
 ): RuntimeStoreDiff<K> {
+  if (previous === next) {
+    return { store, create: [], update: [], deleteIds: [], unchangedCount: previous.length };
+  }
   const before = new Map(previous.map((record) => [record.id, record]));
   const after = new Map(next.map((record) => [record.id, record]));
   const create: StorageRecordMap[K][] = [];
@@ -99,14 +103,28 @@ function diffStore<K extends RuntimeEntityStoreName>(
   let unchangedCount = 0;
   for (const record of next) {
     const old = before.get(record.id);
-    if (!old) create.push(record as unknown as StorageRecordMap[K]);
-    else if (canonicalRuntimeValue(old) !== canonicalRuntimeValue(record)) update.push(record as unknown as StorageRecordMap[K]);
+    if (!old) create.push(cloneRuntimeStorageValue(record) as unknown as StorageRecordMap[K]);
+    else if (canonicalRuntimeValue(old) !== canonicalRuntimeValue(record)) {
+      update.push(cloneRuntimeStorageValue(record) as unknown as StorageRecordMap[K]);
+    }
     else unchangedCount += 1;
   }
   const deleteIds = previous.filter((record) => !after.has(record.id)).map((record) => record.id);
   return { store, create, update, deleteIds, unchangedCount };
 }
 
+function runtimeEntityRecords(bundle: RuntimeStateBundle): RuntimeEntityRecords {
+  return {
+    savedItems: bundle.state.savedItems,
+    actionCards: bundle.state.actionCards,
+    planCards: bundle.state.planCards ?? [],
+    classificationCorrections: bundle.state.classificationCorrections ?? [],
+    searchLogs: bundle.state.searchLogs,
+    smartAlbums: bundle.state.smartAlbums ?? [],
+    importBatches: bundle.state.importBatches ?? [],
+    importBatchItems: bundle.state.importBatchItems ?? []
+  };
+}
 function sameSetting(left: StoredSetting | undefined, right: StoredSetting | undefined): boolean {
   if (!left || !right) return left === right;
   return canonicalRuntimeValue({
