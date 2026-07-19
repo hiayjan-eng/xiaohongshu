@@ -214,8 +214,6 @@ test.describe("Task 8E physical Chromium scale", () => {
     test(`${itemCount.toLocaleString()} records complete migration, activation, refresh and search`, async ({ page }) => {
       test.slow();
       test.setTimeout(itemCount === 10_000 ? 600_000 : 420_000);
-      page.on("console", (message) => console.info(`[Task8E browser ${itemCount}] ${message.type()}: ${message.text()}`));
-      page.on("pageerror", (error) => console.info(`[Task8E browser ${itemCount}] pageerror: ${error.message}`));
       const timings: Record<string, number> = {};
       await page.goto("/");
       await deleteTask8eDatabase(page);
@@ -224,8 +222,6 @@ test.describe("Task 8E physical Chromium scale", () => {
 
       let started = Date.now();
       await page.goto("/dashboard");
-      await page.waitForTimeout(5_000);
-      console.info(`[Task8E boot ${itemCount}] url=${page.url()} body=${(await page.locator("body").innerText()).slice(0, 500)}`);
       await expect(page.locator(".app-shell")).toBeVisible({ timeout: 120_000 });
       timings.legacyBootMs = Date.now() - started;
 
