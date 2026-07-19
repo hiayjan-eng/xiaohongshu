@@ -286,10 +286,16 @@ export function inspectMarkerJournalConsistency(
 }
 
 export async function verifyTargetStoreChecksums(adapter: StorageAdapter, metadata: MigrationExecutionMetadataRecord): Promise<boolean> {
+  const checkpoints = new Map(metadata.checkpoints.map((checkpoint) => [checkpoint.store, checkpoint]));
   for (const store of MIGRATION_EXECUTION_STORE_ORDER) {
-    const expected = metadata.targetChecksums[store];
-    if (!expected) return false;
     const records = await adapter.getAll(store);
+    const checkpoint = checkpoints.get(store);
+    if (!checkpoint) {
+      if (records.length !== 0) return false;
+      continue;
+    }
+    const expected = metadata.targetChecksums[store] ?? checkpoint.targetChecksum;
+    if (checkpoint.status !== "verified" || !expected || records.length !== checkpoint.expectedCount) return false;
     if (await computeStoreChecksum(store, records as never[]) !== expected) return false;
   }
   return true;
