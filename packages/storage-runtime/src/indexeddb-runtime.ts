@@ -54,6 +54,7 @@ export class IndexedDbRuntime implements ActiveStorageRuntime {
   private loadPromise?: Promise<StorageRuntimeLoadResult>;
   private persistTail: Promise<unknown> = Promise.resolve();
   private current?: RuntimeStateBundle;
+  private readonly acceptedStateReferences = new WeakSet<object>();
 
   constructor(options: IndexedDbRuntimeOptions) {
     if (options.adapter.kind !== "indexedDB") {
@@ -133,11 +134,11 @@ export class IndexedDbRuntime implements ActiveStorageRuntime {
 
   async loadAppState(): Promise<StorageRuntimeLoadResult> {
     this.ensureOpen();
-    if (this.current) return makeLoadResult(this.current, [], this.now, this.expectedSchemaVersion);
-    if (this.loadPromise) return clone(await this.loadPromise);
+    if (this.current) return this.acceptLoadResult(makeLoadResult(this.current, [], this.now, this.expectedSchemaVersion));
+    if (this.loadPromise) return this.acceptLoadResult(clone(await this.loadPromise));
     this.loadPromise = this.performLoad();
     try {
-      return clone(await this.loadPromise);
+      return this.acceptLoadResult(clone(await this.loadPromise));
     } finally {
       this.loadPromise = undefined;
     }
@@ -146,16 +147,21 @@ export class IndexedDbRuntime implements ActiveStorageRuntime {
   async persistAppState(previous: AppState, next: AppState): Promise<StorageRuntimePersistResult> {
     return this.enqueuePersist(async () => {
       const baseline = this.requireBaseline();
-      if (canonicalRuntimeValue(previous) !== canonicalRuntimeValue(baseline.state)) {
+      if (!this.acceptedStateReferences.has(previous) && canonicalRuntimeValue(previous) !== canonicalRuntimeValue(baseline.state)) {
         throw this.error("RUNTIME_BASELINE_MISMATCH", false);
       }
       const timestamp = this.now().toISOString();
-      const nextBundle: RuntimeStateBundle = { state: clone(next), settings: clone(baseline.settings) };
-      const diff = createRuntimeStateDiff(baseline, nextBundle, timestamp);
-      if (diff.isEmpty) return this.persistResult(false, timestamp);
+      const previousBundle: RuntimeStateBundle = { state: previous, settings: baseline.settings };
+      const nextBundle: RuntimeStateBundle = { state: next, settings: baseline.settings };
+      const diff = createRuntimeStateDiff(previousBundle, nextBundle, timestamp);
+      if (diff.isEmpty) {
+        this.acceptedStateReferences.add(next);
+        return this.persistResult(false, timestamp);
+      }
       await this.persistDiff(diff);
       await this.verifyDiff(diff);
-      this.current = nextBundle;
+      this.current = clone(nextBundle);
+      this.acceptedStateReferences.add(next);
       return this.persistResult(true, timestamp);
     });
   }
@@ -170,7 +176,7 @@ export class IndexedDbRuntime implements ActiveStorageRuntime {
         throw this.error("RUNTIME_BASELINE_MISMATCH", false);
       }
       const timestamp = this.now().toISOString();
-      const nextBundle: RuntimeStateBundle = { state: clone(baseline.state), settings: clone(next) };
+      const nextBundle: RuntimeStateBundle = { state: baseline.state, settings: next };
       const diff = createRuntimeStateDiff(baseline, nextBundle, timestamp);
       if (diff.isEmpty) return this.persistResult(false, timestamp);
       await this.persistDiff(diff);
@@ -246,9 +252,13 @@ export class IndexedDbRuntime implements ActiveStorageRuntime {
 
   private requireBaseline(): RuntimeStateBundle {
     if (!this.current) throw this.error("RUNTIME_DATA_INVALID", false);
-    return clone(this.current);
+    return this.current;
   }
 
+  private acceptLoadResult(result: StorageRuntimeLoadResult): StorageRuntimeLoadResult {
+    this.acceptedStateReferences.add(result.state);
+    return result;
+  }
   private ensureOpen(): void {
     if (this.state === "closed" || this.state === "opening" || this.state === "failed") {
       throw this.error("RUNTIME_NOT_OPEN", true);
