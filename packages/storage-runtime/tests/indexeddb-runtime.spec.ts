@@ -348,6 +348,45 @@ export function registerIndexedDbRuntimeTests(harness: TestHarness): void {
       await deleteIndexedDbDatabase(name, fakeIndexedDB);
     }
   });
+  harness.test("10,000 record SearchLog-only persist avoids rewriting unchanged entity stores", async () => {
+    const name = nextName("large-10000-search");
+    const adapter = new RecordingIndexedDbAdapter(name);
+    const initial = makeLargeBundle(10000);
+    try {
+      await seedAdapter(adapter, initial);
+      const runtime = new IndexedDbRuntime({ adapter, expectedSchemaVersion: 1 });
+      await runtime.open();
+      const loaded = await runtime.loadAppState();
+      adapter.readwriteTransactions.length = 0;
+      const next: AppState = {
+        ...loaded.state,
+        searchLogs: [
+          ...loaded.state.searchLogs,
+          {
+            id: "search-task8e",
+            userId: loaded.state.user.id,
+            query: "10000",
+            resultCount: 1,
+            createdAt: "2026-07-19T00:00:00.000Z"
+          }
+        ]
+      };
+      const startedAt = Date.now();
+      await runtime.persistAppState(loaded.state, next);
+      const elapsedMs = Date.now() - startedAt;
+      harness.equal(adapter.readwriteTransactions.length, 1, "one atomic write transaction");
+      harness.assert(adapter.readwriteTransactions[0].includes("searchLogs"), "search log store changed");
+      harness.assert(adapter.readwriteTransactions[0].includes("settings"), "order manifest changed");
+      harness.equal(adapter.readwriteTransactions[0].includes("savedItems"), false, "saved items not rewritten");
+      harness.equal((await adapter.getAll("savedItems")).length, 10000, "saved item count preserved");
+      harness.equal((await adapter.getAll("searchLogs")).length, 1, "search log persisted");
+      harness.assert(elapsedMs < 30000, "small diff stays within the non-brittle safety ceiling");
+      await runtime.close();
+    } finally {
+      await adapter.close();
+      await deleteIndexedDbDatabase(name, fakeIndexedDB);
+    }
+  });
   harness.test("10,000 record codec round-trip is iterative and order exact", () => {
     const bundle = makeLargeBundle(10000);
     const dehydrated = dehydrateRuntimeState(bundle, "2026-07-18T00:00:00.000Z");
@@ -358,6 +397,22 @@ export function registerIndexedDbRuntimeTests(harness: TestHarness): void {
   });
 }
 
+class RecordingIndexedDbAdapter extends IndexedDbAdapter {
+  readonly readwriteTransactions: StorageEntityName[][] = [];
+
+  constructor(databaseName: string) {
+    super({ databaseName, schemaVersion: 1, indexedDBFactory: fakeIndexedDB, keyRangeFactory: FakeIDBKeyRange });
+  }
+
+  override async transaction<T>(
+    stores: StorageEntityName[],
+    mode: StorageTransactionMode,
+    operation: (tx: StorageTransaction) => Promise<T>
+  ): Promise<T> {
+    if (mode === "readwrite") this.readwriteTransactions.push([...stores]);
+    return super.transaction(stores, mode, operation);
+  }
+}
 class SchemaReportingIndexedDbAdapter extends IndexedDbAdapter {
   constructor(databaseName: string) {
     super({ databaseName, schemaVersion: 1, indexedDBFactory: fakeIndexedDB, keyRangeFactory: FakeIDBKeyRange });
