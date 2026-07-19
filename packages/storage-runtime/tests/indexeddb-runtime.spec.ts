@@ -167,6 +167,34 @@ export function registerIndexedDbRuntimeTests(harness: TestHarness): void {
     }
   });
 
+  harness.test("IndexedDbRuntime omits optional undefined fields before an atomic write", async () => {
+    const name = nextName("optional-undefined");
+    const adapter = createAdapter(name);
+    const initial = makeBundle();
+    try {
+      await seedAdapter(adapter, initial);
+      const runtime = new IndexedDbRuntime({ adapter, expectedSchemaVersion: 1 });
+      await runtime.open();
+      await runtime.loadAppState();
+      const next = clone(initial.state);
+      const created = {
+        ...clone(next.savedItems[0]),
+        id: "saved-with-optional-undefined",
+        sourceUrl: "https://example.test/optional-undefined",
+        classificationShadow: undefined
+      };
+      next.savedItems = [created, ...next.savedItems];
+
+      await runtime.persistAppState(initial.state, next);
+      const stored = await adapter.get("savedItems", created.id) as unknown as Record<string, unknown>;
+      harness.assert(Boolean(stored), "created record persisted");
+      harness.equal(Object.prototype.hasOwnProperty.call(stored, "classificationShadow"), false, "undefined optional field omitted");
+      await runtime.close();
+    } finally {
+      await adapter.close();
+      await deleteIndexedDbDatabase(name, fakeIndexedDB);
+    }
+  });
   harness.test("broken references and stale baselines produce zero writes", async () => {
     const name = nextName("validation");
     const adapter = createAdapter(name);
