@@ -70,15 +70,19 @@ export function dehydrateRuntimeState(
     importBatches: cloneForStorage(bundle.state.importBatches ?? []),
     importBatchItems: cloneForStorage(bundle.state.importBatchItems ?? [])
   };
-  const runtimeSettings = createRuntimeMetadataSettings(bundle.state, updatedAt);
   return {
     stores,
-    settings: [
-      ...runtimeSettings,
-      makeProductSetting(RUNTIME_THEME_STORAGE_KEY, bundle.settings.themeId, "appearance", updatedAt),
-      makeProductSetting(RUNTIME_ACHIEVEMENTS_STORAGE_KEY, bundle.settings.achievements, "product", updatedAt)
-    ]
+    settings: makeRuntimeSettings(bundle, updatedAt)
   };
+}
+
+export function dehydrateRuntimeSettings(
+  bundle: RuntimeStateBundle,
+  updatedAt: string
+): StoredSetting[] {
+  validateAppState(bundle.state, "RUNTIME_DEHYDRATION_FAILED");
+  validateProductSettings(bundle.settings, "RUNTIME_DEHYDRATION_FAILED");
+  return makeRuntimeSettings(bundle, updatedAt);
 }
 
 export function hydrateRuntimeState(input: DehydratedRuntimeState): HydratedRuntimeState {
@@ -211,8 +215,20 @@ export function canonicalRuntimeValue(value: unknown): string {
   return canonicalJsonStringify(value, { adapter: "indexedDB", code: "STORAGE_VALIDATION_FAILED" });
 }
 
-function cloneForStorage<T>(value: T): T {
+export function cloneRuntimeStorageValue<T>(value: T): T {
   return JSON.parse(canonicalRuntimeValue(value)) as T;
+}
+
+function cloneForStorage<T>(value: T): T {
+  return cloneRuntimeStorageValue(value);
+}
+
+function makeRuntimeSettings(bundle: RuntimeStateBundle, updatedAt: string): StoredSetting[] {
+  return [
+    ...createRuntimeMetadataSettings(bundle.state, updatedAt),
+    makeProductSetting(RUNTIME_THEME_STORAGE_KEY, bundle.settings.themeId, "appearance", updatedAt),
+    makeProductSetting(RUNTIME_ACHIEVEMENTS_STORAGE_KEY, bundle.settings.achievements, "product", updatedAt)
+  ];
 }
 
 function orderRecords<T extends { id: string }>(records: T[], ids: string[]): T[] {
