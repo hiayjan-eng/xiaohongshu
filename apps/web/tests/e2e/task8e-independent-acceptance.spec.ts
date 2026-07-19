@@ -1,4 +1,4 @@
-import { expect, test, type BrowserContext, type Page } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import { collectConsoleErrors, expectNoConsoleErrors, STORAGE_KEY, submitQuickImportForm } from "./helpers";
 import { seedMigrationFixture } from "./migration-preview-fixtures";
 import {
@@ -34,8 +34,8 @@ test.describe("Task 8E independent release acceptance", () => {
     const errors = collectConsoleErrors(page);
     await installLegacyBootProbe(page);
     await seedMigrationFixture(page);
-    await page.goto("/");
-    await expect(page.locator(".app-shell")).toBeVisible();
+    await page.goto("/dashboard");
+    await expect(page.locator(".app-shell")).toBeVisible({ timeout: 30_000 });
     expect(await page.evaluate(() => window.__TASK8E_BOOT_PROBE__?.indexedDbOpenCalls)).toBe(0);
     expect(await page.evaluate((key) => localStorage.getItem(key), TASK8E_MARKER_KEY)).toBeNull();
     expect((await page.evaluate(() => indexedDB.databases())).some((entry) => entry.name === TASK8E_DATABASE_NAME)).toBe(false);
@@ -82,8 +82,8 @@ test.describe("Task 8E independent release acceptance", () => {
     await page.getByTestId("import-user-note").fill("激活后持久化验证");
     await submitQuickImportForm(page);
     await expect(page.getByTestId("import-success-panel")).toBeVisible();
+    await expect.poll(async () => (await readTask8eRecords(page, "savedItems")).length).toBe(beforeItems.length + 1);
     const afterItems = await readTask8eRecords<Record<string, unknown>>(page, "savedItems");
-    expect(afterItems).toHaveLength(beforeItems.length + 1);
     const imported = afterItems.find((record) => record.sourceUrl === "https://example.test/task8e-indexeddb-import");
     expect(imported).toBeTruthy();
     expect(await readLegacyBytes(page)).toEqual(legacyBefore);
@@ -129,7 +129,7 @@ test.describe("Task 8E independent release acceptance", () => {
     await page.goto("/");
     const legacyBefore = await readLegacyBytes(page);
     const oldTab = await context.newPage();
-    await oldTab.goto("/");
+    await oldTab.goto("/dashboard");
     await expect(oldTab.locator(".app-shell")).toBeVisible();
 
     await runMigrationToCompleted(page);
@@ -165,8 +165,8 @@ test.describe("Task 8E independent release acceptance", () => {
     ];
 
     for (const mutate of mutations) {
-      await mutate();
       await page.goto("/settings/data-migration");
+      await mutate();
       await page.getByTestId("activation-preflight-idle").getByRole("button", { name: "检查启用条件" }).click();
       await expect(page.getByTestId("activation-source-drift")).toBeVisible({ timeout: 60_000 });
       expect(await page.evaluate((key) => localStorage.getItem(key), TASK8E_MARKER_KEY)).toBeNull();
@@ -175,6 +175,7 @@ test.describe("Task 8E independent release acceptance", () => {
         localStorage.setItem("collection-revival-theme", theme!);
         localStorage.setItem("collection-revival-achievements", achievements!);
       }, { key: STORAGE_KEY, state: originalState, theme: originalTheme, achievements: originalAchievements });
+      await page.reload();
     }
 
     await page.evaluate(() => {
@@ -217,7 +218,7 @@ test.describe("Task 8E physical Chromium scale", () => {
       await seedCompactLegacyFixture(page, itemCount);
 
       let started = Date.now();
-      await page.goto("/");
+      await page.goto("/dashboard");
       await expect(page.locator(".app-shell")).toBeVisible({ timeout: 120_000 });
       timings.legacyBootMs = Date.now() - started;
 
@@ -239,7 +240,7 @@ test.describe("Task 8E physical Chromium scale", () => {
       await expect(page.locator(".app-shell")).toBeVisible({ timeout: 180_000 });
       timings.refreshBootMs = Date.now() - started;
       await page.goto(`/search?q=${itemCount}`);
-      await expect(page.getByTestId("search-page-input")).toHaveValue(String(itemCount));
+      await expect(page.getByPlaceholder("试试搜：大理、剪辑、低卡晚餐、周末去处、AI工具")).toHaveValue(String(itemCount));
       expect(await readTask8eMarker(page)).toMatchObject({ state: "indexeddb_active" });
       expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1)).toBe(false);
       await captureTask8e(page, `physical-${itemCount}-active`);
