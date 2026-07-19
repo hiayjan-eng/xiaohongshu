@@ -12,7 +12,11 @@ const NOW = "2026-07-19T08:00:00.000Z";
 
 export async function seedCompactLegacyFixture(page: Page, itemCount: number): Promise<void> {
   const state = makeCompactLegacyState(itemCount);
-  await page.addInitScript(({ state, storageKey, achievementKey, themeKey }) => {
+  await seedLegacyStateOnce(page, state);
+}
+
+export async function seedLegacyStateOnce(page: Page, state: unknown): Promise<void> {
+  await page.evaluate(({ state, storageKey, achievementKey, themeKey }) => {
     localStorage.setItem(storageKey, JSON.stringify(state));
     localStorage.setItem(achievementKey, JSON.stringify({ first_revival: "2026-07-19T08:00:00.000Z" }));
     localStorage.setItem(themeKey, "lavender-mint");
