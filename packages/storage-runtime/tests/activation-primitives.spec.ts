@@ -4,12 +4,16 @@ import {
   LEGACY_APP_STATE_STORAGE_KEY,
   LEGACY_THEME_STORAGE_KEY,
   LegacyLocalStorageSnapshotReader,
+  MemoryAdapter,
   computeSha256,
+  computeStoreChecksum,
   serializeLegacyBackup,
   type MigrationExecutionMetadataRecord,
   type PersistedMigrationBackup,
-  type ReadonlyStorageLike
+  type ReadonlyStorageLike,
+  type StoredSetting
 } from "@revival/storage-service";
+import type { SearchLog } from "@revival/shared-types";
 import {
   ACTIVATION_LEGACY_SOURCE_KEYS,
   STORAGE_BOOTSTRAP_MARKER_KEY,
@@ -22,6 +26,7 @@ import {
   createLegacyActiveMarker,
   inspectBrowserActivationCapabilities,
   isStorageRuntimeBroadcastMessage,
+  verifyTargetStoreChecksums,
   type BroadcastChannelLike,
   type StorageBootstrapMarkerV1
 } from "../src";
@@ -116,6 +121,50 @@ export function registerActivationPrimitiveTests(harness: TestHarness): void {
     harness.assert(fallback.warnings.includes("BROADCAST_CHANNEL_UNAVAILABLE"), "BroadcastChannel warning");
   });
 
+  harness.test("Activation checksums accept planned stores with empty peers and reject unplanned target data", async () => {
+    const adapter = new MemoryAdapter();
+    await adapter.open();
+    try {
+      const setting: StoredSetting = {
+        id: "setting-theme",
+        key: "theme",
+        value: "sprout",
+        category: "appearance",
+        internal: false,
+        updatedAt: "2026-07-18T00:00:00.000Z",
+        schemaVersion: 1
+      };
+      await adapter.put("settings", setting);
+      const checksum = await computeStoreChecksum("settings", [setting]);
+      const fixture = await makeSourceFixture();
+      const metadata = {
+        ...fixture.input.migrationMetadata,
+        checkpoints: [{
+          store: "settings",
+          status: "verified",
+          expectedCount: 1,
+          writtenCount: 1,
+          verifiedCount: 1,
+          expectedChecksum: checksum,
+          targetChecksum: checksum
+        }],
+        targetChecksums: { settings: checksum }
+      } as MigrationExecutionMetadataRecord;
+
+      harness.equal(await verifyTargetStoreChecksums(adapter, metadata), true, "empty stores without checkpoints are valid");
+      const searchLog: SearchLog = {
+        id: "search-unplanned",
+        userId: "user-test",
+        query: "AI",
+        resultCount: 1,
+        createdAt: "2026-07-18T00:00:00.000Z"
+      };
+      await adapter.put("searchLogs", searchLog);
+      harness.equal(await verifyTargetStoreChecksums(adapter, metadata), false, "unexpected unplanned store data blocks activation");
+    } finally {
+      await adapter.close();
+    }
+  });
   harness.test("Source Drift: unchanged AppState, theme and achievements remain equivalent", async () => {
     const fixture = await makeSourceFixture();
     const report = await checkSourceDrift(fixture.input);
