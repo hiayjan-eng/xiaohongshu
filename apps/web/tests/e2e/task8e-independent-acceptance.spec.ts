@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { collectConsoleErrors, expectNoConsoleErrors, STORAGE_KEY, submitQuickImportForm } from "./helpers";
-import { seedMigrationFixture } from "./migration-preview-fixtures";
+import { makeMigrationAppState } from "./migration-preview-fixtures";
 import {
   activatePreparedStorage,
   captureTask8e,
@@ -13,6 +13,7 @@ import {
   runFullActivation,
   runMigrationToCompleted,
   seedCompactLegacyFixture,
+  seedLegacyStateOnce,
   TASK8E_DATABASE_NAME,
   TASK8E_MARKER_KEY
 } from "./task8e-helpers";
@@ -33,7 +34,7 @@ test.describe("Task 8E independent release acceptance", () => {
   test("legacy default path opens no IndexedDB, creates no Marker, and keeps CRUD on localStorage", async ({ page }) => {
     const errors = collectConsoleErrors(page);
     await installLegacyBootProbe(page);
-    await seedMigrationFixture(page);
+    await seedLegacyStateOnce(page, makeMigrationAppState());
     await page.goto("/dashboard");
     await expect(page.locator(".app-shell")).toBeVisible({ timeout: 30_000 });
     expect(await page.evaluate(() => window.__TASK8E_BOOT_PROBE__?.indexedDbOpenCalls)).toBe(0);
@@ -65,7 +66,7 @@ test.describe("Task 8E independent release acceptance", () => {
     test.slow();
     test.setTimeout(300_000);
     const errors = collectConsoleErrors(page);
-    await seedMigrationFixture(page);
+    await seedLegacyStateOnce(page, makeMigrationAppState());
     await page.goto("/");
     const legacyBefore = await readLegacyBytes(page);
     await runFullActivation(page);
@@ -125,7 +126,7 @@ test.describe("Task 8E independent release acceptance", () => {
   test("old legacy tab freezes during activation and resumes only after reload into IndexedDB", async ({ page, context }) => {
     test.slow();
     test.setTimeout(300_000);
-    await seedMigrationFixture(page);
+    await seedLegacyStateOnce(page, makeMigrationAppState());
     await page.goto("/");
     const legacyBefore = await readLegacyBytes(page);
     const oldTab = await context.newPage();
@@ -148,7 +149,7 @@ test.describe("Task 8E independent release acceptance", () => {
   test("source drift blocks authoritative changes and ignores internal keys", async ({ page }) => {
     test.slow();
     test.setTimeout(360_000);
-    await seedMigrationFixture(page);
+    await seedLegacyStateOnce(page, makeMigrationAppState());
     await runMigrationToCompleted(page);
     const originalState = await page.evaluate((key) => localStorage.getItem(key), STORAGE_KEY);
     const originalTheme = await page.evaluate(() => localStorage.getItem("collection-revival-theme"));
