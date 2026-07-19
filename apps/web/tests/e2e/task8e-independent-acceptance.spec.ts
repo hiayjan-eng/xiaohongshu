@@ -83,6 +83,8 @@ test.describe("Task 8E independent release acceptance", () => {
     await page.getByTestId("import-user-note").fill("激活后持久化验证");
     await submitQuickImportForm(page);
     await expect(page.getByTestId("import-success-panel")).toBeVisible();
+    await page.waitForTimeout(500);
+    await expect(page.getByTestId("runtime-save-error")).toHaveCount(0);
     await expect.poll(async () => (await readTask8eRecords(page, "savedItems")).length).toBe(beforeItems.length + 1);
     const afterItems = await readTask8eRecords<Record<string, unknown>>(page, "savedItems");
     const imported = afterItems.find((record) => record.sourceUrl === "https://example.test/task8e-indexeddb-import");
