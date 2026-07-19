@@ -84,7 +84,6 @@ test.describe("Task 8E independent release acceptance", () => {
     await submitQuickImportForm(page);
     await expect(page.getByTestId("import-success-panel")).toBeVisible();
     await page.waitForTimeout(500);
-    console.info("[Task8E runtime save]", await page.getByTestId("runtime-save-error").textContent());
     await expect(page.getByTestId("runtime-save-error")).toHaveCount(0);
     await expect.poll(async () => (await readTask8eRecords(page, "savedItems")).length).toBe(beforeItems.length + 1);
     const afterItems = await readTask8eRecords<Record<string, unknown>>(page, "savedItems");
