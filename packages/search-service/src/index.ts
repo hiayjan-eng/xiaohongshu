@@ -24,8 +24,9 @@ export function searchSavedItems(query: string, savedItems: SavedItem[], actionC
   const cardByItemId = new Map(actionCards.map((card) => [card.savedItemId, card]));
   const albumsByItemId = groupAlbumsByItemId(smartAlbums);
   const queryTerms = buildQueryTerms(cleanQuery);
+  const semanticReasonsByCategory = buildSemanticReasonsByCategory(cleanQuery);
   return savedItems
-    .map((item) => scoreItem(item, cardByItemId.get(item.id), albumsByItemId.get(item.id) ?? [], cleanQuery, queryTerms))
+    .map((item) => scoreItem(item, cardByItemId.get(item.id), albumsByItemId.get(item.id) ?? [], queryTerms, semanticReasonsByCategory.get(item.category)))
     .filter((result): result is SearchResult => result !== undefined && result.score > 0)
     .sort((a, b) => (b.score !== a.score ? b.score - a.score : new Date(b.item.createdAt).getTime() - new Date(a.item.createdAt).getTime()));
 }
@@ -34,7 +35,7 @@ export async function semanticSearch(_query: string): Promise<SearchResult[]> {
   return [];
 }
 
-function scoreItem(item: SavedItem, actionCard: ActionCard | undefined, albums: SmartAlbum[], cleanQuery: string, queryTerms: string[]): SearchResult | undefined {
+function scoreItem(item: SavedItem, actionCard: ActionCard | undefined, albums: SmartAlbum[], queryTerms: string[], semanticReason: string | undefined): SearchResult | undefined {
   let score = 0;
   const reasons = new Set<string>();
   const cardFields = actionCard ? flattenFields(actionCard.fields) : "";
@@ -97,7 +98,6 @@ function scoreItem(item: SavedItem, actionCard: ActionCard | undefined, albums: 
     if (matches(itemText, term)) { score += 12; if (reasons.size < 3) reasons.add(`命中索引：${displayTerm(term)}`); }
   });
 
-  const semanticReason = getSemanticReason(cleanQuery, item.category);
   if (semanticReason) { score += 38; reasons.add(semanticReason); }
   if (!score) return undefined;
   return { item, actionCard, score, matchReasons: Array.from(reasons).slice(0, 5) };
@@ -120,9 +120,15 @@ function buildQueryTerms(cleanQuery: string): string[] {
   return Array.from(terms).slice(0, 12);
 }
 
-function getSemanticReason(cleanQuery: string, category: Category): string | undefined {
-  const rule = semanticRules.find((item) => item.triggers.some((trigger) => cleanQuery.includes(normalize(trigger))) && item.categories.includes(category));
-  return rule?.reason;
+function buildSemanticReasonsByCategory(cleanQuery: string): Map<Category, string> {
+  const reasons = new Map<Category, string>();
+  semanticRules.forEach((rule) => {
+    if (!rule.triggers.some((trigger) => cleanQuery.includes(normalize(trigger)))) return;
+    rule.categories.forEach((category) => {
+      if (!reasons.has(category)) reasons.set(category, rule.reason);
+    });
+  });
+  return reasons;
 }
 
 function matches(value: string | undefined, term: string): boolean {
