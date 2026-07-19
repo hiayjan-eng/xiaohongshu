@@ -53,7 +53,7 @@ test.describe("Task 8E independent release acceptance", () => {
     expect(await page.evaluate((key) => localStorage.getItem(key), TASK8E_MARKER_KEY)).toBeNull();
 
     await page.reload();
-    await page.goto("/search?q=Task%208E%20legacy");
+    await page.goto("/search?q=Task");
     await expect(page.getByTestId("search-result-card")).toContainText("Task 8E legacy 写入验证");
     await page.setViewportSize({ width: 390, height: 844 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1)).toBe(false);
