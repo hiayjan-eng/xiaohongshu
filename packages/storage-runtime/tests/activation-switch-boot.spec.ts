@@ -240,8 +240,23 @@ async function setupBoot() {
     for (const setting of dehydrated.settings) await tx.put("settings", setting);
   });
   const targetChecksums: Partial<Record<StorageEntityName, string>> = {};
-  for (const store of MIGRATION_EXECUTION_STORE_ORDER) targetChecksums[store] = await computeStoreChecksum(store, await adapter.getAll(store) as never[]);
-  const metadata = { ...metadataShape(), targetChecksums };
+  const checkpoints: MigrationExecutionMetadataRecord["checkpoints"] = [];
+  for (const store of MIGRATION_EXECUTION_STORE_ORDER) {
+    const records = await adapter.getAll(store) as never[];
+    if (records.length === 0) continue;
+    const checksum = await computeStoreChecksum(store, records);
+    targetChecksums[store] = checksum;
+    checkpoints.push({
+      store,
+      status: "verified",
+      expectedCount: records.length,
+      writtenCount: records.length,
+      verifiedCount: records.length,
+      expectedChecksum: checksum,
+      targetChecksum: checksum
+    });
+  }
+  const metadata = { ...metadataShape(), checkpoints, targetChecksums };
   await adapter.put("migrationMetadata", metadata);
   const journals = new ActivationJournalRepository(adapter);
   await journals.createOrReuse(journalInput(await computeRuntimeBundleChecksum(bundle)));
