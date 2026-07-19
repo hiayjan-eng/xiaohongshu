@@ -32,6 +32,10 @@ export function makeCompactLegacyState(itemCount: number) {
       sourcePlatform: "manual",
       sourceUrl: `https://example.test/n/${number}`,
       rawShareText: "",
+      rawTitle: `Task8E saved ${number}`,
+      cleanedTitle: `Task8E saved ${number}`,
+      displayTitle: `Task8E saved ${number}`,
+      textNormalizationVersion: 3,
       title: `Task8E 收藏 ${number}`,
       userNote: index === 0 ? "保留这条人工备注" : "",
       contentDomain: "技能学习",
@@ -160,7 +164,13 @@ export async function activatePreparedStorage(page: Page): Promise<void> {
   for (let index = 0; index < await boxes.count(); index += 1) await boxes.nth(index).check();
   await confirmation.getByRole("button", { name: "开始正式启用" }).click();
   await expect(page.locator(".app-shell")).toBeVisible({ timeout: 180_000 });
-  await expect.poll(() => readTask8eMarker(page), { timeout: 60_000 }).toMatchObject({ state: "indexeddb_active", activeBackend: "indexedDB" });
+  await expect.poll(async () => {
+    try {
+      return await readTask8eMarker(page);
+    } catch {
+      return null;
+    }
+  }, { timeout: 60_000 }).toMatchObject({ state: "indexeddb_active", activeBackend: "indexedDB" });
 }
 
 export async function runFullActivation(page: Page): Promise<void> {
