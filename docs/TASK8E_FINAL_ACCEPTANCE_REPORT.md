@@ -2,7 +2,7 @@
 
 ## Result
 
-`TASK8E_ACCEPTANCE_STATUS: FAIL_BLOCKING`
+`TASK8E_ACCEPTANCE_STATUS: PASS`
 
 This independent release audit is complete. It does not authorize a merge to `main`, a pull request, a push initiated by this task, or a deployment.
 
@@ -72,3 +72,23 @@ Focused and default-worker scale evidence both passed. The focused 3,000-record 
 The full `pnpm check` now completes typecheck and production build and reports 141 / 142 Web E2E scenarios passed. The sole remaining failure is the known concurrent Task 8D formal activation flaky. It passed immediately in an isolated serial rerun, and the complete `activation-indexeddb.spec.ts` group also passed with one worker. This remains a release-audit gap, so the status is `PASS_WITH_NON_BLOCKING_GAPS` and `ALLOW_MERGE_MAIN: NO` until a fully green default-worker run is obtained.
 
 `task8e-3k-failed.png` is no longer tracked; it remains local and is ignored along with Task 8E test artifacts. See `docs/TASK8E2_PHYSICAL_IMPORT_FIX.md` for the full chain of evidence.
+
+## Task 8E.3 Concurrent Activation Acceptance Closure
+
+Task 8E.3 was completed on `phase1-task8e3-activation-flaky-fix` from the Task 8E.2 tip `8eb586ff7cb5912b68579c17bfdebb1a8b11e9bb`. The production-runtime implementation was deliberately left unchanged. The only code adjustment is in the Task 8D Playwright acceptance: it waits for the controlled main-frame navigation triggered by formal activation before observing the new runtime, and its evidence captures use viewport screenshots rather than concurrent full-page screenshots.
+
+The previously observed failure left the Marker at `activating` / revision `2`; it did not demonstrate a corrupt committed runtime because the test stopped before the post-commit read. Under the repaired acceptance synchronization, the normal Marker reaches `indexeddb_active` / revision `3`, the Journal commits, migration metadata records `activeStorageSwitched: true`, and the normal reload releases the old-tab write gate. A subsequent full-suite reproduction showed the actual concurrent failure was `page.screenshot({ fullPage: true })` timing out while waiting for fonts, before the Marker assertion. This is an acceptance-evidence synchronization and rendering-load issue, not a production Marker, Journal, Web Locks, activation, or controlled-reload protocol race.
+
+Focused evidence passed without retry, worker reduction, or timeout increase: the formal activation case repeated serially 3/3; the Task 8C plus Task 8D pair passed 8/8; the formal activation case passed 6/6 under six workers; and the post-fix paired suite passed 24/24 under six workers. The final default-worker `pnpm check` passed all `142/142` Web E2E cases in 4.5 minutes, including the physical 3,000- and 10,000-record Chromium flows. The 3,000-record flow recorded legacy boot 516 ms, migration 6,030 ms, prepare 4,155 ms, activation boot 3,672 ms, differential import 2,561 ms, refresh 1,010 ms, and search 188 ms. The 10,000-record flow recorded legacy boot 357 ms, migration 17,617 ms, prepare 8,561 ms, activation boot 7,933 ms, differential import 2,372 ms, order work 2,650 ms, refresh 1,609 ms, and search 267 ms.
+
+Generated evidence remains local and ignored under `apps/web/test-results/task8d-indexeddb-activation/` and `apps/web/test-results/task8e-independent-acceptance/`; it includes desktop and mobile activation/recovery captures plus `physical-3000-active.png` and `physical-10000-active.png`. Vite retains its existing chunk-size warning, which is non-blocking and should be handled as a separately scoped optimization.
+
+`TASK8E_ACCEPTANCE_STATUS: PASS`
+
+`RELEASE_RECOMMENDATION: READY_FOR_EXPLICIT_MERGE_AND_RELEASE`
+
+`MERGE_MAIN_ALLOWED: READY_FOR_EXPLICIT_MERGE_AND_RELEASE`
+
+`DEPLOY_ALLOWED: READY_FOR_EXPLICIT_MERGE_AND_RELEASE`
+
+No merge, pull request, push initiated by this task, deployment, real user migration, localStorage deletion, automatic upgrade, or default active-storage policy change was performed. The next action may be an explicitly authorized merge/release decision; it is not part of this acceptance task.
