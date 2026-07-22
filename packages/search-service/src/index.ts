@@ -65,7 +65,7 @@ function scoreItem(item: SavedItem, actionCard: ActionCard | undefined, albums: 
     item.contentDomain,
     item.contentSubDomain,
     item.savedIntent,
-    item.secondaryIntents.join(" "),
+    (item.secondaryIntents ?? []).join(" "),
     item.whyThisDomain,
     item.whyThisIntent
   ].filter(Boolean).join(" ");
