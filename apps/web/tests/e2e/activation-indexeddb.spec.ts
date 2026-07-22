@@ -32,7 +32,10 @@ const LEGACY_KEYS = ["collection-revival-system:v1", "collection-revival-theme",
 
     await page.getByTestId("activation-preflight-idle").getByRole("button", { name: "检查启用条件" }).click();
     await expect(page.getByTestId("activation-preflight-passed")).toBeVisible({ timeout: 30_000 });
-    await page.getByTestId("activation-preflight-passed").getByRole("button", { name: "确认准备启用" }).click();
+    await diagnosePrepareConfirmationClick(
+      page,
+      page.getByTestId("activation-preflight-passed").getByRole("button", { name: "确认准备启用" })
+    );
     await checkCheckboxGroup(page, page.getByTestId("activation-prepare-confirmation"), 4);
     await page.getByTestId("activation-prepare-confirmation").getByRole("button", { name: "准备启用" }).click();
     await expect(page.getByTestId("activation-prepared")).toBeVisible({ timeout: 30_000 });
@@ -159,6 +162,42 @@ async function checkCheckboxGroup(page: Page, container: Locator, expectedCount:
     await checkbox.focus();
     await page.keyboard.press("Space");
     await expect(checkboxes.nth(index)).toBeChecked();
+  }
+}
+async function diagnosePrepareConfirmationClick(page: Page, button: Locator): Promise<void> {
+  await expect(button).toBeAttached();
+  await expect(button).toBeVisible();
+  await expect(button).toBeEnabled();
+  await button.scrollIntoViewIfNeeded();
+  const box = await button.boundingBox();
+  const startedAt = Date.now();
+  await button.evaluate((element) => {
+    const target = element as HTMLElement;
+    const trace: Array<{ type: string; at: number }> = [];
+    (window as unknown as Record<string, unknown>).__task8dClickTrace = trace;
+    for (const type of ["pointerdown", "pointerup", "click"]) {
+      target.addEventListener(type, () => trace.push({ type, at: performance.now() }), { once: true });
+    }
+  });
+  try {
+    await button.click();
+  } finally {
+    const trace = await page.evaluate(() =>
+      (window as unknown as Record<string, unknown>).__task8dClickTrace ?? []
+    ).catch(() => []);
+    const marker = await readMarkerAcrossNavigation(page).catch(() => null);
+    const metadata = await readRecords(page, "migrationMetadata").catch(() => []);
+    console.log("[Task8D prepare click diagnostic]", JSON.stringify({
+      url: page.url(),
+      box,
+      elapsedMs: Date.now() - startedAt,
+      trace,
+      markerState: marker?.state ?? "missing",
+      metadataStates: metadata.map((entry) => {
+        const record = entry as Record<string, unknown>;
+        return record.executionStatus ?? record.status ?? record.recordType ?? "unknown";
+      })
+    }));
   }
 }
 async function waitForSettingsTransactionBarrier(page: Page): Promise<void> {
