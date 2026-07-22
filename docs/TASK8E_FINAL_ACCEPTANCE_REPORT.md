@@ -63,3 +63,12 @@ The failed activated 10,000-record search gate has been repaired and rerun in is
 Final focused evidence: 1,000 activated records reached `/search?q=1000` in 112 ms and wrote SearchLog in 8 ms without page errors. The 10,000-record gate passed with 2,177 ms refresh and 264 ms search readiness. Storage-runtime, storage-service, and typecheck passed.
 
 The final `pnpm check` did not become a green merge signal: typecheck and production build passed, and 139/141 Web E2E tests passed, but a separate physical 3,000-record import acceptance assertion failed consistently. It is not changed by this search repair and needs a separately authorized investigation. Therefore `ALLOW_MERGE_MAIN: NO` remains correct.
+## Task 8E.2 Physical Import Follow-up
+
+The 3,000-record physical Chromium import blocker has been repaired. The retained legacy fixture required two compatibility corrections: a today-plan test date must be current, and absent optional `rawShareText` must compact as empty text when the local AI fallback builds its request payload. Smart-album keyword aggregation now also tolerates absent optional `secondaryIntents`.
+
+Focused and default-worker scale evidence both passed. The focused 3,000-record run took 28.7 s; the default-worker run inside the final suite took 26.9 s. At the import completion boundary, the test verifies 3,001 SavedItems, one ImportBatch, one ImportBatchItem, a 3,001-entry order manifest, persistence through refresh, and byte-identical legacy keys. No fallback or dual write was observed.
+
+The full `pnpm check` now completes typecheck and production build and reports 141 / 142 Web E2E scenarios passed. The sole remaining failure is the known concurrent Task 8D formal activation flaky. It passed immediately in an isolated serial rerun, and the complete `activation-indexeddb.spec.ts` group also passed with one worker. This remains a release-audit gap, so the status is `PASS_WITH_NON_BLOCKING_GAPS` and `ALLOW_MERGE_MAIN: NO` until a fully green default-worker run is obtained.
+
+`task8e-3k-failed.png` is no longer tracked; it remains local and is ignored along with Task 8E test artifacts. See `docs/TASK8E2_PHYSICAL_IMPORT_FIX.md` for the full chain of evidence.

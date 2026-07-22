@@ -74,3 +74,16 @@ The activated IndexedDB search blocker was reproduced with an isolated 1,000-rec
 The scorer now treats the optional field as an empty array. The repaired 1,000-record path reached `/search?q=1000` in 112 ms and persisted the SearchLog in 8 ms with no page errors. The repaired 10,000-record physical gate also passed: refresh 2,177 ms and search readiness 264 ms. Full details are in `docs/TASK8E1_SEARCH_PERFORMANCE_FIX.md`.
 
 This closes the original 10,000-record search blocker. The overall Task 8E status remains `FAIL_BLOCKING`: the final full `pnpm check` passed typecheck and build but recorded 139/141 Web E2E successes. One activation assertion passed when rerun alone; the separate 3,000-record import acceptance failure is outside Task 8E.1 and remains a merge blocker.
+## Task 8E.2 Physical Import Repair
+
+The 3,000-record physical import blocker is closed on `phase1-task8e2-physical-import-fix`. The test fixture had a stale fixed today-plan date, and retained historical SavedItems could omit optional `rawShareText` while the AI fallback payload compactor assumed a required string. The minimal guards preserve the existing runtime and make these legacy fields safe to retain. A companion smart-album guard handles absent optional `secondaryIntents`.
+
+Focused 3,000-record Chromium passed in 28.7 s. The default-worker full regression repeated the same 3,000-record flow in 26.9 s, with migration, activation, manual import, manifest update, refresh and search all succeeding. The import regression verifies 3,001 SavedItems, one ImportBatch, one ImportBatchItem, a 3,001-entry order manifest, unchanged legacy bytes, and durable refresh. Full evidence is in `docs/TASK8E2_PHYSICAL_IMPORT_FIX.md`.
+
+The final default-worker `pnpm check` produced 141 passing Web E2E scenarios out of 142. The remaining failure is the existing concurrent Task 8D activation flaky: its serial focused test and serial two-test group both passed. Therefore the physical import gate is passed, but the full command is not yet a green release signal.
+
+`TASK8E_ACCEPTANCE_STATUS: PASS_WITH_NON_BLOCKING_GAPS`
+
+`MERGE_MAIN_ALLOWED: NO`
+
+`DEPLOY_ALLOWED: NO`
