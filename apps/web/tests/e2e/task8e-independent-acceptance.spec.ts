@@ -265,7 +265,16 @@ test.describe("Task 8E physical Chromium scale", () => {
       throw error;
     }
     timings.searchReadyMs = Date.now() - started;
-    console.info(`[Task8E1 1000] ${JSON.stringify(timings)}`);
+    started = Date.now();
+    await expect.poll(async () => (await readTask8eRecords(page, "searchLogs")).length).toBe(1);
+    timings.searchLogPersistMs = Date.now() - started;
+    const probe = await page.evaluate(() => {
+      const target = window as Window & { __task8e1SearchProbe?: { pushStateCalls: string[] } };
+      return { pathname: window.location.pathname, search: window.location.search, pushStateCalls: target.__task8e1SearchProbe?.pushStateCalls ?? [] };
+    });
+    expect(probe).toEqual({ pathname: "/search", search: "?q=1000", pushStateCalls: ["/search?q=1000"] });
+    expect(pageErrors).toEqual([]);
+    console.info(`[Task8E1 1000] ${JSON.stringify({ timings, probe, pageErrors })}`);
 
     await page.evaluate((key) => localStorage.removeItem(key), TASK8E_MARKER_KEY);
     await page.reload();
