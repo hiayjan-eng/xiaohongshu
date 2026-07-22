@@ -10,6 +10,7 @@ export const TASK8E_LEGACY_KEYS = [STORAGE_KEY, TASK8E_THEME_KEY, ACHIEVEMENT_ST
 export const TASK8E_ARTIFACT_DIR = "test-results/task8e-independent-acceptance";
 
 const NOW = "2026-07-19T08:00:00.000Z";
+const TODAY = new Date().toISOString().slice(0, 10);
 
 export async function seedCompactLegacyFixture(page: Page, itemCount: number): Promise<void> {
   const state = makeCompactLegacyState(itemCount);
@@ -130,7 +131,7 @@ export function makeCompactLegacyState(itemCount: number) {
       actionCardId: "large-action-1",
       title: "Task8E 大数据计划卡",
       sourceTitle: savedItems[0].title,
-      plannedDate: "2026-07-19",
+      plannedDate: TODAY,
       estimatedMinutes: 10,
       oneNextStep: "查看第一条收藏",
       doneCriteria: "计划记录可读取",
