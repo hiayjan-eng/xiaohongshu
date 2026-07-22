@@ -211,6 +211,47 @@ test.describe("Task 8E independent release acceptance", () => {
 });
 
 test.describe("Task 8E physical Chromium scale", () => {
+  test("1,000 activated records isolate global search submission timing", async ({ page }) => {
+    test.setTimeout(240_000);
+    const itemCount = 1_000;
+    const timings: Record<string, number> = {};
+    await page.goto("/");
+    await deleteTask8eDatabase(page);
+    await page.evaluate((key) => localStorage.removeItem(key), TASK8E_MARKER_KEY);
+    await seedCompactLegacyFixture(page, itemCount);
+
+    let started = Date.now();
+    await page.goto("/dashboard");
+    await expect(page.locator(".app-shell")).toBeVisible({ timeout: 60_000 });
+    timings.legacyBootMs = Date.now() - started;
+
+    started = Date.now();
+    await runMigrationToCompleted(page);
+    timings.migrationMs = Date.now() - started;
+    started = Date.now();
+    await prepareActivation(page);
+    timings.prepareMs = Date.now() - started;
+    started = Date.now();
+    await activatePreparedStorage(page);
+    timings.activationMs = Date.now() - started;
+
+    started = Date.now();
+    await page.reload();
+    await expect(page.locator(".app-shell")).toBeVisible({ timeout: 90_000 });
+    timings.refreshBootMs = Date.now() - started;
+
+    started = Date.now();
+    await page.locator(".global-search input").fill(String(itemCount));
+    await page.locator(".global-search button").click();
+    await expect(page.locator(".search-page-form input")).toHaveValue(String(itemCount), { timeout: 45_000 });
+    timings.searchReadyMs = Date.now() - started;
+    console.info(`[Task8E1 1000] ${JSON.stringify(timings)}`);
+
+    await page.evaluate((key) => localStorage.removeItem(key), TASK8E_MARKER_KEY);
+    await page.reload();
+    await deleteTask8eDatabase(page);
+  });
+
   test("10,000 legacy records complete global search before activation", async ({ page }) => {
     test.setTimeout(90_000);
     await page.goto("/");
