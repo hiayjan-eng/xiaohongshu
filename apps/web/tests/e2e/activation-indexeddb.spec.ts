@@ -47,7 +47,9 @@ const LEGACY_KEYS = ["collection-revival-system:v1", "collection-revival-theme",
     await expect(formal.getByRole("button", { name: "开始正式启用" })).toBeDisabled();
     for (let index = 0; index < 4; index += 1) await formalBoxes.nth(index).check();
 
+    const controlledReload = page.waitForEvent("framenavigated", (frame) => frame === page.mainFrame());
     await formal.getByRole("button", { name: "开始正式启用" }).click();
+    await controlledReload;
     await expect(page.locator(".app-shell")).toBeVisible({ timeout: 45_000 });
     await expect.poll(() => readMarkerAcrossNavigation(page), { timeout: 20_000 }).toMatchObject({ state: "indexeddb_active", activeBackend: "indexedDB", revision: 3 });
     const metadata = await readRecords(page, "migrationMetadata") as Array<Record<string, unknown>>;
