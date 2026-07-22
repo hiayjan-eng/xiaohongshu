@@ -240,10 +240,30 @@ test.describe("Task 8E physical Chromium scale", () => {
     await expect(page.locator(".app-shell")).toBeVisible({ timeout: 90_000 });
     timings.refreshBootMs = Date.now() - started;
 
+    await page.evaluate(() => {
+      const target = window as Window & { __task8e1SearchProbe?: { pushStateCalls: string[] } };
+      const originalPushState = window.history.pushState.bind(window.history);
+      target.__task8e1SearchProbe = { pushStateCalls: [] };
+      window.history.pushState = ((...args: Parameters<History["pushState"]>) => {
+        target.__task8e1SearchProbe?.pushStateCalls.push(String(args[2] ?? ""));
+        return originalPushState(...args);
+      }) as History["pushState"];
+    });
+    const pageErrors: string[] = [];
+    page.on("pageerror", (error) => pageErrors.push(error.message));
     started = Date.now();
     await page.locator(".global-search input").fill(String(itemCount));
     await page.locator(".global-search button").click();
-    await expect(page.locator(".search-page-form input")).toHaveValue(String(itemCount), { timeout: 45_000 });
+    try {
+      await expect(page.locator(".search-page-form input")).toHaveValue(String(itemCount), { timeout: 45_000 });
+    } catch (error) {
+      const probe = await page.evaluate(() => {
+        const target = window as Window & { __task8e1SearchProbe?: { pushStateCalls: string[] } };
+        return { pathname: window.location.pathname, search: window.location.search, pushStateCalls: target.__task8e1SearchProbe?.pushStateCalls ?? [] };
+      });
+      console.info(`[Task8E1 1000 failure] ${JSON.stringify({ probe, pageErrors })}`);
+      throw error;
+    }
     timings.searchReadyMs = Date.now() - started;
     console.info(`[Task8E1 1000] ${JSON.stringify(timings)}`);
 
