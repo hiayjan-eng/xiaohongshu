@@ -211,6 +211,52 @@ test.describe("Task 8E independent release acceptance", () => {
 });
 
 test.describe("Task 8E physical Chromium scale", () => {
+  test("300 activated records import one item only after IndexedDB persistence", async ({ page }) => {
+    test.setTimeout(180_000);
+    const itemCount = 300;
+    const errors = collectConsoleErrors(page);
+    await page.goto("/");
+    await deleteTask8eDatabase(page);
+    await page.evaluate((key) => localStorage.removeItem(key), TASK8E_MARKER_KEY);
+    await seedCompactLegacyFixture(page, itemCount);
+    const legacyBefore = await readLegacyBytes(page);
+    await runFullActivation(page);
+
+    const beforeSavedItems = await readTask8eRecords<Record<string, unknown>>(page, "savedItems");
+    const beforeBatches = await readTask8eRecords<Record<string, unknown>>(page, "importBatches");
+    const beforeBatchItems = await readTask8eRecords<Record<string, unknown>>(page, "importBatchItems");
+    await page.goto("/import");
+    await page.getByTestId("import-source-url").fill("https://example.test/task8e-physical-import-300");
+    await page.getByTestId("import-title").fill("Task8E physical import fixture");
+    await submitQuickImportForm(page);
+    await expect(page.getByTestId("import-success-panel")).toBeVisible({ timeout: 60_000 });
+
+    const afterSavedItems = await readTask8eRecords<Record<string, unknown>>(page, "savedItems");
+    const afterBatches = await readTask8eRecords<Record<string, unknown>>(page, "importBatches");
+    const afterBatchItems = await readTask8eRecords<Record<string, unknown>>(page, "importBatchItems");
+    const imported = afterSavedItems.find((record) => record.sourceUrl === "https://example.test/task8e-physical-import-300");
+    expect(imported).toBeTruthy();
+    expect(afterSavedItems).toHaveLength(beforeSavedItems.length + 1);
+    expect(afterBatches).toHaveLength(beforeBatches.length + 1);
+    expect(afterBatchItems).toHaveLength(beforeBatchItems.length + 1);
+    const settings = await readTask8eRecords<{ key: string; value: unknown }>(page, "settings");
+    const manifest = settings.find((setting) => setting.key === "runtime:order-manifest:v1")?.value as { orders?: { savedItems?: string[] } } | undefined;
+    expect(manifest?.orders?.savedItems).toHaveLength(itemCount + 1);
+    expect(manifest?.orders?.savedItems).toContain(imported?.id);
+    expect(await readLegacyBytes(page)).toEqual(legacyBefore);
+
+    await page.reload();
+    await expect(page.locator(".app-shell")).toBeVisible({ timeout: 60_000 });
+    expect((await readTask8eRecords(page, "savedItems")).length).toBe(itemCount + 1);
+    expect((await readTask8eRecords(page, "importBatches")).length).toBe(1);
+    expect((await readTask8eRecords(page, "importBatchItems")).length).toBe(1);
+    expect(await readLegacyBytes(page)).toEqual(legacyBefore);
+    await expectNoConsoleErrors(errors);
+
+    await page.evaluate((key) => localStorage.removeItem(key), TASK8E_MARKER_KEY);
+    await page.reload();
+    await deleteTask8eDatabase(page);
+  });
   test("1,000 activated records isolate global search submission timing", async ({ page }) => {
     test.setTimeout(240_000);
     const itemCount = 1_000;
