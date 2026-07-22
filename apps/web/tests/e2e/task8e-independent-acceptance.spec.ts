@@ -211,6 +211,16 @@ test.describe("Task 8E independent release acceptance", () => {
 });
 
 test.describe("Task 8E physical Chromium scale", () => {
+  test("10,000 legacy records complete global search before activation", async ({ page }) => {
+    test.setTimeout(90_000);
+    await page.goto("/");
+    await seedCompactLegacyFixture(page, 10_000);
+    await page.goto("/settings");
+    await expect(page.locator(".app-shell")).toBeVisible({ timeout: 60_000 });
+    await page.locator(".global-search input").fill("10000");
+    await page.locator(".global-search button").click();
+    await expect(page.locator(".search-page-form input")).toHaveValue("10000", { timeout: 30_000 });
+  });
   for (const itemCount of [3_000, 10_000]) {
     test(`${itemCount.toLocaleString()} records complete migration, activation, refresh and search`, async ({ page }) => {
       test.slow();
@@ -226,18 +236,22 @@ test.describe("Task 8E physical Chromium scale", () => {
       await page.goto("/dashboard");
       await expect(page.locator(".app-shell")).toBeVisible({ timeout: 120_000 });
       timings.legacyBootMs = Date.now() - started;
+      console.info(`[Task8E ${itemCount}] legacyBootMs=${timings.legacyBootMs}`);
 
       started = Date.now();
       await runMigrationToCompleted(page);
       timings.migrationMs = Date.now() - started;
+      console.info(`[Task8E ${itemCount}] migrationMs=${timings.migrationMs}`);
       expect((await readTask8eRecords(page, "savedItems")).length).toBe(itemCount);
 
       started = Date.now();
       await prepareActivation(page);
       timings.preflightAndPrepareMs = Date.now() - started;
+      console.info(`[Task8E ${itemCount}] preflightAndPrepareMs=${timings.preflightAndPrepareMs}`);
       started = Date.now();
       await activatePreparedStorage(page);
       timings.activationBootMs = Date.now() - started;
+      console.info(`[Task8E ${itemCount}] activationBootMs=${timings.activationBootMs}`);
       expect((await readTask8eRecords(page, "savedItems")).length).toBe(itemCount);
       expect((await readTask8eRecords(page, "actionCards")).length).toBe(1);
       expect((await readTask8eRecords(page, "planCards")).length).toBe(1);
@@ -284,7 +298,7 @@ test.describe("Task 8E physical Chromium scale", () => {
       started = Date.now();
       await page.locator(".global-search input").fill(String(itemCount));
       await page.locator(".global-search").getByRole("button", { name: "搜索", exact: true }).click();
-      await expect(page.locator(".search-page-form input")).toHaveValue(String(itemCount), { timeout: 180_000 });
+      await expect(page.locator(".search-page-form input")).toHaveValue(String(itemCount), { timeout: 60_000 });
       timings.searchReadyMs = Date.now() - started;
       expect(await readTask8eMarker(page)).toMatchObject({ state: "indexeddb_active" });
       expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1)).toBe(false);
