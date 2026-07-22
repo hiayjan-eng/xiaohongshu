@@ -66,3 +66,11 @@ The tracked historical `task8e-3k-failed.png` is still an unrelated release-hygi
 `DEPLOY_ALLOWED: NO`
 
 Task 8E cannot proceed to merge while an activated IndexedDB browser session with 10,000 records cannot complete a normal global search. The next task should profile and repair that narrow active-runtime search submission path, add a bounded Chromium regression benchmark, then rerun only the failed 10,000-record gate before any new full-suite release audit.
+
+## Task 8E.1 Search Gate Repair
+
+The activated IndexedDB search blocker was reproduced with an isolated 1,000-record Chromium fixture. It was a compatibility exception in the search scorer, not a migration, Marker, Journal, or IndexedDB transaction stall: older retained records can omit optional `secondaryIntents`, while the scorer called `.join()` unguarded. The resulting exception prevented `runSearch` from reaching `history.pushState` and the SearchLog update.
+
+The scorer now treats the optional field as an empty array. The repaired 1,000-record path reached `/search?q=1000` in 112 ms and persisted the SearchLog in 8 ms with no page errors. The repaired 10,000-record physical gate also passed: refresh 2,177 ms and search readiness 264 ms. Full details are in `docs/TASK8E1_SEARCH_PERFORMANCE_FIX.md`.
+
+This closes the original 10,000-record search blocker. The overall Task 8E status remains `FAIL_BLOCKING`: the final full `pnpm check` passed typecheck and build but recorded 139/141 Web E2E successes. One activation assertion passed when rerun alone; the separate 3,000-record import acceptance failure is outside Task 8E.1 and remains a merge blocker.

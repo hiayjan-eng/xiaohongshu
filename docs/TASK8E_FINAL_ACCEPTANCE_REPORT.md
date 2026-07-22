@@ -55,3 +55,11 @@ The active IndexedDB runtime cannot yet demonstrate responsive normal search at 
 `ALLOW_MERGE_MAIN: NO`
 
 The next instruction should be a tightly scoped performance investigation of the activated 10,000-record search submission path. It should not redesign Task 8A-8D, rerun full migration work indiscriminately, or deploy.
+
+## Task 8E.1 Follow-up
+
+The failed activated 10,000-record search gate has been repaired and rerun in isolated Chromium. The root cause was an optional historical `secondaryIntents` field missing on retained records; `searchSavedItems` dereferenced it before requesting navigation. The minimal compatibility guard keeps the existing search ranking behavior while treating the absent optional array as empty.
+
+Final focused evidence: 1,000 activated records reached `/search?q=1000` in 112 ms and wrote SearchLog in 8 ms without page errors. The 10,000-record gate passed with 2,177 ms refresh and 264 ms search readiness. Storage-runtime, storage-service, and typecheck passed.
+
+The final `pnpm check` did not become a green merge signal: typecheck and production build passed, and 139/141 Web E2E tests passed, but a separate physical 3,000-record import acceptance assertion failed consistently. It is not changed by this search repair and needs a separately authorized investigation. Therefore `ALLOW_MERGE_MAIN: NO` remains correct.
