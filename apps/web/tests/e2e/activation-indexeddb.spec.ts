@@ -127,7 +127,7 @@ async function readLegacy(page: Page): Promise<Record<string, string | null>> {
 async function capture(page: Page, name: string): Promise<void> {
   const directory = "test-results/task8d-indexeddb-activation";
   await fs.mkdir(directory, { recursive: true });
-  await page.screenshot({ path: `${directory}/${name}.png`, fullPage: true });
+  await page.screenshot({ path: `${directory}/${name}.png` });
 }
 async function completeMigration(page: Page) {
   await page.goto("/settings/data-migration");
