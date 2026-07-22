@@ -228,3 +228,52 @@ Phase 1 建议增加迁移锁设计，但不要依赖服务器：
 Task 3 的 `IndexedDbAdapter.importSnapshot({ mode: "staging" })` 已实现为底层 adapter 能力测试：先用 `MemoryAdapter` 验证 Snapshot 结构和导入语义，验证成功后再用一个 IndexedDB 多 store readwrite transaction 写入目标 stores。这个 staging 行为能证明“验证失败不会污染主数据库、写入失败会由原生 transaction 回滚”，但它还不是用户可见的数据迁移流程。
 
 真实迁移仍然需要后续 Task 4-6 完成以下内容：raw localStorage snapshot、不可变备份、checksum、MigrationReport、引用完整性验证、用户确认 UI、多标签 writer lock、activeStorage 切换、失败恢复和用户可理解的回滚入口。Task 3 没有读取 localStorage，没有写 `migrationMetadata` 状态机，没有修改 `collection-revival-active-storage`，也没有删除或清理任何旧数据。
+
+## Task 6 补充：执行、断点恢复和回滚的当前落地
+
+Task 6 已把迁移状态机中的执行段落落到 `packages/storage-service/src/migration-executor.ts`。当前实现仍然是库能力，不会在 Web 页面打开时运行，也不会切换 `activeStorage`。调用方必须先通过 Task 4 创建 `LegacyBackupEnvelope`，再通过 Task 5 创建可执行的 `MigrationPreviewReport/MigrationPlan`，最后显式传入 `userConfirmed = true` 才能执行。
+
+执行流程现在拆成几个可恢复阶段：获取单写入者锁、检查 target adapter、校验 plan/envelope/checksum、检查目标业务 stores 为空、用 MemoryAdapter 做 staging 校验、写入 `backups`、写入 `migrationMetadata` checkpoint、按固定顺序写入业务 stores、逐 store 验证数量和 checksum、最终全量验证并标记 completed。固定顺序为 `settings -> savedItems -> importBatches -> importBatchItems -> smartAlbums -> actionCards -> planCards -> classificationCorrections -> searchLogs`，`migrationMetadata` 和 `backups` 只保存执行证据，不作为业务数据迁移目标。
+
+断点恢复基于 `migrationMetadata` 中的 store checkpoint。已验证的 store 会重新比对 checksum；写入后失败但 checksum 匹配的 store 会被标记为 verified；pending 或 failed store 会继续写入。如果目标 store 中存在与 checkpoint 不一致的数据，恢复会以 `MIGRATION_RESUME_CONFLICT` 停止，避免覆盖用户或测试过程中出现的未知写入。
+
+回滚只在 `activeStorageSwitched = false` 时允许。它按业务 store 逆序清空本次迁移写入的数据，并保留 `backups` 与 `migrationMetadata`，方便后续导出报告或人工排查。回滚不是删除旧 localStorage，也不是把 IndexedDB 切回 localStorage；真正的 activeStorage 标识切换和设置页恢复入口仍留到后续 Task。
+
+单写入者锁当前提供两个实现：`MemoryMigrationLockProvider` 用于单元测试和库级验证，`WebLocksMigrationLockProvider` 用于后续浏览器环境接入时的独占语义。Task 6 没有实现 localStorage 锁、BroadcastChannel UI 通知或多标签页设置页锁定，这些属于接入层任务。
+## Task 6.1 Hardened Execution Flow
+
+Task 6.1 keeps execution as a library capability only. It still does not run on page load, does not read real user localStorage by itself, does not mutate legacy localStorage, and does not switch `activeStorage`.
+
+The execution order is now locked to:
+
+1. Acquire the migration writer lock.
+2. Open and health-check the explicit target adapter.
+3. Compare target schemaVersion across preview, plan, expected option, and actual adapter.
+4. Scan all `migrationMetadata` and block if another unresolved migration exists.
+5. Confirm target business stores are empty.
+6. Validate the normalized snapshot through staging.
+7. Strictly verify the legacy backup envelope.
+8. Serialize the envelope and compute SHA-256.
+9. Create or reuse an immutable backup in a single `backups` readwrite transaction.
+10. Read the backup back, recompute SHA-256, parse it, and verify the parsed envelope.
+11. Mark backup `verifiedAt`.
+12. Write execution metadata.
+13. Write business stores in fixed order.
+14. Verify each store by count and SHA-256.
+15. Run final semantic verification for references and user-preserved fields.
+16. Run final physical verification.
+17. Mark completed without switching `activeStorage`.
+
+Resume rereads the persisted backup, verifies immutable fields, byte length, serialized envelope SHA-256, parsed envelope, and source checksum alignment before continuing from checkpoints. Rollback can be retried after `rollback_failed`; already-cleared stores remain empty, remaining stores continue clearing, and backup/metadata are retained.
+
+Task 7B must use Web Locks for IndexedDB. If Web Locks are unavailable, the UI must block migration instead of falling back to memory or localStorage locks.
+
+## Task 8 补充：迁移完成后的激活协议
+
+MigrationExecutor 的 `completed` 只代表目标数据写入和校验完成，不能直接改变产品 Runtime。激活前必须验证 source drift、Backup、MigrationMetadata、目标 Store SHA-256、Runtime settings/order manifests、schema 和浏览器能力，并在 authority Web Lock 内进行第二次 source checksum。
+
+激活使用 Bootstrap Marker 与 Activation Journal 的两阶段协议。Marker 或 IndexedDB boot 异常时进入 Recovery Screen；不得静默回到可写 localStorage。`activeStorageSwitched=true` 只在 boot verification 成功后的 IndexedDB commit transaction 中写入，之后 Task 7C rollback 永久拒绝该 migration。
+
+## Task 8B Runtime Readiness
+
+Legacy normalized Snapshot 现在把 Runtime App Metadata 与 Order Manifest 作为 settings records 纳入 MigrationPlan。Preview 与 Final semantic verification 验证 user/schema 和八组数组顺序；缺失或不一致会阻止 completed。Rollback 清理 settings 时同步移除 Runtime records，backups 和 migrationMetadata 仍保留。该准备不改变 Raw Backup/Envelope，也不代表 activeStorage 已切换。

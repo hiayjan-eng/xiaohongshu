@@ -26,8 +26,13 @@ export * from "./errors";
 export * from "./indexeddb-adapter";
 export * from "./legacy-localstorage-snapshot";
 export * from "./memory-adapter";
+export * from "./migration-executor";
+export * from "./migration-executor-errors";
+export * from "./migration-lock";
 export * from "./migration-preview";
 export * from "./repositories";
+export * from "./runtime-metadata";
+export { canonicalJsonStringify } from "./json-utils";
 
 export interface AchievementRecord {
   id: string;
@@ -367,3 +372,5 @@ function upsertById<T extends { id: string }>(items: T[], item: T): T[] {
   if (!exists) return [item, ...items];
   return items.map((entry) => (entry.id === item.id ? item : entry));
 }
+export * from "./activation-journal";
+export * from "./activation-commit";

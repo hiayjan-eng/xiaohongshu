@@ -181,6 +181,12 @@ UI 流程：
 
 ## 10. Production 验收
 
+## Task 8 补充：迁移与激活分离
+
+路线中的“新读写切到 IndexedDB”不再视为迁移 transaction 的最后一步。迁移 completed 后，localStorage 仍是权威源；正式启用前必须重新计算主 AppState、theme、achievements 的 source checksum，发现漂移则先 Rollback 并重新迁移。
+
+正式切换采用 Prepare、controlled reload、IndexedDB boot verification、Commit 四段协议。Task 7C Rollback 只适用于 `activeStorageSwitched=false`；commit 后回到旧存储属于未来独立反向迁移，不能清空新 Store后直接恢复旧 writer。
+
 每次生产发布后必须记录：
 
 - commit hash。

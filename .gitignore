@@ -19,3 +19,5 @@ packages/*/dist/
 dist/
 .vercel
 release-artifacts/
+# Task 8E browser acceptance artifacts stay local and must not be tracked.
+task8e-*.png

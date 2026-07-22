@@ -8,6 +8,7 @@
     "build": "tsc -p tsconfig.json --noEmit && vite build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test:e2e": "playwright test",
+    "test:e2e:task8e": "playwright test task8e-independent-acceptance.spec.ts --workers=1",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:headed": "playwright test --headed"
   },
@@ -19,6 +20,8 @@
     "@revival/recommendation-service": "workspace:*",
     "@revival/search-service": "workspace:*",
     "@revival/shared-types": "workspace:*",
+    "@revival/storage-service": "workspace:*",
+    "@revival/storage-runtime": "workspace:*",
     "@vitejs/plugin-react": "^4.3.1",
     "lucide-react": "^0.468.0",
     "react": "^18.3.1",

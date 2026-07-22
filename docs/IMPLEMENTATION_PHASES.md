@@ -26,6 +26,8 @@
 
 目标：把长期数据从 localStorage 迁移到 IndexedDB local-first，建立可回滚迁移和数据访问层。
 
+Task 8 审计补充：Phase 1 的“迁移”与“正式启用”是两个独立状态。迁移完成后仍需 Runtime 等价性、source drift、Bootstrap Marker、Activation Journal、异步启动门和 Recovery Screen；在这些门未通过前，localStorage 继续是唯一权威数据源。
+
 不做什么：不接 Supabase，不做登录，不重写分类，不改扩展扫描协议。
 
 修改模块：

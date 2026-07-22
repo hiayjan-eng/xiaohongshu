@@ -1,0 +1,374 @@
+# Task 7 Migration UI Specification
+
+Task 7 adds the user-facing migration surface under Settings, but it must not silently migrate data and must not switch `activeStorage`. It is a confirmation-heavy safety flow for upgrading local data storage from legacy localStorage toward IndexedDB readiness.
+
+This spec assumes Task 6 blocking gaps are fixed before any execution UI is enabled. Until then, Task 7A may implement read-only preview and backup download only.
+
+## Product Entry
+
+Location:
+
+`Settings -> Data Management -> Upgrade local data storage`
+
+The entry should not live under "Development and Testing". It is a real user data management function, but it should be visually quiet and clearly labeled as a local browser upgrade.
+
+Entry card copy:
+
+Title: `升级本地数据存储`
+
+Description:
+
+`为了支持几千条收藏、更稳定的搜索和未来同步，需要把当前浏览器里的本地数据升级到新的存储方式。升级前会先创建备份，不会删除现有 localStorage 数据。`
+
+Primary action: `查看升级内容`
+
+Secondary action: `暂不升级`
+
+Small note:
+
+`本功能只处理当前浏览器里的收藏复活数据，不会读取小红书账号、扩展断点或其他网站数据。`
+
+## User Flow
+
+1. User opens Settings and clicks `查看升级内容`.
+2. UI creates a read-only legacy snapshot from allowlisted localStorage keys.
+3. UI creates raw backup envelope and migration preview.
+4. User sees a summary: what will be preserved, regenerated, excluded, and what needs attention.
+5. User downloads the backup file.
+6. If preview has blocking issues or manual review, user cannot start execution.
+7. If preview is executable and Task 6 executor is accepted, user must check four confirmations.
+8. UI creates and opens an explicit IndexedDbAdapter only after confirmation.
+9. UI creates `WebLocksMigrationLockProvider`. If Web Locks is unavailable, execution is blocked.
+10. User clicks `开始升级`.
+11. Executor writes backup, metadata, stores, checkpoints, and final verification.
+12. Completion state is `completed_not_activated`: IndexedDB data exists and is verified, but the app still reads legacy localStorage.
+13. In Task 7B the user can view the report and return to Settings. Resume and rollback controls remain unavailable until Task 7C.
+14. Active storage switch remains a later Task 8 decision.
+
+## Wizard Steps
+
+### Step 1: Read-Only Check
+
+Purpose: inspect legacy data and create the backup envelope without writing anything.
+
+Primary status messages:
+
+- `正在检查当前浏览器里的收藏数据...`
+- `检查完成，当前还没有修改任何数据。`
+- `当前无法生成升级预览，原始备份仍可导出。`
+
+Required behavior:
+
+- Use `LegacyLocalStorageSnapshotReader`.
+- Do not call `loadAppState`.
+- Do not call `persistAppState`.
+- Do not open IndexedDB.
+- Do not call MigrationExecutor.
+- Do not mutate localStorage.
+
+### Step 2: Preview
+
+Purpose: explain the result in human terms before technical details.
+
+Top states:
+
+- Can proceed: `已检查 X 条收藏，当前数据可以安全升级。`
+- Needs review: `有 X 条数据需要确认，其余内容可以保留。`
+- Blocked: `备份或数据结构存在问题，当前不会修改任何数据。`
+
+Summary blocks:
+
+- `将保留`: saved items, source URLs, user notes, edited titles, manual classifications, confirmed/archived albums, action cards, plan cards, classification corrections, theme and achievements.
+- `将重新生成`: search indexes, temporary recommendations, rebuildable caches, candidate albums that are not user-confirmed when the migration plan marks them rebuildable.
+- `默认排除`: QA data, real-test records, developerMode, extension checkpoints, API keys, environment variables.
+- `需要确认`: grouped issues such as duplicates, broken optional references, manual_review operations, checksum mismatch, unsupported schema, or invalid records.
+
+Manual review behavior:
+
+- Task 7 first implementation should block execution if any `manual_review` operation remains.
+- The UI may allow report export, but should not build a per-record editor in Task 7A/B.
+- Copy: `这些数据需要先确认，当前不会开始升级。`
+
+### Step 3: Backup Download
+
+Purpose: make sure the user has a recoverable copy before any execution.
+
+Button: `下载升级前备份`
+
+Warning copy:
+
+`备份中可能包含你的收藏标题、备注和来源链接。请保存在自己的设备中，不要随意分享。`
+
+Implementation requirements:
+
+- Use `serializeLegacyBackup`.
+- Use `createLegacyBackupBlob`.
+- Use `createLegacyBackupFilename`.
+- Use `URL.createObjectURL`, temporary link click, and `URL.revokeObjectURL` only inside the UI action.
+- Set local UI state `backupDownloadTriggered=true`.
+- Do not upload backup to Vercel.
+- Do not save backup content to localStorage.
+- Do not store local disk path.
+
+### Step 4: Four Confirmations
+
+Execution cannot start until all four confirmations are checked:
+
+1. `我知道原来的本地收藏不会被删除。`
+2. `我已经下载并检查浏览器下载列表中的原始备份。`
+3. `我知道升级完成后，当前产品暂时仍使用旧存储。`
+4. `我知道新存储需要在下一阶段完成验证后才会正式启用。`
+
+If any confirmation is missing, the primary button stays disabled with a clear reason.
+
+### Step 5: Execution Progress
+
+Displayed stages:
+
+- `准备安全锁`
+- `确认备份`
+- `写入收藏`
+- `写入导入批次`
+- `写入智能专辑`
+- `写入行动卡`
+- `写入计划卡`
+- `写入分类纠正`
+- `写入设置`
+- `校验数据`
+- `完成`
+
+Progress should map from `MigrationExecutionProgress`:
+
+| Executor status | UI state |
+|---|---|
+| `lock_acquiring` | `正在获取安全锁` |
+| `preflight` | `正在做升级前检查` |
+| `backup_persisted` | `备份已保存到新存储` |
+| `writing_store` | `正在写入 ${currentStore}` |
+| `verifying_store` | `正在校验 ${currentStore}` |
+| `verifying_all` | `正在做最终校验` |
+| `completed` | `升级写入完成，尚未启用` |
+| `failed` | `升级停止，新存储不会启用` |
+| `cancelled` | `升级已取消，可继续或恢复` |
+| `rollback_pending` | `正在恢复升级前状态` |
+| `rolled_back` | `已恢复到升级前状态` |
+| `rollback_failed` | `恢复没有全部完成，请保留备份并停止操作` |
+
+### Step 6: Completed Not Activated
+
+Completion copy:
+
+`本地数据已经写入并校验完成，但当前应用仍然使用原来的 localStorage 数据。下一阶段会单独实现启用新存储和回退入口。`
+
+Actions:
+
+- `查看迁移报告`
+- `返回设置`
+
+Task 7B intentionally provides no resume, rollback, delete-old-data, or activate-now action. The UI must not call active storage switching code in Task 7.
+
+## UI State Machine
+
+```mermaid
+stateDiagram-v2
+  [*] --> idle
+  idle --> inspecting: 查看升级内容
+  inspecting --> previewReady: read-only snapshot ok
+  inspecting --> previewBlocked: backup or parse issue
+  previewReady --> backupDownloaded: 下载备份
+  previewReady --> previewBlocked: blocking/manual_review
+  backupDownloaded --> confirmationsReady: 四项确认
+  confirmationsReady --> executing: 开始升级
+  executing --> completedNotActivated: executor completed
+  executing --> failed: executor failed
+  executing --> cancelled: user cancel
+  failed --> resumePrompt: metadata recoverable
+  cancelled --> resumePrompt: checkpoints exist
+  resumePrompt --> executing: 继续升级
+  resumePrompt --> rollingBack: 恢复到升级前
+  completedNotActivated --> rollingBack: 恢复到升级前
+  rollingBack --> rolledBack
+  rollingBack --> rollbackFailed
+```
+
+## Controller Boundary
+
+Task 7 should introduce a small controller rather than placing migration logic inside React components.
+
+Suggested name:
+
+`MigrationFlowController`
+
+Responsibilities:
+
+- Build read-only snapshot and backup envelope.
+- Build migration preview and plan.
+- Expose summary state to React.
+- Trigger backup download helper.
+- Validate four confirmations.
+- Create explicit IndexedDbAdapter only at execution time.
+- Create WebLocksMigrationLockProvider only at execution time.
+- Call `execute` in Task 7B. Task 7C may add explicit `inspect`, `resume`, and `rollback` actions after refresh recovery is designed.
+- Convert executor errors into safe Chinese UI messages.
+- Never modify `activeStorage`.
+
+React responsibilities:
+
+- Render states and buttons.
+- Hold transient form state.
+- Display progress, report, and errors.
+- Avoid calling storage adapters directly.
+
+## IndexedDB Timing
+
+Task 7A:
+
+- Do not open IndexedDB.
+- Do not create target adapter.
+- Do not write anything.
+
+Task 7B:
+
+- After backup download and four confirmations, create `IndexedDbAdapter`.
+- Use a stable database name from schema docs.
+- Open target adapter explicitly.
+- Confirm business stores are empty through executor preflight.
+- Do not switch activeStorage.
+
+Task 7C:
+
+- Reopen IndexedDB to inspect `migrationMetadata` and `backups` after refresh.
+- Resume or rollback only after explicit user action.
+- Do not recreate a migration plan from memory after refresh.
+
+## Web Locks
+
+Task 7B must use `WebLocksMigrationLockProvider`.
+
+Rules:
+
+- Check `globalThis.navigator?.locks`.
+- If unavailable, block execution.
+- Do not fallback to memory lock in production UI.
+- Do not implement localStorage lease.
+- Do not use interval-based lock.
+- If another tab holds the lock, show: `另一个页面正在升级数据，请等待它完成后再试。`
+
+Browser unsupported copy:
+
+`当前浏览器暂不支持安全的数据升级，请使用最新版 Chrome 或 Edge。`
+
+## Error Message Mapping
+
+Do not display raw DOMException, object store names, foreign-key wording, or transaction internals as primary copy.
+
+| Error code | User copy |
+|---|---|
+| `MIGRATION_LOCK_UNAVAILABLE` | `另一个页面正在升级数据，请等待它完成后再试。` |
+| `MIGRATION_TARGET_UNAVAILABLE` | `新存储暂时无法打开，当前数据没有被修改。` |
+| `MIGRATION_USER_CONFIRMATION_REQUIRED` | `请先完成所有确认项，再开始升级。` |
+| `MIGRATION_PREVIEW_BLOCKED` | `仍有数据需要确认，暂时不能开始升级。` |
+| `MIGRATION_SOURCE_MISMATCH` | `备份和预览结果不一致，请重新检查当前数据。` |
+| `MIGRATION_TARGET_NOT_EMPTY` | `新存储中已经存在其他数据。为了避免覆盖，升级已停止。` |
+| `MIGRATION_VERIFY_FAILED` | `写入后的校验没有通过，新存储不会启用。` |
+| `MIGRATION_RESUME_CONFLICT` | `已写入的数据与升级记录不一致，不能自动继续。建议先恢复到升级前。` |
+| `MIGRATION_ROLLBACK_FAILED` | `恢复过程没有全部完成。请保留页面和备份，不要清理浏览器数据。` |
+| `MIGRATION_ALREADY_ACTIVATED` | `新存储已经被启用，不能使用这条回滚路径。` |
+
+Technical details may be shown in a collapsed section with safe error code, store name, and record id only.
+
+## Page Refresh and Recovery
+
+Task 7A keeps the backup envelope, preview, plan, and download-trigger state in memory only. Refreshing or leaving `/settings/data-migration` returns the page to `idle`; it does not rerun inspection, persist a session, open IndexedDB, or claim that a downloaded file was saved. The IndexedDB recovery behavior below belongs to Task 7C after a real execution has been introduced.
+
+After refresh:
+
+- Do not rely on in-memory envelope.
+- Inspect IndexedDB `migrationMetadata` and `backups`.
+- If status is `writing_store`, `verifying_store`, `failed`, or `cancelled`, show a recovery panel.
+- Do not automatically resume.
+- User must click `继续升级` or `恢复到升级前`.
+- If status is `completed`, show `升级完成，尚未启用`.
+- If status is `rolled_back`, show `已恢复`.
+- If status is `rollback_failed`, show high-risk stop message.
+
+## Responsive and Accessibility
+
+Desktop:
+
+- Task 7A wizard max width: 960px, with a minimum usable desktop content width of 760px when the viewport permits it.
+- Step navigation visible.
+- The four primary summary values may use four columns; supporting groups use at most two columns.
+- Main action area must remain obvious.
+
+Mobile:
+
+- Single column.
+- Buttons use full-width rows when needed.
+- No horizontal scrolling.
+- Important confirmations must not depend on hover.
+
+Accessibility:
+
+- All checkboxes have labels.
+- Progress uses `aria-live` and progress semantics.
+- Errors are not color-only.
+- Disabled buttons explain the reason.
+- Keyboard navigation works through all actions.
+
+## Task Split
+
+### Task 7A: Read-Only Check and Preview
+
+Includes Settings entry, read-only snapshot, migration preview, report summary, backup download, and blocked/manual-review states. It does not open IndexedDB and does not execute migration.
+
+Implemented on `/settings/data-migration` with three visible steps only: `检查数据`, `查看结果`, and `保存备份`. The page uses a single reducer state machine (`idle`, `inspecting`, `preview_ready`, `review_required`, `blocked`, `backup_ready`, `backup_downloaded`, and `inspection_failed`). The controller is inert until the user explicitly starts inspection, receives a narrow `ReadonlyStorageLike`, and holds its envelope and preview only in memory.
+
+Task 7A downloads the Task 4 `LegacyBackupEnvelope` through `serializeLegacyBackup`, `createLegacyBackupBlob`, and `createLegacyBackupFilename`. The browser-only click helper creates and revokes an object URL; it does not upload, persist, or reinterpret the envelope. A blocked normalized snapshot may still expose the raw backup when the raw capture succeeded.
+
+### Task 7B: Execution Confirmation and Progress
+
+Includes four confirmations, explicit IndexedDbAdapter creation, Web Locks provider, executor `execute`, progress UI, cancel, and completed-not-activated state. Requires Task 6 blocking gaps to be fixed first.
+
+Implemented contract:
+
+- The production runtime lives in `apps/web/src/features/storage-migration/migration-execution-runtime.ts` and creates `IndexedDbAdapter`, `WebLocksMigrationLockProvider`, and `MigrationExecutor` only after the final user action.
+- The target is `collection-revival-local`, schema version 1. Opening Settings, inspection, preview, backup creation, download, and checkbox changes do not create the database.
+- The controller passes the existing envelope, preview, plan, explicit confirmation, AbortSignal, target schema version, and progress callback to the Task 6 executor. The executor contract has no `verifyAfterEachStore` option; per-store verification is mandatory inside the executor and therefore cannot be disabled by Web code.
+- Production Web code imports no `MemoryMigrationLockProvider`, sets no `unsafeAllowProcessLocalLockForTests`, and has no lock fallback.
+- The native Web Locks request uses non-queued `ifAvailable` acquisition. Because Chrome rejects `ifAvailable` combined with `signal`, the provider checks cancellation before and inside the lock callback and omits the incompatible request option.
+- Progress is derived from real `MigrationExecutionProgress` checkpoints. The UI exposes the current phase, translated Store name, record count, verified Store count, and an ARIA progressbar.
+- Safe stop uses `AbortController`. Task 6 completes or rolls back the active Store transaction atomically, records cancellation metadata, retains backup evidence, and never switches `activeStorage`.
+- Success is rendered only as `completed_not_activated`; failure and cancellation retain the old localStorage runtime and expose no automatic retry, resume, rollback, activation, or deletion action.
+- Task 7B state remains memory-only. Refresh does not auto-execute, auto-resume, or auto-rollback. Task 7C owns recovery UI.
+- The branch must not merge or deploy before Task 7C closes the refresh-recovery gap.
+
+### Task 7C: Resume and Rollback UI
+
+Implemented on `phase1-task7c-migration-recovery-ui`:
+
+- `/settings/data-migration` explicitly checks for an existing migration session on mount. `IndexedDbDatabaseInspector` uses `indexedDB.databases()` and never calls `open()` to test existence. Unsupported enumeration is a safe blocking state; an absent database returns to the Task 7A inspection entry with zero database creation.
+- An existing database is opened read-only through `IndexedDbAdapter`, `MigrationExecutor.inspectAll()` reads every metadata record and the persisted backup summary, and the adapter is closed in `finally`. More than one unresolved migration or `activeStorageSwitched=true` blocks all recovery actions.
+- The reducer owns `checking_existing_session`, `existing_session_not_found`, `resume_available`, `rollback_available`, `resuming`, `rolling_back`, `rolled_back`, `rollback_failed`, `recovery_blocked`, and `another_session_running`. Page load and refresh only inspect; they never call `execute`, `resume`, or `rollback` automatically.
+- Resume requires one explicit confirmation and a verified persisted backup. It calls `MigrationExecutor.resume({ migrationId, userConfirmed: true })`; the executor reconstructs recovery input from persisted Backup, Metadata, Plan, and Store checkpoints. It does not reread localStorage, rebuild the preview, create a new backup, or call `execute`.
+- Rollback requires two explicit confirmations. It clears only the nine migration business stores, keeps `backups` and `migrationMetadata`, leaves localStorage byte-for-byte unchanged, and supports an idempotent second attempt from `rollback_failed`.
+- Resume and rollback create `WebLocksMigrationLockProvider` at the explicit action boundary. Production Web code has no Memory lock, test-only lock bypass, or no-lock fallback. A held writer lock maps to `another_session_running`; the user must refresh after the other page releases it.
+- Completed sessions map to `completed_not_activated`; rolled-back sessions remain inspectable. Neither state offers activation, old-data deletion, or an active-storage switch.
+- Persisted backup re-download calls the executor's verified read path before constructing the existing Task 4 JSON Blob. A damaged backup disables Resume and download but leaves rollback available when metadata permits it.
+- The safe report contains sanitized migration/execution ids, timestamps, status, counts, checkpoint summaries, backup status, Resume count, recovery capabilities, and whitelisted warning/error codes. It excludes record content, notes, titles, URLs, tokens, serialized envelopes, raw backup, full checksums, and stack traces.
+- Recovery results are rediscovered after refresh; only confirmations, expanded report state, and in-flight presentation remain in React memory. The active product runtime remains localStorage.
+
+### Task 7D: Full Flow Validation
+
+Includes large fake data, multi-tab lock behavior, backup download, cancel/resume/rollback, no console errors, production build, and no activeStorage switch.
+
+## Task 8 Boundary
+
+Task 8 owns merge/main/deploy decisions and active storage activation design. It should be further split before implementation:
+
+- Task 8A: merge and production deploy of safe UI if still not active.
+- Task 8B: real user preview in a controlled browser profile.
+- Task 8C: activeStorage switch implementation.
+- Task 8D: rollback after activation strategy.
+
+Task 7 must stop at `completed_not_activated`.

@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Archive,
   BarChart3,
@@ -30,10 +30,8 @@ import {
   createInitialDemoData,
   createSearchLog,
   STORAGE_KEY,
-  loadAppState,
   migrateScannedTextV2,
   migrateScannedTextV3,
-  persistAppState,
   updateItemStatus,
   type ScannedTextMigrationV3Report
 } from "@revival/database";
@@ -44,8 +42,16 @@ import { RewardConfetti } from "./components/RewardConfetti";
 import { ThemePicker } from "./components/ThemePicker";
 import { TodayWidgetPreview } from "./components/TodayWidgetPreview";
 import { RealTestView } from "./components/RealTestView";
+import {
+  MIGRATION_LEAVE_WARNING,
+  MigrationDataUpgradeEntry,
+  MigrationDataUpgradePage
+} from "./features/storage-migration";
 import { ThemeProvider } from "./theme/ThemeProvider";
-import { getStoredThemeId, getThemePreset, THEME_STORAGE_KEY, type ThemePresetId } from "./theme/themePresets";
+import { getThemePreset, THEME_STORAGE_KEY, type ThemePresetId } from "./theme/themePresets";
+import { createBrowserStorageRuntimeBroadcast, StorageBootstrapMarkerStore, StorageWriteGate } from "@revival/storage-runtime";
+import type { ActiveStorageRuntime, StorageRuntimeProductSettings, StorageWriteGateState } from "@revival/storage-runtime";
+import { RuntimePersistCoordinator, type RuntimePersistStatus } from "./runtime/runtime-persist-coordinator";
 import {
   CATEGORIES,
   REVIVE_INTENTS,
@@ -76,6 +82,7 @@ import {
 } from "@revival/shared-types";
 
 type ViewKey = "welcome" | "dashboard" | "import" | "old-import" | "search" | "pool" | "detail" | "plans" | "albums" | "insights" | "mobile" | "settings" | "real-test" | "qa";
+type SettingsSubRoute = "root" | "data-migration";
 
 const EXTENSION_BETA_VERSION = "0.2.2";
 const EXTENSION_ZIP_FILE_NAME = `collection-revival-extension-beta-v${EXTENSION_BETA_VERSION}.zip`;
@@ -191,9 +198,18 @@ const SEARCH_OPEN_MESSAGES = [
   "原帖已打开，收藏没有走丢"
 ];
 
-export function App() {
-  const [state, setState] = useState<AppState>(() => loadAppState(typeof window === "undefined" ? undefined : window.localStorage));
+type AppContentProps = {
+  initialState: AppState;
+  initialSettings: StorageRuntimeProductSettings;
+  runtime: ActiveStorageRuntime;
+  writeGate: StorageWriteGate;
+  activatedAt?: string;
+};
+
+export function AppContent({ initialState, initialSettings, runtime, writeGate, activatedAt }: AppContentProps) {
+  const [state, setState] = useState<AppState>(initialState);
   const [activeView, setActiveView] = useState<ViewKey>(() => getInitialView());
+  const [settingsSubRoute, setSettingsSubRoute] = useState<SettingsSubRoute>(() => getInitialSettingsSubRoute());
   const [importInput, setImportInput] = useState<ShareInput>(emptyImport);
   const [lastImportResult, setLastImportResult] = useState<ImportSuccessResult | null>(null);
   const [importSessionCount, setImportSessionCount] = useState(0);
@@ -219,12 +235,25 @@ export function App() {
   const [lastPlanUndoState, setLastPlanUndoState] = useState<AppState | null>(null);
   const [lastMigrationUndoState, setLastMigrationUndoState] = useState<AppState | null>(null);
   const [textMigrationPreview, setTextMigrationPreview] = useState<ScannedTextMigrationV3Report | null>(null);
-  const [themeId, setThemeId] = useState<ThemePresetId>(() => getStoredThemeId(typeof window === "undefined" ? undefined : window.localStorage));
-  const [unlockedAchievements, setUnlockedAchievements] = useState<UnlockedAchievementMap>(() =>
-    loadUnlockedAchievements(typeof window === "undefined" ? undefined : window.localStorage)
+  const [themeId, setThemeId] = useState<ThemePresetId>(() => getThemePreset(initialSettings.themeId).id);
+  const [unlockedAchievements, setUnlockedAchievements] = useState<UnlockedAchievementMap>(() => ({ ...initialSettings.achievements }));
+  const [runtimePersistStatus, setRuntimePersistStatus] = useState<RuntimePersistStatus>({ status: "idle" });
+  const persistCoordinator = useMemo(
+    () => new RuntimePersistCoordinator(runtime, setRuntimePersistStatus, writeGate),
+    [runtime, writeGate]
   );
+  const [writeGateState, setWriteGateState] = useState<StorageWriteGateState>(writeGate.state);
+  const previousStateRef = useRef(initialState);
+  const previousSettingsRef = useRef<StorageRuntimeProductSettings>({
+    themeId: getThemePreset(initialSettings.themeId).id,
+    achievements: { ...initialSettings.achievements }
+  });
   const [achievementModal, setAchievementModal] = useState<AchievementDisplay | null>(null);
   const [rewardBurstId, setRewardBurstId] = useState(0);
+  const migrationExecutionActiveRef = useRef(false);
+  const setMigrationExecutionActive = useCallback((active: boolean) => {
+    migrationExecutionActiveRef.current = active;
+  }, []);
   const [aiStatus, setAiStatus] = useState<AiRuntimeStatus>({
     mode: "mock",
     providerName: "ServerAIProxy",
@@ -248,18 +277,60 @@ export function App() {
   );
 
   useEffect(() => {
-    persistAppState(state, typeof window === "undefined" ? undefined : window.localStorage);
-  }, [state]);
+    const previous = previousStateRef.current;
+    if (previous === state) return;
+    previousStateRef.current = state;
+    void persistCoordinator.enqueueAppState(previous, state).catch(() => undefined);
+  }, [persistCoordinator, state]);
+
+  useEffect(() => {
+    const previous = previousSettingsRef.current;
+    const next: StorageRuntimeProductSettings = {
+      themeId,
+      achievements: { ...unlockedAchievements }
+    };
+    if (previous.themeId === next.themeId && JSON.stringify(previous.achievements) === JSON.stringify(next.achievements)) return;
+    previousSettingsRef.current = next;
+    void persistCoordinator.enqueueProductSettings(previous, next).catch(() => undefined);
+  }, [persistCoordinator, themeId, unlockedAchievements]);
+
+  useEffect(() => {
+    const unsubscribeGate = writeGate.subscribe(setWriteGateState);
+    const broadcast = createBrowserStorageRuntimeBroadcast();
+    const unsubscribeBroadcast = broadcast.subscribe((message) => {
+      if (message.type === "activation_preflight_started") {
+        void persistCoordinator.freezeForActivationPreflight().catch(() => undefined);
+      } else if (message.type === "activation_prepared") {
+        writeGate.markPrepared();
+      } else if (message.type === "storage_activation_started" || message.type === "storage_backend_activated" || message.type === "storage_recovery_required") {
+        writeGate.markSwitching();
+        void persistCoordinator.flush().catch(() => undefined);
+      } else if (message.type === "activation_prepare_cancelled") {
+        void new StorageBootstrapMarkerStore(window.localStorage).read().then((marker) => {
+          if (marker.status === "valid" && marker.marker.state === "legacy_active") writeGate.reopen();
+          else writeGate.markPrepared();
+        });
+      }
+    });
+    return () => {
+      unsubscribeBroadcast();
+      unsubscribeGate();
+      broadcast.close();
+    };
+  }, [persistCoordinator, writeGate]);
+  useEffect(() => {
+    persistCoordinator.activate();
+    return () => {
+      persistCoordinator.dispose();
+      void persistCoordinator.flush();
+    };
+  }, [persistCoordinator]);
 
   useEffect(() => {
     if (!toast) return;
     const timer = window.setTimeout(() => setToast(""), 2400);
     return () => window.clearTimeout(timer);
   }, [toast]);
-
-  useEffect(() => {
-    persistUnlockedAchievements(unlockedAchievements, typeof window === "undefined" ? undefined : window.localStorage);
-  }, [unlockedAchievements]);
 
   useEffect(() => {
     const handleSearchShortcut = (event: KeyboardEvent) => {
@@ -275,8 +346,15 @@ export function App() {
 
   useEffect(() => {
     const syncViewFromLocation = () => {
+      if (migrationExecutionActiveRef.current && !window.confirm(MIGRATION_LEAVE_WARNING)) {
+        window.history.pushState(null, "", "/settings/data-migration");
+        setActiveView("settings");
+        setSettingsSubRoute("data-migration");
+        return;
+      }
       const nextView = getInitialView();
       setActiveView(nextView);
+      setSettingsSubRoute(getInitialSettingsSubRoute());
       if (nextView === "search") {
         const query = getInitialSearchQuery();
         setSubmittedSearch(query);
@@ -386,6 +464,7 @@ export function App() {
     const results = searchSavedItems(clean, state.savedItems, state.actionCards, smartAlbums);
     setSubmittedSearch(clean);
     setGlobalQuery(clean);
+    setSettingsSubRoute("root");
     setActiveView("search");
     if (options.syncUrl !== false && typeof window !== "undefined") {
       window.history.pushState(null, "", `/search?q=${encodeURIComponent(clean)}`);
@@ -394,6 +473,40 @@ export function App() {
       ...current,
       searchLogs: [...current.searchLogs, createSearchLog(current.user.id, clean, results.length)]
     }));
+  }
+
+  function navigatePrimaryView(view: ViewKey) {
+    if (
+      settingsSubRoute === "data-migration"
+      && migrationExecutionActiveRef.current
+      && !window.confirm(MIGRATION_LEAVE_WARNING)
+    ) {
+      return;
+    }
+    if (settingsSubRoute === "data-migration" && typeof window !== "undefined") {
+      const path = view === "welcome" ? "/" : `/${view}`;
+      window.history.pushState(null, "", path);
+    }
+    setSettingsSubRoute("root");
+    setActiveView(view);
+  }
+
+  function openDataMigration() {
+    if (typeof window !== "undefined") window.history.pushState(null, "", "/settings/data-migration");
+    setSettingsSubRoute("data-migration");
+    setActiveView("settings");
+  }
+
+  function returnToSettings() {
+    if (typeof window !== "undefined") window.history.pushState(null, "", "/settings");
+    setSettingsSubRoute("root");
+    setActiveView("settings");
+  }
+
+  function returnToImportFromMigration() {
+    if (typeof window !== "undefined") window.history.pushState(null, "", "/import");
+    setSettingsSubRoute("root");
+    setActiveView("import");
   }
 
   function runDashboardSearch(query: string) {
@@ -1302,6 +1415,20 @@ export function App() {
     setSelectedAlbumId(album.id);
     setToast("已新建手动专辑");
   }
+  if (writeGateState !== "open") {
+    return (
+      <ThemeProvider themeId={themeId}>
+        <main className="app-boot-screen" data-testid={writeGateState === "activation_switching" ? "app-write-gate-switching" : writeGateState === "activation_prepared" ? "app-write-gate-prepared" : "app-write-gate-preflight"}>
+          <section className="app-boot-panel warning" role="alert">
+            <p className="app-boot-kicker">本地数据保护</p>
+            <h1>{writeGateState === "activation_switching" ? "正在切换数据源" : writeGateState === "activation_prepared" ? "新存储已经准备，尚未切换" : "正在检查新存储启用条件"}</h1>
+            <p>{writeGateState === "activation_switching" ? "此页面已停止接收旧存储写入。数据源切换完成后请刷新，页面不会把旧内存状态写入 IndexedDB。" : writeGateState === "activation_prepared" ? "当前正式数据源仍是旧本地存储。普通编辑已冻结，请前往数据管理取消准备或正式启用。" : "正在保存已有修改并核对数据。此页面暂时不能继续编辑，当前数据源仍是旧本地存储。"}</p>
+            <button className="primary-button" type="button" onClick={() => window.location.assign("/settings/data-migration")}>前往数据管理</button>
+          </section>
+        </main>
+      </ThemeProvider>
+    );
+  }
   if (activeView === "welcome") {
     return (
       <ThemeProvider themeId={themeId}>
@@ -1313,6 +1440,7 @@ export function App() {
         />
         <RewardConfetti burstId={rewardBurstId} />
         <AchievementModal achievement={achievementModal} onClose={() => setAchievementModal(null)} />
+        <RuntimeSaveAlert status={runtimePersistStatus} />
       </ThemeProvider>
     );
   }
@@ -1321,7 +1449,7 @@ export function App() {
     <ThemeProvider themeId={themeId}>
     <div className="app-shell">
       <aside className="sidebar">
-        <button className="brand" onClick={() => setActiveView("welcome")}>
+        <button className="brand" onClick={() => navigatePrimaryView("welcome")}>
           <span className="brand-mark">复</span>
           <span>
             <strong>收藏复活</strong>
@@ -1333,7 +1461,7 @@ export function App() {
           {visibleNavItems.map((item) => {
             const Icon = item.icon;
             return (
-              <button key={item.key} className={activeView === item.key ? "nav-item active" : "nav-item"} onClick={() => setActiveView(item.key)}>
+              <button key={item.key} className={activeView === item.key ? "nav-item active" : "nav-item"} onClick={() => navigatePrimaryView(item.key)}>
                 <Icon size={18} />
                 <span>{item.label}</span>
               </button>
@@ -1362,7 +1490,7 @@ export function App() {
           </form>
 
           <div className="topbar-actions">
-            <button className="icon-text-button" onClick={() => setActiveView("import")}>
+            <button className="icon-text-button" onClick={() => navigatePrimaryView("import")}>
               <Share2 size={17} />
               导入一条
             </button>
@@ -1556,7 +1684,7 @@ export function App() {
             />
           )}
 
-          {activeView === "settings" && (
+          {activeView === "settings" && settingsSubRoute === "root" && (
             <SettingsView
               userName={state.user.name}
               recommendationLimit={recommendationLimit}
@@ -1578,6 +1706,17 @@ export function App() {
               developerMode={developerMode}
               setDeveloperMode={setDeveloperMode}
               openInternalTool={(view) => setActiveView(view)}
+              openDataMigration={openDataMigration}
+              runtimeKind={runtime.kind}
+              activatedAt={activatedAt}
+            />
+          )}
+
+          {activeView === "settings" && settingsSubRoute === "data-migration" && (
+            <MigrationDataUpgradePage
+              onBackToSettings={returnToSettings}
+              onReturnToImport={returnToImportFromMigration}
+              onExecutionActiveChange={setMigrationExecutionActive}
             />
           )}
 
@@ -1614,11 +1753,23 @@ export function App() {
         </section>
 
         {toast && <div className="toast">{toast}</div>}
+        <RuntimeSaveAlert status={runtimePersistStatus} />
         <RewardConfetti burstId={rewardBurstId} />
         <AchievementModal achievement={achievementModal} onClose={() => setAchievementModal(null)} />
       </main>
     </div>
     </ThemeProvider>
+  );
+}
+
+function RuntimeSaveAlert({ status }: { status: RuntimePersistStatus }) {
+  if (status.status !== "failed") return null;
+  return (
+    <div className="runtime-save-alert" role="alert" data-testid="runtime-save-error">
+      <strong>这次修改还没有保存</strong>
+      <span>请保留当前页面并重试操作。本地数据没有被清空。</span>
+      <code>{status.code}</code>
+    </div>
   );
 }
 
@@ -3522,6 +3673,9 @@ function SettingsView(props: {
   developerMode: boolean;
   setDeveloperMode: (value: boolean) => void;
   openInternalTool: (view: "qa" | "real-test") => void;
+  openDataMigration: () => void;
+  runtimeKind: "localStorage" | "indexedDB";
+  activatedAt?: string;
 }) {
   const [devOpen, setDevOpen] = useState(false);
   function toggleDeveloperMode(value: boolean) {
@@ -3539,6 +3693,8 @@ function SettingsView(props: {
       </div>
 
       <ThemePicker selectedThemeId={props.themeId} onThemeChange={props.setThemeId} />
+
+      <MigrationDataUpgradeEntry onOpen={props.openDataMigration} runtimeKind={props.runtimeKind} activatedAt={props.activatedAt} />
 
       <section className="tool-panel single settings-list" data-testid="local-data-tools">
         <div className="settings-row">
@@ -4239,23 +4395,6 @@ function getStorageStatus(state: AppState): StorageStatus {
     };
   }
 }
-const ACHIEVEMENT_STORAGE_KEY = "collection-revival-achievements";
-
-function loadUnlockedAchievements(storage?: Storage): UnlockedAchievementMap {
-  try {
-    const raw = storage?.getItem(ACHIEVEMENT_STORAGE_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw) as UnlockedAchievementMap;
-    return parsed && typeof parsed === "object" ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-
-function persistUnlockedAchievements(achievements: UnlockedAchievementMap, storage?: Storage) {
-  storage?.setItem(ACHIEVEMENT_STORAGE_KEY, JSON.stringify(achievements));
-}
-
 function pickMessage(messages: string[]): string {
   return messages[Math.floor(Math.random() * messages.length)] ?? messages[0] ?? "完成了";
 }
@@ -4478,6 +4617,11 @@ function getInitialView(): ViewKey {
   const view = firstSegment as ViewKey;
   const supported: ViewKey[] = ["welcome", "dashboard", "import", "old-import", "search", "pool", "detail", "plans", "albums", "insights", "mobile", "settings", "real-test", "qa"];
   return supported.includes(view) ? view : "welcome";
+}
+
+function getInitialSettingsSubRoute(): SettingsSubRoute {
+  if (typeof window === "undefined") return "root";
+  return /^\/settings\/data-migration\/?$/.test(window.location.pathname) ? "data-migration" : "root";
 }
 
 function getInitialAlbumId(): string | undefined {

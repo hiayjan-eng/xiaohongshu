@@ -149,19 +149,11 @@ interface AppStateStorageFacade {
 | 搜索结果缓存 | 不迁移，不建 v1 store。 |
 | 文本修复预览 | 与存储迁移独立，不自动应用。 |
 
-## activeStorage 与回退
+## activeStorage 与恢复
 
-建议使用两个标识：
+Task 8 采用独立 Bootstrap Marker `collection-revival-storage-bootstrap:v1` 和 IndexedDB `migrationMetadata` 中的 Activation Journal。Marker 只保存 backend、state、revision、migration/activation id、schema 和 checksum，不含用户内容。settings 镜像不能单独决定启动后端。
 
-1. localStorage 小 key：`collection-revival-active-storage`，值为 `localStorage` 或 `indexedDB`。它只保存启动路由选择，不含用户数据。
-2. IndexedDB `settings.storageRuntime` 和 `migrationMetadata.current`：保存 schemaVersion、lastMigrationId、lastVerifiedAt。
-
-启动流程：
-
-1. 读取 activeStorage 小 key。
-2. 如果是 `indexedDB`，尝试打开 DB 并读取 `migrationMetadata.current`。
-3. 如果 IndexedDB 打开失败或校验失败，显示中文提示并回退 LocalStorageAdapter，只读旧数据。
-4. 不在失败时删除 IndexedDB，也不静默清空 localStorage。
+Marker 缺失时兼容 legacy localStorage。Marker 为 prepared/activating/indexeddb_active 时，启动必须先与 Journal 和 MigrationMetadata 交叉验证。正式激活后 IndexedDB 打开或校验失败时进入启动级 Recovery Screen，不得静默回到可写 LocalStorageAdapter。完整状态机见 `STORAGE_BOOTSTRAP_AND_ACTIVATION_PROTOCOL.md`。
 
 ## 依赖关系图
 
@@ -298,7 +290,7 @@ export type StorageEntityName =
 
 Phase 1 正式迁移只能走 `staging`，不能直接 replace 用户真实数据。
 
-`ActiveStorageMetadata` 只允许 `localStorage` 与 `indexedDB`。activeStorage 标识不进入整个 AppState 大对象，后续应使用独立最小启动元数据；切换 IndexedDB 前必须完成 migration verification，失败时继续使用 LocalStorageAdapter。
+`ActiveStorageMetadata` 只允许 `localStorage` 与 `indexedDB`。activeStorage 标识不进入整个 AppState 大对象，后续使用独立最小 Bootstrap Marker；切换前必须完成 migration verification、source drift 和 boot verification。尚未 commit 时失败继续保持 LocalStorageRuntime；commit 后失败进入 Recovery Screen，禁止静默 fallback writer。
 
 ## Task 1 定稿：Repository 边界
 
@@ -395,3 +387,36 @@ Snapshot import 支持 `preview`、`merge`、`replace`、`staging`。其中 `pre
 可复用测试入口已经扩展为同时覆盖 MemoryAdapter 和 IndexedDbAdapter。`runStorageAdapterContractTests()` 仍是底层适配器必须通过的通用契约；IndexedDbAdapter 额外补充 schema、keyPath、index、persistence、versionchange、blocked、VersionError、多 store transaction、Snapshot internal settings、staging 污染保护等专属测试。Task 3 当前 storage-service 单包测试结果为 88 tests / 468 assertions passed。
 
 Task 4 的边界保持不变：只做 raw localStorage snapshot 和备份导出，不调用会自动写 demo 的 `loadAppState`，不切 activeStorage。Task 5 再做 migration preview / validator，Task 6 才做迁移执行、断点恢复、多标签 writer lock 和正式回滚。
+
+## Task 6 补充：MigrationExecutor 仍是库能力
+
+Task 6 在 `packages/storage-service` 内新增迁移执行层，但它没有接入 Web 启动流程，也没有改变默认存储。新增能力包括 `MigrationExecutor`、`MemoryMigrationLockProvider`、`WebLocksMigrationLockProvider`、`MigrationExecutionMetadataRecord` 和 `MigrationExecutionError`。执行器只消费 Task 4 的 `LegacyBackupEnvelope` 与 Task 5 的 `MigrationPreviewReport/MigrationPlan`，并要求调用方传入 `userConfirmed = true`，所以不会在页面打开时静默迁移。
+
+执行器不会自己读取 `localStorage`，不会调用 `loadAppState`、`persistAppState`、`LegacyLocalStorageSnapshotReader` 或 `createBrowserReadonlyStorage`，也不会实例化正式 IndexedDB。它只写入显式传入的 target adapter；当前测试覆盖了 MemoryAdapter 和 fake-indexeddb 注入的 IndexedDbAdapter。
+
+写入边界是：允许写入 target adapter 的 `backups`、`migrationMetadata` 和计划中的业务 stores；禁止写旧 localStorage、禁止写 `chrome.storage.local`、禁止切换 `activeStorage`。初次执行要求目标业务 stores 为空；失败恢复时根据 checkpoint、数量和 checksum 判断哪些 store 可跳过、验证或继续写入。`backups` store 保存 normalized Snapshot，并把 raw backup 作为扩展字段保留给后续检查。
+
+Task 6 的 rollback 只在 `activeStorageSwitched = false` 时允许。它会清空本次迁移写入的业务 stores，保留 `backups` 和 `migrationMetadata` 作为审计证据。真正的 activeStorage 切换、设置页入口、多标签页 UI 锁定和生产数据迁移仍属于后续任务。
+## Task 6.1 Migration Executor Hardening
+
+Task 6.1 closes the executor gaps found in `docs/TASK6_ACCEPTANCE_AUDIT.md` while keeping the same storage boundary: no Web runtime wiring, no localStorage mutation, no `chrome.storage.local`, no activeStorage switch, and no UI.
+
+The hardened execution contract is:
+
+- Backup persistence uses `verifyLegacyBackupEnvelope`, `serializeLegacyBackup`, SHA-256, and a `backups` readwrite transaction.
+- Backup records store `serializedEnvelope`, `byteLength`, SHA-256 `checksum`, `immutable=true`, `sourceBackupId`, `migrationId`, `rawBackup`, `checksums`, `report`, and `verifiedAt`.
+- Backup records are immutable. Same id + same serialized envelope can be reused. Same id + different immutable content throws `MIGRATION_RESUME_CONFLICT` and never overwrites the old backup.
+- Backup write success is not enough. The executor independently reads the backup back, recalculates SHA-256, parses the serialized envelope, verifies the parsed envelope, and only then writes execution metadata.
+- Store checkpoint checksums now use SHA-256 over canonical JSON `{ store, records }`, where records are sorted by Store primary key. Web Crypto absence throws `MIGRATION_CRYPTO_UNAVAILABLE`; there is no weak hash fallback.
+- IndexedDB targets require a Web Locks provider by default. `MemoryMigrationLockProvider` remains valid for MemoryAdapter and explicitly marked test paths only.
+- Preflight compares preview target schemaVersion, plan target schemaVersion, expected target schemaVersion, and actual adapter schemaVersion before any backup or business write.
+- New executions scan all `migrationMetadata`; any other non-`rolled_back` migration blocks with `MIGRATION_ACTIVE_SESSION_EXISTS`.
+- Final verification now combines Task 5 semantic validation with physical count + SHA-256 verification.
+- Resume rereads and reverifies the persisted backup instead of trusting metadata alone.
+- Rollback after `rollback_failed` can be retried; backup and metadata are preserved.
+
+Task 7B must inject `WebLocksMigrationLockProvider` and must not enable any test-only lock option.
+
+## IndexedDbRuntime 使用边界
+
+Adapter 仍只负责通用持久化和事务；IndexedDbRuntime 负责 AppState hydrate/dehydrate、引用预检、实体 diff、顺序 manifest 和写后校验。一次业务 persist 使用一个多 Store readwrite transaction，完成后再用 readonly transaction 校验 change set。Runtime 不 clear 全库、不修改 backups/migrationMetadata、不选择 active storage，也不自动 fallback。

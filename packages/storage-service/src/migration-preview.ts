@@ -24,6 +24,13 @@ import {
   type LegacySnapshotIssue,
   verifyLegacyBackupEnvelope
 } from "./legacy-localstorage-snapshot";
+import {
+  RUNTIME_APP_METADATA_KEY,
+  RUNTIME_ORDERED_COLLECTIONS,
+  RUNTIME_ORDER_MANIFEST_KEY,
+  parseRuntimeAppMetadata,
+  parseRuntimeOrderManifest
+} from "./runtime-metadata";
 
 export type MigrationIssueSeverity = "blocking" | "warning" | "info";
 
@@ -76,6 +83,8 @@ export type MigrationIssueCode =
   | "CLASSIFICATION_CORRECTION_NOT_PRESERVED"
   | "THEME_NOT_PRESERVED"
   | "ACHIEVEMENT_NOT_PRESERVED"
+  | "RUNTIME_METADATA_NOT_PRESERVED"
+  | "RUNTIME_ORDER_NOT_PRESERVED"
   | "INTERNAL_DATA_EXCLUDED"
   | "DERIVED_DATA_WILL_REBUILD"
   | "TEXT_REPAIR_PENDING"
@@ -119,6 +128,8 @@ export const MIGRATION_ISSUE_SEVERITY: Readonly<Record<MigrationIssueCode, Migra
   CLASSIFICATION_CORRECTION_NOT_PRESERVED: "blocking",
   THEME_NOT_PRESERVED: "warning",
   ACHIEVEMENT_NOT_PRESERVED: "warning",
+  RUNTIME_METADATA_NOT_PRESERVED: "blocking",
+  RUNTIME_ORDER_NOT_PRESERVED: "blocking",
   INTERNAL_DATA_EXCLUDED: "info",
   DERIVED_DATA_WILL_REBUILD: "info",
   TEXT_REPAIR_PENDING: "warning",
@@ -261,6 +272,13 @@ export interface MigrationPreviewReport {
   duplicateGroups: MigrationDuplicateGroup[];
   brokenReferences: MigrationBrokenReference[];
   plan: MigrationPlan;
+}
+
+export interface MigrationTargetIntegrityResult {
+  valid: boolean;
+  issues: MigrationIssue[];
+  preservationChecks: DataPreservationCheck[];
+  brokenReferences: MigrationBrokenReference[];
 }
 
 export interface MigrationReport {
@@ -494,6 +512,27 @@ export async function createMigrationPreview(envelope: LegacyBackupEnvelope, opt
     duplicateGroups: sortDuplicateGroups(context.duplicateGroups),
     brokenReferences: sortBrokenReferences(context.brokenReferences),
     plan
+  };
+}
+
+export function validateMigratedSnapshotIntegrity(
+  envelope: LegacyBackupEnvelope,
+  targetSnapshot: StorageSnapshot,
+  options: Pick<MigrationPreviewOptions, "now" | "createMigrationId" | "targetSchemaVersion" | "detailLimit"> = {}
+): MigrationTargetIntegrityResult {
+  const generatedAt = (options.now ?? (() => new Date()))().toISOString();
+  const context = createValidationContext(options.createMigrationId?.() ?? "migration_final_verification", generatedAt, options.detailLimit);
+  validateSnapshotBasics(context, targetSnapshot, options.targetSchemaVersion ?? DEFAULT_TARGET_SCHEMA_VERSION);
+  validateSnapshotStores(context, targetSnapshot);
+  validateReferences(context, targetSnapshot);
+  validatePreservation(context, envelope, targetSnapshot);
+  const failedPreservation = context.preservationChecks.some((check) => check.status === "failed");
+  const blockingIssue = context.issues.some((issue) => issue.severity === "blocking");
+  return {
+    valid: !failedPreservation && !blockingIssue,
+    issues: sortIssues(context.issues),
+    preservationChecks: sortPreservationChecks(context.preservationChecks),
+    brokenReferences: sortBrokenReferences(context.brokenReferences)
   };
 }
 
@@ -1062,6 +1101,21 @@ function validatePreservation(context: ValidationContext, envelope: LegacyBackup
   const settingKeys = new Set((snapshot.records.settings ?? []).map((setting) => setting.key));
   addPreservationCheck(context, "settings", "setting-theme", "theme", settingKeys.has("theme") ? "passed" : "failed", "THEME_NOT_PRESERVED");
   addPreservationCheck(context, "settings", "setting-achievements", "achievements", settingKeys.has("achievements") ? "passed" : "failed", "ACHIEVEMENT_NOT_PRESERVED");
+  const runtimeMetadata = parseRuntimeAppMetadata((snapshot.records.settings ?? []).find((setting) => setting.key === RUNTIME_APP_METADATA_KEY));
+  const expectedSchema = typeof parsed.schemaVersion === "number" ? parsed.schemaVersion : snapshot.sourceSchemaVersion;
+  const metadataPreserved = runtimeMetadata.valid && runtimeMetadata.value?.appSchemaVersion === expectedSchema &&
+    canonicalCompare(runtimeMetadata.value?.user, parsed.user);
+  addPreservationCheck(context, "settings", RUNTIME_APP_METADATA_KEY, "runtimeMetadata", metadataPreserved ? "passed" : "failed", "RUNTIME_METADATA_NOT_PRESERVED");
+  const orderManifest = parseRuntimeOrderManifest((snapshot.records.settings ?? []).find((setting) => setting.key === RUNTIME_ORDER_MANIFEST_KEY));
+  const sourceOrderManifest = parseRuntimeOrderManifest((envelope.normalizedSnapshot?.records.settings ?? []).find((setting) => setting.key === RUNTIME_ORDER_MANIFEST_KEY));
+  const orderPreserved = orderManifest.valid && sourceOrderManifest.valid &&
+    canonicalCompare(orderManifest.value?.orders, sourceOrderManifest.value?.orders) &&
+    RUNTIME_ORDERED_COLLECTIONS.every((collection) => {
+      const targetIds = (snapshot.records[collection] ?? []).map((record) => record.id).sort();
+      const manifestIds = [...(orderManifest.value?.orders[collection] ?? [])].sort();
+      return canonicalCompare(manifestIds, targetIds);
+    });
+  addPreservationCheck(context, "settings", RUNTIME_ORDER_MANIFEST_KEY, "runtimeOrder", orderPreserved ? "passed" : "failed", "RUNTIME_ORDER_NOT_PRESERVED");
 }
 
 function compareById<K extends StorageEntityName>(

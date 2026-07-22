@@ -18,6 +18,166 @@
   letter-spacing: 0;
 }
 
+.app-boot-screen {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 32px;
+  background: var(--color-page, #f7f5ef);
+  color: var(--color-text, #1f2933);
+}
+
+.app-boot-panel {
+  width: min(100%, 640px);
+  padding: 44px;
+  border: 1px solid var(--color-border, #e8e3da);
+  border-radius: 8px;
+  background: var(--color-surface, #fff);
+  box-shadow: 0 18px 55px rgba(31, 41, 51, 0.08);
+}
+
+.app-boot-panel.warning {
+  border-left: 4px solid var(--color-warning, #d98c64);
+}
+
+.app-boot-panel.danger {
+  border-left: 4px solid var(--color-danger, #c86767);
+}
+
+.app-boot-mark {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--color-primary, #4f8a75);
+  color: #fff;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.app-boot-kicker {
+  margin: 24px 0 8px;
+  color: var(--color-primary, #4f8a75);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.app-boot-panel h1 {
+  margin: 0;
+  font-size: 30px;
+  line-height: 1.25;
+  letter-spacing: 0;
+}
+
+.app-boot-panel > p:not(.app-boot-kicker) {
+  margin: 14px 0 0;
+  color: var(--color-muted, #6b7280);
+  line-height: 1.7;
+}
+
+.app-boot-progress {
+  height: 4px;
+  margin-top: 30px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--color-surface-soft, #eef6f2);
+}
+
+.app-boot-progress span {
+  display: block;
+  width: 42%;
+  height: 100%;
+  background: var(--color-primary, #4f8a75);
+  animation: runtime-boot-progress 1.15s ease-in-out infinite alternate;
+}
+
+.app-boot-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 28px;
+}
+
+.app-boot-actions button {
+  min-height: 42px;
+}
+
+.app-boot-details {
+  margin-top: 22px;
+  color: var(--color-muted, #6b7280);
+}
+
+.app-boot-details summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.app-boot-details code {
+  display: inline-block;
+  margin-top: 10px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: var(--color-surface-soft, #eef6f2);
+}
+
+.runtime-save-alert {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 100;
+  display: grid;
+  width: min(420px, calc(100vw - 32px));
+  gap: 4px;
+  padding: 16px;
+  border: 1px solid var(--color-danger, #c86767);
+  border-radius: 8px;
+  background: var(--color-surface, #fff);
+  box-shadow: 0 16px 40px rgba(31, 41, 51, 0.14);
+}
+
+.runtime-save-alert span {
+  color: var(--color-muted, #6b7280);
+  line-height: 1.5;
+}
+
+.runtime-save-alert code {
+  margin-top: 4px;
+  color: var(--color-danger, #c86767);
+  font-size: 12px;
+}
+
+@keyframes runtime-boot-progress {
+  from { transform: translateX(-10%); }
+  to { transform: translateX(150%); }
+}
+
+@media (max-width: 600px) {
+  .app-boot-screen {
+    padding: 16px;
+  }
+
+  .app-boot-panel {
+    padding: 28px 22px;
+  }
+
+  .app-boot-panel h1 {
+    font-size: 25px;
+  }
+
+  .app-boot-actions {
+    flex-direction: column;
+  }
+
+  .app-boot-actions button {
+    width: 100%;
+  }
+
+  .runtime-save-alert {
+    right: 16px;
+    bottom: 16px;
+  }
+}
+
 * {
   box-sizing: border-box;
 }
@@ -46,6 +206,10 @@ button {
   display: grid;
   grid-template-columns: 248px minmax(0, 1fr);
   min-height: 100vh;
+}
+
+.migration-route-main {
+  min-width: 0;
 }
 
 .sidebar {
@@ -5598,4 +5762,92 @@ select,
 
 .install-steps span {
   color: var(--color-muted);
+}
+
+/* Task 8D startup recovery is deliberately isolated from the editable app shell. */
+.storage-recovery-screen {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 32px 24px;
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+.storage-recovery-panel {
+  width: min(880px, 100%);
+  display: grid;
+  gap: 22px;
+  padding: 28px;
+  border: 1px solid color-mix(in srgb, var(--color-warning) 34%, var(--color-border));
+  border-radius: 8px;
+  background: var(--color-surface);
+  box-shadow: 0 16px 40px color-mix(in srgb, var(--color-text) 8%, transparent);
+}
+
+.storage-recovery-panel h1,
+.storage-recovery-panel h2,
+.storage-recovery-panel p { margin: 0; }
+
+.storage-recovery-heading {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.storage-recovery-heading > span {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-warning) 14%, var(--color-surface));
+  color: var(--color-warning);
+}
+
+.storage-recovery-heading h1 { margin: 4px 0 8px; font-size: clamp(26px, 4vw, 38px); letter-spacing: 0; }
+.storage-recovery-heading p:last-child,
+.storage-recovery-exports > p { max-width: 680px; color: var(--color-muted); line-height: 1.7; }
+
+.storage-recovery-facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+
+.storage-recovery-facts > div {
+  min-width: 0;
+  padding: 13px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface-soft);
+}
+
+.storage-recovery-facts dt { color: var(--color-muted); font-size: 12px; }
+.storage-recovery-facts dd { margin: 5px 0 0; overflow-wrap: anywhere; font-weight: 760; }
+.storage-recovery-actions,
+.storage-recovery-exports > div { display: flex; flex-wrap: wrap; gap: 10px; }
+.storage-recovery-actions button,
+.storage-recovery-exports button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 42px; }
+.storage-recovery-exports { display: grid; gap: 12px; padding-top: 18px; border-top: 1px solid var(--color-border); }
+.storage-recovery-exports h2 { display: flex; align-items: center; gap: 8px; font-size: 18px; }
+.storage-recovery-exports button { padding: 9px 13px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-surface); color: var(--color-text); font-weight: 720; }
+.storage-recovery-details { padding: 10px 12px; border: 1px solid var(--color-border); border-radius: 8px; }
+.storage-recovery-details summary { cursor: pointer; font-weight: 720; }
+.storage-recovery-details code { display: block; margin-top: 8px; overflow-wrap: anywhere; color: var(--color-danger); }
+
+@media (max-width: 700px) {
+  .storage-recovery-screen { place-items: start center; padding: 18px 16px; }
+  .storage-recovery-panel { padding: 20px 16px; }
+  .storage-recovery-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .storage-recovery-actions,
+  .storage-recovery-exports > div { display: grid; grid-template-columns: 1fr; }
+  .storage-recovery-actions button,
+  .storage-recovery-exports button { width: 100%; white-space: normal; }
+}
+
+@media (max-width: 390px) {
+  .storage-recovery-facts { grid-template-columns: 1fr; }
 }

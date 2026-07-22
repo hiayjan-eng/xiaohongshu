@@ -121,11 +121,11 @@ Task 5 结束后仍然不允许执行真实迁移。Task 6 的输入应是 Task 
 
 | 项目 | 内容 |
 |---|---|
-| 目标 | 用户确认后写入 IndexedDB staging，校验通过后切换 activeStorage；失败可回滚。 |
-| 修改文件 | storage-service migration executor、activeStorage resolver、测试文件。 |
+| 目标 | 用户确认后写入 IndexedDB staging 并校验；保持 activeStorage 为 localStorage，失败可回滚。 |
+| 修改文件 | storage-service migration executor、checkpoint/backup/lock、测试文件。 |
 | 不修改文件 | 扩展扫描逻辑、分类、AI、页面大布局。 |
 | 输入 | Task 3 IndexedDbAdapter、Task 5 validator。 |
-| 输出 | `runMigration()`、`rollbackMigration()`、迁移锁、BroadcastChannel 事件。 |
+| 输出 | `MigrationExecutor`、Resume/Rollback、迁移 writer lock 和持久化 checkpoint。 |
 | 自动化测试 | 迁移中刷新恢复、重复执行不重复插入、失败不切换、回滚读取 localStorage、多标签锁。 |
 | 人工验收 | 测试 profile 执行迁移，导出报告，回滚后数据仍在。 |
 | 失败停止条件 | 任何场景会删除或覆盖 localStorage 原始数据。 |
@@ -153,17 +153,17 @@ Task 5 结束后仍然不允许执行真实迁移。Task 6 的输入应是 Task 
 
 | 项目 | 内容 |
 |---|---|
-| 目标 | IndexedDB 作为 activeStorage 后，导入、搜索、收藏池、专辑、行动卡、PlanCard、设置继续可用；localStorage 可回滚。 |
-| 修改文件 | active storage resolver、AppState facade 或 repository 接入点、E2E。 |
+| 目标 | 按 Task 8A-E 建立 Runtime 等价性、source drift、Bootstrap/Journal、两阶段激活、Recovery 和发布验收。 |
+| 修改文件 | storage Runtime、Web bootstrap、AppState controller、activation/recovery UI 与 E2E。 |
 | 不修改文件 | 扩展扫描内部逻辑、分类 taxonomy、真实 AI、Supabase。 |
 | 输入 | Task 1-7 全部完成。 |
-| 输出 | Phase 1 可上线版本。 |
+| 输出 | 默认仍 legacy、用户主动启用且可安全恢复的 Phase 1 可发布版本。 |
 | 自动化测试 | `pnpm check`、legacy localStorage fixture 迁移、IndexedDB clean profile、回滚、扩展导入 payload 写入 active adapter。 |
 | 人工验收 | 干净浏览器和有旧数据浏览器各跑一遍；导入、搜索、确认专辑、生成行动卡、计划延期/取消、主题切换、扩展导入回归。 |
-| 失败停止条件 | IndexedDB 打开失败无法回退，或任何用户数据丢失。 |
+| 失败停止条件 | 任一数据丢失、双写、source drift 未阻断、Marker/Journal 不可恢复或静默 fallback。 |
 | 是否允许 commit | 允许。 |
-| 是否允许 deploy | 允许，必须先通过完整门禁和 production smoke。 |
-| 工作量 | L |
+| 是否允许 deploy | 仅 Task 8E 完整门禁通过并获得用户新授权后允许。 |
+| 工作量 | XL |
 
 ## 迁移影响矩阵
 
@@ -189,10 +189,10 @@ Task 5 结束后仍然不允许执行真实迁移。Task 6 的输入应是 Task 
 
 1. **扩展导入 payload 进入 Web 后走哪个 Adapter**：进入当前 active Adapter。未迁移时写 localStorage facade；迁移完成后写 IndexedDB facade。
 2. **迁移期间是否允许继续导入**：不允许写操作。导入、复活、专辑确认和计划更新都显示“正在升级本地数据，请稍后再试”。
-3. **多标签页同时迁移**：使用 localStorage 迁移锁 + BroadcastChannel。第二个标签页只能查看状态，不能启动迁移。
+3. **多标签页同时迁移/激活**：迁移继续使用 Web Locks writer lock；激活和 Runtime 写入使用 authority Web Lock，并以 BroadcastChannel/storage event 通知。禁止 production localStorage lease fallback。
 4. **localStorage 和 IndexedDB 不双向写入**：activeStorage 是单一写目标。localStorage 原始数据只读保留。
-5. **activeStorage 标识保存位置**：localStorage 小 key + IndexedDB metadata 镜像。这样启动时能快速判断，但用户数据不放在该 key。
-6. **数据库打开失败如何回退**：显示中文错误，自动切回 LocalStorageAdapter 只读/可用模式，并提示用户导出备份或稍后重试。
+5. **activeStorage 标识保存位置**：Bootstrap Marker + IndexedDB Activation Journal；必须交叉验证，不能只信一个布尔值。
+6. **数据库打开失败如何恢复**：commit 前保持 legacy active；commit 后进入 Recovery Screen，不自动回到可写 localStorage。
 
 ## 推荐第一实施任务
 
@@ -299,3 +299,36 @@ Task 3 已将 `IndexedDbAdapter` 落在 `packages/storage-service/src/indexeddb-
 ### 对后续任务的影响
 
 Task 4 现在可以基于稳定的 adapter contract 做只读 localStorage snapshot 和备份导出。Task 4 仍然不能调用会自动写 demo 数据的 `loadAppState`，也不能将 Snapshot 导入 IndexedDB。Task 5 可以复用 IndexedDbAdapter 和 MemoryAdapter 的 import/transaction 行为来做 migration preview 和引用校验。Task 6 才允许讨论真实迁移执行、activeStorage 切换、多标签 writer lock、失败回滚和设置页接入。
+
+## Task 6 执行补充：MigrationExecutor 已完成底层能力
+
+Task 6 当前完成的是 storage-service 内部执行器，不是产品运行时接入。新增源码范围为 `packages/storage-service/src/migration-executor.ts`、`migration-lock.ts`、`migration-executor-errors.ts` 以及对应测试。它没有修改 `apps/`、扩展、分类服务、ActionCard/PlanCard 业务逻辑、`loadAppState`、`persistAppState` 或部署配置。
+
+本任务完成的能力包括：显式用户确认门、单写入者锁、target adapter 可用性检查、目标业务 stores 空库保护、Memory staging 校验、backup 持久化、store 级 checkpoint、逐 store 写入和验证、失败后 resume、completed/idempotent 再执行、rollback、rollback failure 标记、取消信号、错误脱敏和进度回调。测试同时覆盖 MemoryAdapter 和 fake-indexeddb 注入的 IndexedDbAdapter smoke。
+
+当前仍然延后的能力包括：设置页迁移 UI、真实用户 localStorage 读取入口、下载按钮、activeStorage 切换、localStorage 启动 flag、多标签页 BroadcastChannel UI 锁定、迁移期间产品写操作锁定、生产 smoke 和部署。Task 7 才能把这些库能力放进设置页，并且必须继续保持“用户预览、备份、确认后才执行”的顺序。
+
+Task 6 验收测试新增 20 个左右的迁移执行相关用例，其中锁 5 个、执行器 15 个。storage-service 单包测试现在覆盖 MemoryAdapter、IndexedDbAdapter、Legacy Snapshot、Migration Preview、Migration Lock 和 Migration Executor。后续 Task 7 不应重新实现执行器，而应调用这些已测试的 API。
+## Task 6.1：迁移执行器加固
+
+Task 6.1 修复 Task 6 独立审计中发现的 blocking gap 和明确 high risk，范围仍限于 `packages/storage-service`、测试和文档。它没有接入 Web 页面，没有读取真实 localStorage，没有切换 activeStorage，也没有部署。
+
+完成内容：
+
+- Backup 写入前严格验证 envelope，写入后 read-back、重算 SHA-256、parse、再次 verify，并写入 `verifiedAt`。
+- Backup 采用 compare-before-create 语义；相同 id 不同内容会阻止迁移，不会覆盖旧备份。
+- Store checkpoint checksum 改为 SHA-256 canonical JSON，Web Crypto 不可用时停止执行。
+- IndexedDB 执行默认强制 Web Locks；memory lock 只用于 MemoryAdapter 或明确测试路径。
+- Preflight 显式比对 preview、plan、expected option、target adapter actual schemaVersion。
+- 新 execute 扫描全部 `migrationMetadata`，阻止其他未解决 migration。
+- Final verification 复用 Task 5 语义验证，覆盖引用完整性和用户手动数据保留。
+- Resume 重新读取并验证 persisted backup，不只信任 metadata。
+- `rollback_failed` 支持再次显式 rollback。
+
+当前结论：Task 6.1 允许进入 Task 7A 的只读设置页预览实现；Task 7B 必须使用 `WebLocksMigrationLockProvider`，不得开启任何 test-only lock option。合并 main、真实用户迁移和 activeStorage 切换仍属于后续单独任务。
+
+## Task 8 实施拆分补充
+
+Task 8 不作为单一 Codex goal 实施，固定拆为：8A Runtime/LocalStorage 兼容、8B IndexedDB Runtime 与 AppState 等价、8C source drift 与 activation prepare、8D 两阶段激活与 Recovery Screen、8E 全链路验收和发布。8A 至 8C 不切换 activeStorage；8D 仅在隔离 Profile 验证；8E 通过并获得用户新授权后才允许合并和发布。
+
+完整输入、测试和停止条件以 `TASK8_IMPLEMENTATION_PLAN.md` 为准。

@@ -13,6 +13,7 @@
     "deploy:check": "pnpm check",
     "verify:prod": "node scripts/verify-production.mjs",
     "test:e2e": "pnpm --filter @revival/web test:e2e",
+    "test:e2e:task8e": "pnpm --filter @revival/web test:e2e:task8e",
     "test:e2e:ui": "pnpm --filter @revival/web test:e2e:ui",
     "test:e2e:headed": "pnpm --filter @revival/web test:e2e:headed",
     "preview:start": "powershell -ExecutionPolicy Bypass -File scripts/start-web-preview.ps1",

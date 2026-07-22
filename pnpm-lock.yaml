@@ -43,6 +43,12 @@ importers:
       '@revival/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types
+      '@revival/storage-runtime':
+        specifier: workspace:*
+        version: link:../../packages/storage-runtime
+      '@revival/storage-service':
+        specifier: workspace:*
+        version: link:../../packages/storage-service
       '@vitejs/plugin-react':
         specifier: ^4.3.1
         version: 4.7.0(vite@5.4.21)
@@ -130,6 +136,22 @@ importers:
         version: link:../shared-types
 
   packages/shared-types: {}
+
+  packages/storage-runtime:
+    dependencies:
+      '@revival/database':
+        specifier: workspace:*
+        version: link:../database
+      '@revival/shared-types':
+        specifier: workspace:*
+        version: link:../shared-types
+      '@revival/storage-service':
+        specifier: workspace:*
+        version: link:../storage-service
+    devDependencies:
+      fake-indexeddb:
+        specifier: ^6.2.5
+        version: 6.2.5
 
   packages/storage-service:
     dependencies:

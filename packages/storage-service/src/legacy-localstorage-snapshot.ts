@@ -21,6 +21,7 @@ import {
 } from "./contracts";
 import { StorageError } from "./errors";
 import { assertNoDangerousJsonKeys, canonicalJsonStringify, cloneJsonSafe, DANGEROUS_JSON_KEYS } from "./json-utils";
+import { createRuntimeMetadataSettings } from "./runtime-metadata";
 
 export interface ReadonlyStorageLike {
   readonly length: number;
@@ -638,7 +639,33 @@ function createNormalizedStorageSnapshot(
   addRecords(records, counts, "classificationCorrections", collectStoreRecords("classificationCorrections", state.classificationCorrections, context));
   addRecords(records, counts, "searchLogs", collectStoreRecords("searchLogs", state.searchLogs, context));
 
-  const settings = collectLegacySettings(rawRecords, context, createdAt, options);
+  const runtimeState = {
+    ...(state as unknown as AppState),
+    savedItems: records.savedItems ?? [],
+    actionCards: records.actionCards ?? [],
+    planCards: records.planCards ?? [],
+    classificationCorrections: records.classificationCorrections ?? [],
+    searchLogs: records.searchLogs ?? [],
+    smartAlbums: records.smartAlbums ?? [],
+    importBatches: records.importBatches ?? [],
+    importBatchItems: records.importBatchItems ?? []
+  } satisfies AppState;
+  let runtimeSettings: StoredSetting[] = [];
+  try {
+    runtimeSettings = createRuntimeMetadataSettings(runtimeState, createdAt);
+  } catch {
+    context.issues.push(createIssue({
+      code: "INVALID_APP_STATE",
+      severity: "error",
+      key: LEGACY_APP_STATE_STORAGE_KEY,
+      message: "Legacy AppState cannot produce required runtime metadata.",
+      recoverable: false
+    }));
+  }
+  const settings = [
+    ...collectLegacySettings(rawRecords, context, createdAt, options),
+    ...runtimeSettings
+  ];
   addRecords(records, counts, "settings", settings);
 
   checkBrokenReferences(records, context);

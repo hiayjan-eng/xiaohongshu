@@ -1,7 +1,7 @@
-﻿import { defineConfig } from "@playwright/test";
+import { defineConfig } from "@playwright/test";
 
-const port = Number(process.env.E2E_PORT ?? 5173);
-const baseURL = process.env.E2E_BASE_URL ?? `http://localhost:${port}`;
+const port = Number(process.env.E2E_PORT ?? 5199);
+const baseURL = process.env.E2E_BASE_URL ?? `http://127.0.0.1:${port}`;
 const browserChannel = process.env.PLAYWRIGHT_CHANNEL || "chrome";
 
 export default defineConfig({
@@ -11,6 +11,7 @@ export default defineConfig({
     timeout: 8_000
   },
   fullyParallel: false,
+  workers: process.env.CI ? 1 : undefined,
   retries: process.env.CI ? 1 : 0,
   reporter: [
     ["list"],
@@ -28,9 +29,9 @@ export default defineConfig({
     video: "off"
   },
   webServer: {
-    command: `pnpm run dev -- --host 0.0.0.0 --port ${port}`,
+    command: `node node_modules/vite/bin/vite.js --host 127.0.0.1 --port ${port}`,
     url: baseURL,
-    reuseExistingServer: true,
+    reuseExistingServer: false,
     timeout: 120_000,
     env: {
       CI: "true"

@@ -259,7 +259,7 @@ function buildMatchProfile(cluster: AlbumCluster): SmartAlbumMatchProfile {
 function pickAlbumKeywords(items: SavedItem[]): string[] {
   const counts = new Map<string, number>();
   items.forEach((item) => {
-    [item.contentSubDomain || item.subCategory, item.savedIntent, ...item.secondaryIntents, ...item.keywords, ...item.entities.map((entity) => entity.value)]
+    [item.contentSubDomain || item.subCategory, item.savedIntent, ...(item.secondaryIntents ?? []), ...item.keywords, ...item.entities.map((entity) => entity.value)]
       .map((keyword) => String(keyword || "").trim())
       .filter((keyword) => keyword.length >= 2 && keyword.length <= 18)
       .forEach((keyword) => counts.set(keyword, (counts.get(keyword) ?? 0) + 1));

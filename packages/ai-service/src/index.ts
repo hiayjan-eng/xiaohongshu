@@ -416,8 +416,9 @@ function compactSavedItemForAi(item: SavedItem): SavedItem {
   };
 }
 
-function truncateForAi(value: string, maxLength: number): string {
-  return value.length <= maxLength ? value : `${value.slice(0, maxLength)}…`;
+function truncateForAi(value: string | undefined, maxLength: number): string {
+  const text = value ?? "";
+  return text.length <= maxLength ? text : `${text.slice(0, maxLength)}…`;
 }
 type CategoryRule = {
   category: Category;

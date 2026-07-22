@@ -1,0 +1,20 @@
+{
+    "name":  "@revival/storage-runtime",
+    "version":  "0.1.0",
+    "private":  true,
+    "type":  "module",
+    "main":  "./src/index.ts",
+    "types":  "./src/index.ts",
+    "scripts":  {
+                    "typecheck":  "tsc -p tsconfig.json --noEmit",
+                    "test":  "tsc -p tsconfig.test.json --noEmit \u0026\u0026 tsc -p tsconfig.runtime-test.json \u0026\u0026 node tests/prepare-runtime-test.cjs \u0026\u0026 node node_modules/.cache/storage-runtime-test/storage-runtime/tests/run-tests.js"
+                },
+    "dependencies":  {
+                         "@revival/database":  "workspace:*",
+                         "@revival/storage-service":  "workspace:*",
+                         "@revival/shared-types":  "workspace:*"
+                     },
+    "devDependencies":  {
+                            "fake-indexeddb":  "^6.2.5"
+                        }
+}
