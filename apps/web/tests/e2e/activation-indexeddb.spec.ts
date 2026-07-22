@@ -1,5 +1,5 @@
 import fs from "node:fs/promises";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { collectConsoleErrors, expectNoConsoleErrors } from "./helpers";
 import { seedMigrationFixture } from "./migration-preview-fixtures";
 
@@ -33,8 +33,7 @@ const LEGACY_KEYS = ["collection-revival-system:v1", "collection-revival-theme",
     await page.getByTestId("activation-preflight-idle").getByRole("button", { name: "检查启用条件" }).click();
     await expect(page.getByTestId("activation-preflight-passed")).toBeVisible({ timeout: 30_000 });
     await page.getByTestId("activation-preflight-passed").getByRole("button", { name: "确认准备启用" }).click();
-    const prepareBoxes = page.getByTestId("activation-prepare-confirmation").getByRole("checkbox");
-    for (let index = 0; index < 4; index += 1) await prepareBoxes.nth(index).check();
+    await checkCheckboxGroup(page, page.getByTestId("activation-prepare-confirmation"), 4);
     await page.getByTestId("activation-prepare-confirmation").getByRole("button", { name: "准备启用" }).click();
     await expect(page.getByTestId("activation-prepared")).toBeVisible({ timeout: 30_000 });
 
@@ -45,7 +44,7 @@ const LEGACY_KEYS = ["collection-revival-system:v1", "collection-revival-theme",
     const formalBoxes = formal.getByRole("checkbox");
     await expect(formalBoxes).toHaveCount(4);
     await expect(formal.getByRole("button", { name: "开始正式启用" })).toBeDisabled();
-    for (let index = 0; index < 4; index += 1) await formalBoxes.nth(index).check();
+    await checkCheckboxGroup(page, formal, 4);
 
     const controlledReload = page.waitForEvent("framenavigated", (frame) => frame === page.mainFrame());
     await formal.getByRole("button", { name: "开始正式启用" }).click();
@@ -139,13 +138,26 @@ async function completeMigration(page: Page) {
   await download;
   await page.getByTestId("continue-to-migration-confirmation").click();
   const confirmation = page.getByTestId("migration-confirmation-step");
-  const checkboxes = confirmation.getByRole("checkbox");
-  for (let index = 0; index < await checkboxes.count(); index += 1) await checkboxes.nth(index).check();
+  await checkCheckboxGroup(page, confirmation, 4);
   await page.getByTestId("start-migration-execution").click();
   await expect(page.getByTestId("migration-completed-not-activated")).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId("activation-preflight-idle")).toBeVisible();
 }
 
+async function checkCheckboxGroup(page: Page, container: Locator, expectedCount: number) {
+  const checkboxes = container.getByRole("checkbox");
+  await expect(checkboxes).toHaveCount(expectedCount);
+  for (let index = 0; index < expectedCount; index += 1) {
+    const checkbox = checkboxes.nth(index);
+    await expect(checkbox).toBeAttached();
+    await expect(checkbox).toBeVisible();
+    await expect(checkbox).toBeEnabled();
+    await checkbox.scrollIntoViewIfNeeded();
+    await checkbox.focus();
+    await page.keyboard.press("Space");
+    await expect(checkboxes.nth(index)).toBeChecked();
+  }
+}
 async function readMarker(page: Page): Promise<Record<string, unknown> | null> {
   return page.evaluate((key) => { const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : null; }, MARKER_KEY);
 }
