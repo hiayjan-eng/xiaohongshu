@@ -74,8 +74,11 @@ const LEGACY_KEYS = ["collection-revival-system:v1", "collection-revival-theme",
       const settings = await readRecords(page, "settings") as Array<{ key?: string; value?: unknown }>;
       return settings.find((entry) => entry.key === "collection-revival-theme")?.value;
     }).toBe("dawn");
+    await waitForSettingsTransactionBarrier(page);
     expect(await readLegacy(page)).toEqual(legacyBefore);
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await expect(page.getByTestId("indexeddb-storage-status")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId("storage-recovery-screen")).toHaveCount(0);
     await expect(page.getByTestId("theme-dawn")).toHaveAttribute("aria-pressed", "true", { timeout: 30_000 });
     expect(await readLegacy(page)).toEqual(legacyBefore);
 
@@ -158,6 +161,21 @@ async function checkCheckboxGroup(page: Page, container: Locator, expectedCount:
     await expect(checkboxes.nth(index)).toBeChecked();
   }
 }
+async function waitForSettingsTransactionBarrier(page: Page): Promise<void> {
+  await page.evaluate(() => new Promise<void>((resolve, reject) => {
+    const request = indexedDB.open("collection-revival-local");
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const database = request.result;
+      const transaction = database.transaction("settings", "readwrite");
+      transaction.objectStore("settings").get("collection-revival-theme");
+      transaction.oncomplete = () => { database.close(); resolve(); };
+      transaction.onerror = () => { database.close(); reject(transaction.error); };
+      transaction.onabort = () => { database.close(); reject(transaction.error); };
+    };
+  }));
+}
+
 async function readMarker(page: Page): Promise<Record<string, unknown> | null> {
   return page.evaluate((key) => { const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : null; }, MARKER_KEY);
 }
