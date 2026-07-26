@@ -45,6 +45,9 @@ test.describe("MVP empty states and responsive basics", () => {
         userNote: "响应式回归测试"
       });
       await reviveImportedItem(page, imported.id);
+      await page.reload();
+      await page.goto("/detail");
+      await expect(page.getByTestId("add-to-plan-card")).toBeVisible();
       await page.goto("/dashboard");
       await expect(page.getByRole("heading", { name: "先把旧收藏捡回来" })).toBeVisible();
       const globalSearch = page.getByRole("textbox", { name: "全局搜索" });
