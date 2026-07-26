@@ -10,7 +10,14 @@ export const TASK8E_LEGACY_KEYS = [STORAGE_KEY, TASK8E_THEME_KEY, ACHIEVEMENT_ST
 export const TASK8E_ARTIFACT_DIR = "test-results/task8e-independent-acceptance";
 
 const NOW = "2026-07-19T08:00:00.000Z";
-const TODAY = new Date().toISOString().slice(0, 10);
+const TODAY = localCalendarDate(new Date());
+
+function localCalendarDate(value: Date): string {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
 
 export async function seedCompactLegacyFixture(page: Page, itemCount: number): Promise<void> {
   const state = makeCompactLegacyState(itemCount);
