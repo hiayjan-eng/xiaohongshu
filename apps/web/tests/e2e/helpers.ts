@@ -179,17 +179,8 @@ export async function reviveImportedItem(page: Page, itemId: string) {
   await expect(reviveButton).toBeVisible();
   await expect(reviveButton).toBeEnabled();
   await reviveButton.scrollIntoViewIfNeeded();
-  await reviveButton.click({ trial: true });
-  const box = await reviveButton.boundingBox();
-  if (!box) throw new Error("Imported item revive button has no clickable bounding box.");
-  await Promise.all([
-    expect(reviveButton).toHaveCount(0),
-    (async () => {
-      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-      await page.mouse.down();
-      await page.mouse.up();
-    })()
-  ]);
+  await reviveButton.click();
+  await expect(reviveButton).toHaveCount(0);
   await expect.poll(async () => {
     const state = await readAppState(page);
     return state.actionCards.some((card) => card.savedItemId === itemId);
