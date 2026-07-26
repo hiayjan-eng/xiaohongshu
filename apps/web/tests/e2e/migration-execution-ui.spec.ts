@@ -29,14 +29,20 @@ test.describe("Task 7B migration execution UI", () => {
     await deleteTask7bDatabase(page);
   });
 
-  test.afterEach(async ({ page }) => {
-    await deleteTask7bDatabase(page);
+  test.afterEach(async ({ page }, testInfo) => {
+    if (page.isClosed()) return;
+    await deleteTask7bDatabase(page).catch((error) => {
+      testInfo.annotations.push({
+        type: "cleanup-warning",
+        description: error instanceof Error ? error.message : "Task 7B database cleanup failed."
+      });
+    });
   });
 
   test("confirmed data migrates into IndexedDB but remains completed-not-activated", async ({ page }) => {
     await seedMigrationFixture(page);
     const errors = collectConsoleErrors(page);
-    await page.goto("/settings/data-migration");
+    await openMigrationDataPage(page);
     const before = await readLocalStorageSnapshot(page);
     await installTask7aBoundarySpies(page);
 
@@ -92,7 +98,7 @@ test.describe("Task 7B migration execution UI", () => {
 
   test("backup and four explicit confirmations gate the first IndexedDB open", async ({ page }) => {
     await seedMigrationFixture(page);
-    await page.goto("/settings/data-migration");
+    await openMigrationDataPage(page);
     await installTask7aBoundarySpies(page);
     await page.getByTestId("start-migration-inspection").click();
     await expect(page.getByTestId("migration-preview-step")).toBeVisible();
@@ -122,7 +128,7 @@ test.describe("Task 7B migration execution UI", () => {
       Object.defineProperty(Navigator.prototype, "locks", { configurable: true, get: () => undefined });
     });
     await seedMigrationFixture(page);
-    await page.goto("/settings/data-migration");
+    await openMigrationDataPage(page);
     const before = await readLocalStorageSnapshot(page);
     await installTask7aBoundarySpies(page);
     await reachConfirmation(page);
@@ -143,7 +149,7 @@ test.describe("Task 7B migration execution UI", () => {
 
   test("a non-empty target is never overwritten", async ({ page }) => {
     await seedMigrationFixture(page);
-    await page.goto("/settings/data-migration");
+    await openMigrationDataPage(page);
     await createNonEmptyTarget(page);
     const before = await readLocalStorageSnapshot(page);
     await reachConfirmation(page);
@@ -160,7 +166,7 @@ test.describe("Task 7B migration execution UI", () => {
 
   test("an existing writer lock blocks execution without a process-local fallback", async ({ page }) => {
     await seedMigrationFixture(page);
-    await page.goto("/settings/data-migration");
+    await openMigrationDataPage(page);
     await holdMigrationWriterLock(page);
     await reachConfirmation(page);
     await checkAllConfirmations(page);
@@ -178,7 +184,7 @@ test.describe("Task 7B migration execution UI", () => {
 
   test("a real IndexedDB write failure keeps the backup and metadata without completing", async ({ page }) => {
     await seedMigrationFixture(page);
-    await page.goto("/settings/data-migration");
+    await openMigrationDataPage(page);
     await createMalformedTarget(page);
     const before = await readLocalStorageSnapshot(page);
     await reachConfirmation(page);
@@ -200,7 +206,7 @@ test.describe("Task 7B migration execution UI", () => {
   test("safe stop leaves no half-written Store and never activates the target", async ({ page }) => {
     test.slow();
     await seedMigrationFixture(page, { itemCount: 3000 });
-    await page.goto("/settings/data-migration");
+    await openMigrationDataPage(page);
     const before = await readLocalStorageSnapshot(page);
     await reachConfirmation(page);
     await checkAllConfirmations(page);
@@ -238,7 +244,7 @@ test.describe("Task 7B migration execution UI", () => {
   test("mobile confirmation and completion have no horizontal overflow", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await seedMigrationFixture(page);
-    await page.goto("/settings/data-migration");
+    await openMigrationDataPage(page);
     await reachConfirmation(page);
     expect(await hasHorizontalOverflow(page)).toBe(false);
     await expect(page.getByTestId("start-migration-execution")).toBeVisible();
@@ -249,6 +255,10 @@ test.describe("Task 7B migration execution UI", () => {
   });
 });
 
+async function openMigrationDataPage(page: Page) {
+  await page.goto("/settings/data-migration", { waitUntil: "domcontentloaded" });
+  await expect(page.getByTestId("migration-data-upgrade-page")).toBeVisible();
+}
 async function reachConfirmation(page: Page) {
   await page.getByTestId("start-migration-inspection").click();
   await expect(page.getByTestId("migration-preview-step")).toBeVisible();

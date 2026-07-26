@@ -174,7 +174,13 @@ export async function seedEmptyState(page: Page) {
 
 
 export async function reviveImportedItem(page: Page, itemId: string) {
-  await page.getByTestId("revive-imported-item").click({ force: true });
+  const reviveButton = page.getByTestId("revive-imported-item");
+  await expect(reviveButton).toBeAttached();
+  await expect(reviveButton).toBeVisible();
+  await expect(reviveButton).toBeEnabled();
+  await reviveButton.scrollIntoViewIfNeeded();
+  await reviveButton.click();
+  await expect(reviveButton).toHaveCount(0);
   await expect.poll(async () => {
     const state = await readAppState(page);
     return state.actionCards.some((card) => card.savedItemId === itemId);
