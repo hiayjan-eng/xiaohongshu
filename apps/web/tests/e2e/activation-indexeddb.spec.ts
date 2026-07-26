@@ -32,7 +32,7 @@ const LEGACY_KEYS = ["collection-revival-system:v1", "collection-revival-theme",
 
     await page.getByTestId("activation-preflight-idle").getByRole("button", { name: "检查启用条件" }).click();
     await expect(page.getByTestId("activation-preflight-passed")).toBeVisible({ timeout: 30_000 });
-    await physicalClickAndWaitForPrepareConfirmation(
+    await clickAndWaitForPrepareConfirmation(
       page,
       page.getByTestId("activation-preflight-passed").getByRole("button", { name: "确认准备启用" })
     );
@@ -164,23 +164,13 @@ async function checkCheckboxGroup(page: Page, container: Locator, expectedCount:
     await expect(checkboxes.nth(index)).toBeChecked();
   }
 }
-async function physicalClickAndWaitForPrepareConfirmation(page: Page, button: Locator): Promise<void> {
+async function clickAndWaitForPrepareConfirmation(page: Page, button: Locator): Promise<void> {
   await expect(button).toBeAttached();
   await expect(button).toBeVisible();
   await expect(button).toBeEnabled();
-  await button.scrollIntoViewIfNeeded();
-  await button.click({ trial: true });
-  const box = await button.boundingBox();
-  if (!box) throw new Error("Task 8D prepare button has no clickable bounding box.");
   const confirmationReady = expect(page.getByTestId("activation-prepare-confirmation")).toBeVisible();
-  await Promise.all([
-    confirmationReady,
-    (async () => {
-      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-      await page.mouse.down();
-      await page.mouse.up();
-    })()
-  ]);
+  await button.click();
+  await confirmationReady;
 }
 async function waitForSettingsTransactionBarrier(page: Page): Promise<void> {
   await page.evaluate(() => new Promise<void>((resolve, reject) => {
