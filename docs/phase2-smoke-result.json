@@ -1,0 +1,12 @@
+{
+  "productionUrl": "https://xiaohongshu-green.vercel.app",
+  "startedAt": "2026-07-27T14:48:10.509Z",
+  "chromiumVersion": "150.0.7871.184",
+  "routes": [],
+  "freshUser": {},
+  "legacyFixture": {},
+  "errors": [],
+  "screenshots": [],
+  "finishedAt": "2026-07-27T14:48:18.689Z",
+  "failure": "page.goto: net::ERR_NETWORK_ACCESS_DENIED at https://xiaohongshu-green.vercel.app/\nCall log:\n\u001b[2m  - navigating to \"https://xiaohongshu-green.vercel.app/\", waiting until \"networkidle\"\u001b[22m\n"
+}
