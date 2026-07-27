@@ -1,0 +1,12 @@
+{
+  "productionUrl": "https://xiaohongshu-green.vercel.app",
+  "startedAt": "2026-07-27T14:48:52.660Z",
+  "chromiumVersion": "150.0.7871.184",
+  "routes": [],
+  "freshUser": {},
+  "legacyFixture": {},
+  "errors": [],
+  "screenshots": [],
+  "finishedAt": "2026-07-27T14:49:11.205Z",
+  "failure": "Route / did not render .app-shell"
+}
