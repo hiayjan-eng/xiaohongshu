@@ -21,7 +21,9 @@
     "test:e2e:ui": "pnpm --filter @revival/web test:e2e:ui",
     "test:e2e:headed": "pnpm --filter @revival/web test:e2e:headed",
     "preview:start": "powershell -ExecutionPolicy Bypass -File scripts/start-web-preview.ps1",
-    "preview:foreground": "powershell -ExecutionPolicy Bypass -File scripts/start-web-preview.ps1 -Foreground"
+    "preview:foreground": "powershell -ExecutionPolicy Bypass -File scripts/start-web-preview.ps1 -Foreground",
+    "deepseek:task": "node scripts/deepseek-worker/worker.mjs",
+    "test:deepseek-worker": "node scripts/deepseek-worker/test.mjs"
   },
   "engines": {
     "node": ">=20"
