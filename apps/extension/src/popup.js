@@ -63,6 +63,9 @@ const elements = {
   bridgeStatus: document.querySelector("#bridgeStatus"),
   scannerStatus: document.querySelector("#scannerStatus"),
   supportStatus: document.querySelector("#supportStatus"),
+  collectionSignals: document.querySelector("#collectionSignals"),
+  extractionSignals: document.querySelector("#extractionSignals"),
+  copyDiagnostics: document.querySelector("#copyDiagnostics"),
   selectorVersion: document.querySelector("#selectorVersion"),
   scanDiagnostics: document.querySelector("#scanDiagnostics"),
   status: document.querySelector("#status"),
@@ -103,6 +106,7 @@ async function init() {
   elements.redetectPage.addEventListener("click", refreshPageStatus);
   elements.importToWeb.addEventListener("click", importToWeb);
   elements.exportJson.addEventListener("click", exportJson);
+  elements.copyDiagnostics.addEventListener("click", copyDiagnostics);
   elements.selectAll.addEventListener("click", () => setAllSelected(true));
   elements.clearSelection.addEventListener("click", () => setAllSelected(false));
   elements.searchBox.addEventListener("input", () => {
@@ -378,25 +382,57 @@ async function openOrRefreshWebApp() {
 
 function updateDiagnostics(tabUrl, result) {
   const pageType = isWebAppUrl(tabUrl) ? "收藏复活 Web" : isXhsUrl(tabUrl) ? "小红书页面" : "其他页面";
+  const pageStatus = result.pageStatus || state.pageStatus;
+  const diagnostics = pageStatus?.diagnostics || state.scanState?.diagnostics;
   elements.pageType.textContent = pageType;
   elements.bridgeStatus.textContent = result.bridgeInjected ? "已注入" : isWebAppUrl(tabUrl) ? "未注入，刷新网页" : "不适用";
   elements.scannerStatus.textContent = result.scannerInjected ? "已注入" : isXhsUrl(tabUrl) ? "未注入，重新检测" : "不适用";
   elements.supportStatus.textContent = isXhsUrl(tabUrl)
-    ? result.pageStatus?.blocked
+    ? pageStatus?.blocked
       ? "页面受限，已停止"
-      : result.pageStatus?.activeTab === "收藏"
-        ? "已识别收藏页"
+      : pageStatus?.collectionPageConfirmed
+        ? pageStatus.extractionState === "EXTRACTION_EMPTY" ? "已确认收藏页，待提取诊断" : "已确认收藏页"
         : "疑似收藏页，需要确认"
-    : isWebAppUrl(tabUrl)
-      ? "可检测扩展连接"
-      : "不支持扫描";
-  const diagnostics = result.pageStatus?.diagnostics || state.scanState?.diagnostics;
-  elements.selectorVersion.textContent = result.pageStatus?.selectorVersion || state.scanState?.selectorVersion || "等待扫描";
+    : isWebAppUrl(tabUrl) ? "可检测扩展连接" : "不支持扫描";
+  elements.collectionSignals.textContent = pageStatus
+    ? `${pageStatus.collectionPageConfirmed ? "已确认" : "未确认"} / ${pageStatus.favoriteRouteSignal ? "fav 路由" : "无 fav 路由"} / ${pageStatus.activeFavoriteTab ? "活动收藏标签" : "无活动标签"}`
+    : "等待检测";
+  elements.extractionSignals.textContent = diagnostics
+    ? `${pageStatus?.containerType || "unknown"} / ${diagnostics.globalNoteLinkCount ?? 0} / ${diagnostics.globalDataNoteIdCount ?? 0}`
+    : "等待扫描";
+  elements.selectorVersion.textContent = pageStatus?.selectorVersion || state.scanState?.selectorVersion || "等待扫描";
   elements.scanDiagnostics.textContent = diagnostics
     ? `${diagnostics.candidateCardCount ?? 0} / ${diagnostics.validFavoriteCount ?? 0} / ${diagnostics.filteredCount ?? 0}`
     : "等待扫描";
 }
 
+async function copyDiagnostics() {
+  const pageStatus = state.pageStatus || {};
+  const diagnostics = pageStatus.diagnostics || state.scanState?.diagnostics || {};
+  const deidentified = {
+    pageConfirmed: Boolean(pageStatus.collectionPageConfirmed),
+    extractionState: pageStatus.extractionState || "UNKNOWN",
+    favoriteRouteSignal: Boolean(pageStatus.favoriteRouteSignal),
+    activeFavoriteTab: Boolean(pageStatus.activeFavoriteTab),
+    blocked: Boolean(pageStatus.blocked),
+    rootType: pageStatus.containerType || "unknown",
+    candidateCardCount: diagnostics.candidateCardCount ?? 0,
+    primaryVisibleLinkCount: diagnostics.primaryVisibleLinkCount ?? 0,
+    globalVisibleLinkCount: diagnostics.globalVisibleLinkCount ?? 0,
+    globalNoteLinkCount: diagnostics.globalNoteLinkCount ?? 0,
+    globalDataNoteIdCount: diagnostics.globalDataNoteIdCount ?? 0,
+    validFavoriteCount: diagnostics.validFavoriteCount ?? 0,
+    filteredCount: diagnostics.filteredCount ?? 0,
+    filteredReasons: diagnostics.filteredReasons || {},
+    selectorVersion: pageStatus.selectorVersion || state.scanState?.selectorVersion || "unknown"
+  };
+  try {
+    await navigator.clipboard.writeText(JSON.stringify(deidentified, null, 2));
+    setStatus("已复制不含标题、作者或链接的诊断信息。");
+  } catch (error) {
+    setStatus(`无法复制诊断：${error instanceof Error ? error.message : "请检查浏览器剪贴板权限"}`);
+  }
+}
 function updatePageHealth(tabUrl, pageStatus) {
   const isXhs = isXhsUrl(tabUrl);
   elements.openCollection.classList.toggle("hidden", isXhs);
