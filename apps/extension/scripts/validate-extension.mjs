@@ -53,7 +53,7 @@ const background = readFileSync(new URL("../src/background.js", import.meta.url)
 
 const popupMarkers = ["CHECKPOINT_KEY", "SCAN_STATE_KEY", "pauseScan", "resumeScan", "retryScan", "browser-extension-beta", "autoScrollToggle", "clearCheckpoint", "openOrRefreshWebApp", "ensureWebBridgeScript", "bridgeStatus", "scannerStatus", "progressTrack", "filterSelect"];
 const bridgeMarkers = ["COLLECTION_REVIVAL_EXTENSION_READY", "COLLECTION_REVIVAL_EXTENSION_PING", "COLLECTION_REVIVAL_EXTENSION_PONG", "COLLECTION_REVIVAL_EXTENSION_SCAN_STATUS_REQUEST", "COLLECTION_REVIVAL_EXTENSION_SCAN_STATUS", "requestId", "protocolVersion", "collection-revival-web-bridge-v1", "collectionRevivalExtensionVersion", "collection-revival-extension-bridge", "scan-progress-sync"];
-const scannerMarkers = ["REVIVAL_GET_PAGE_STATUS", "REVIVAL_START_SCAN", "REVIVAL_PAUSE_SCAN", "REVIVAL_RESUME_SCAN", "REVIVAL_GET_SCAN_STATE", "scrollOneStep", "findCollectionRoot", "isElementVisible", "normalizeScannedText", "blocked", "验证码", "xhs-fav-container-v2"];
+const scannerMarkers = ["REVIVAL_GET_PAGE_STATUS", "REVIVAL_START_SCAN", "REVIVAL_PAUSE_SCAN", "REVIVAL_RESUME_SCAN", "REVIVAL_GET_SCAN_STATE", "scrollOneStep", "findCollectionRoot", "isElementVisible", "normalizeScannedText", "blocked", "验证码", "xhs-fav-visible-cards-v3"];
 const backgroundMarkers = ["onInstalled", "onStartup", "executeScript", "web-bridge.js"];
 for (const marker of popupMarkers) {
   if (!popupJs.includes(marker) && !popupHtml.includes(marker)) throw new Error(`Missing popup beta capability marker: ${marker}`);
@@ -81,7 +81,7 @@ function assertPopupStructure() {
     "more-settings"
   ], "popup first-screen order");
 
-  for (const limitValue of ['value="200"', 'value="500"', 'value="1000"', 'value="all"']) {
+  for (const limitValue of ['value="10"', 'value="20"']) {
     if (!popupHtml.includes(limitValue)) throw new Error(`Missing scan limit option: ${limitValue}`);
   }
 
@@ -146,8 +146,8 @@ function assertScannerBehavior() {
     throw new Error("Non-Xiaohongshu URL should not be recognized");
   }
 
-  const milestones = exports.updateMilestones([], 1000);
-  for (const expected of ["已找回 100 条旧收藏", "已找回 300 条旧收藏", "已找回 500 条旧收藏", "已找回 1000 条旧收藏"]) {
+  const milestones = exports.updateMilestones([], 20);
+  for (const expected of ["已找回 10 条旧收藏", "已找回 20 条旧收藏"]) {
     if (!milestones.includes(expected)) throw new Error(`Missing progress milestone: ${expected}`);
   }
 
@@ -195,9 +195,10 @@ function assertScannerRangeWithMockDom() {
   if (!titles.includes("我自己也收藏的灵感")) throw new Error("Own authored but favorited card should not be removed");
   if (titles.includes("我发布但没收藏")) throw new Error("Hidden published note should not enter scan results");
   if (titles.includes("主页可见发布笔记")) throw new Error("Visible non-favorite profile note should not enter scan results");
+  if (result.pageStatus?.diagnostics?.validFavoriteCount !== result.items.length) throw new Error("Scanner diagnostics should expose valid favorite counts");
   const ownFavorite = result.items.find((item) => item.title === "我自己也收藏的灵感");
   if (!ownFavorite?.isLikelyOwnPost) throw new Error("Own authored favorite should be marked, not deleted");
-  if (result.items.some((item) => item.isVisible !== true || item.selectorVersion !== "xhs-fav-container-v2")) {
+  if (result.items.some((item) => item.isVisible !== true || item.selectorVersion !== "xhs-fav-visible-cards-v3")) {
     throw new Error("Scanned items should include visibility and selector diagnostics");
   }
 }
