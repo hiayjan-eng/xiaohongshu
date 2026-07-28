@@ -39,8 +39,7 @@ const webBridgeEntry = contentScripts.find((entry) => (entry.js || []).includes(
 const scannerEntry = contentScripts.find((entry) => (entry.js || []).includes("src/xhs-scanner.js"));
 if (!webBridgeEntry) throw new Error("Missing Web Bridge content script entry");
 if (!scannerEntry) throw new Error("Missing Xiaohongshu scanner content script entry");
-if (manifest.background?.service_worker !== "src/background.js",
-  "src/build-profile.js") throw new Error("Missing background service worker");
+if (manifest.background?.service_worker !== "src/background.js") throw new Error("Missing background service worker");
 
 for (const script of ["popup.js", "web-bridge.js", "xhs-scanner.js", "background.js"]) {
   execFileSync(process.execPath, ["--check", fileURLToPath(new URL(`../src/${script}`, import.meta.url))], { stdio: "inherit" });
@@ -193,7 +192,7 @@ function assertRealCollectionDomFixture() {
   const exports = loadScannerTestExports(fixture, "https://www.xiaohongshu.com/user/profile/fixture?subTab=note&tab=fav");
   const status = exports.getPageStatus();
   if (!status.collectionPageConfirmed || !status.favoriteRouteSignal || status.extractionState !== "EXTRACTION_READY") {
-    throw new Error("Real collection URL fixture should confirm the favorites page before extraction.");
+    throw new Error(`Real collection URL fixture should confirm the favorites page before extraction: ${JSON.stringify(status)}`);
   }
   const result = exports.scanVisibleXhsCards();
   if (result.items.length === 0) throw new Error("Real collection fixture should extract visible cards through fallback candidates.");
