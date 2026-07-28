@@ -1,33 +1,62 @@
 # P0 Preview 发布门报告
 
 - 分支：`p0-core-revival-loop-rescue`
-- 本地 HEAD：`1b9fd17be455ebdcfface1baf697be63f2979602`
-- 远程分支 SHA：`1b9fd17be455ebdcfface1baf697be63f2979602`
-- 本轮结论：完整发布门未通过；没有创建 Preview。
+- 本地 HEAD：`50863362d4861823c34e384b0c86764e5c1e61db`
+- 远程分支 SHA：`50863362d4861823c34e384b0c86764e5c1e61db`
+- Preview deployment：`dpl_EVMWtA4UczrWGJCYuhzUkngRaP5Y`
+- Preview URL：`https://xiaohongshu-4fyatlvv9-ayj.vercel.app`
+- 分支别名：`https://xiaohongshu-git-p0-core-revival-loop-rescue-ayj.vercel.app`
+- Vercel target / state：Preview / Ready
 
-## 本轮两项定向修复
+## legacy settings 最后阻断
 
-| 阻断项 | 根因分类 | 证据与处理 | 定向回归 |
-| --- | --- | --- | --- |
-| `reward-achievement.spec.ts` | 产品故障 | 完成后 UI 移除了 `status-completed`，第二次幂等确认无法触达；完成态现保留同一入口，重复确认不重复计数。 | 单项 3/3 PASS；两项串行 3/3 PASS |
-| `task8e-independent-acceptance.spec.ts` | `INDEXEDDB_STATUS_READINESS_RACE` | 激活后 Marker 为 `indexeddb_active`、`activeBackend=indexedDB`、revision=3，目标数据库存在；测试在 Settings 写入前新增 IndexedDB 已启用的真实就绪断言，不使用固定 sleep 或增大 timeout。 | 单项 3/3 PASS；两项串行 3/3 PASS |
+`CONFIRMED_ROOT_CAUSE: TEST_READINESS_RACE`
 
-两项初始独立复现均使用单 worker、零 retry、`trace=on`。reward trace 记录在 `apps/web/test-results/reward-achievement-MVP-com-653a3-ocks-first-achievement-once/trace.zip`；Task8E trace 记录在 `apps/web/test-results/task8e-independent-accepta-505cd-e-IndexedDB-the-only-writer/trace.zip`。定向回归未发现 console 或 page errors。
+原始失败中，`theme-dawn` 已被定位、可见且启用，但 Playwright 在完整并发 suite 下等待稳定可点击状态超时。独立、同 worker 配置与完整 suite 复现均未重现持续性产品不可交互、遮挡、fixture authority 冲突或 suite state 泄漏；主题卡进入 hover/active 状态时会经历 transform 过渡，因而根因为点击在 Settings/ThemePicker 交互就绪点之前触发的低概率 actionability 竞态。
 
-## 发布门结果
+修改仅在 `apps/web/tests/e2e/legacy-settings-persistence.spec.ts`：保留主题 authority、AppState、achievements、reload、Marker absent、IndexedDB absent 的所有原有断言；新增当前主题已提交、目标按钮 visible/enabled，以及 Playwright `trial` actionability 验证，随后执行正式 click。没有 force click、固定 sleep、retry、提高 timeout 或产品逻辑修改。
 
-| 命令 | 本轮结果 |
+## 定向回归
+
+| 场景 | 结果 |
 | --- | --- |
-| `pnpm check:e2e-core-general` | **FAIL_BLOCKING**：123 passed / 1 failed，212.4s |
-| 后续完整门禁 | 未执行：核心通用门未通过，按发布门停止 |
+| legacy spec，单 worker、零 retry、trace on | 5 / 5 PASS（每轮 3 tests） |
+| legacy spec，`--workers=6`、零 retry、trace on | 3 / 3 PASS（单文件按 Playwright 文件模型串行） |
+| legacy + reward + Task8E 原失败条目，串行、零 retry、trace on | 3 / 3 PASS（每轮 5 tests） |
 
-失败用例为 `legacy-settings-persistence.spec.ts`（`theme-dawn` 已定位但在并行 suite 中未达到可点击稳定状态）。该项不属于本轮被授权的两项 P0 阻断，且与 reward 完成态入口、Task8E IndexedDB authority 无直接代码关联；没有通过删断言、skip、retry 或提高 timeout 处理，也没有越界修改它。
+组合回归同时确认 `lavender-mint → dawn → reload → dawn`、AppState 与 achievements 未覆盖、Marker absent、业务 IndexedDB absent，以及 reward / Task8E 既有契约。
 
-- Extension build / ZIP：未执行
-- Push：未执行
-- Preview：未创建
-- PR / merge main / Production：均未执行
-- migration / activation 的产品实现：未修改
+## 完整发布门
+
+| 命令 | 结果 |
+| --- | --- |
+| `pnpm typecheck` | PASS（扩展 0.2.3 更新后再次通过） |
+| `pnpm --filter @revival/storage-runtime test` | PASS（70 tests / 295 assertions） |
+| `pnpm --filter @revival/storage-service test` | PASS（181 tests / 826 assertions） |
+| `pnpm build` | PASS |
+| `pnpm check:e2e-core-general` | PASS（124 / 124） |
+| `pnpm check:e2e-core-visual` | PASS（12 / 12） |
+| `pnpm check:e2e-core-activation` | PASS（8 / 8） |
+| `pnpm check:e2e-heavy` | PASS（3 / 3） |
+| `git diff --check` | PASS |
+
+项目未定义 `check:e2e-core-storage`；以上现有 core general / visual / activation 三段共同维持项目真实的核心 E2E 覆盖，没有替换或删减脚本。
+
+## Extension
+
+- Manifest version：`0.2.3`
+- 可加载目录：`C:\Users\86178\Documents\小红书收藏夹\release-artifacts\extension-beta`
+- 版本化 ZIP：`C:\Users\86178\Documents\小红书收藏夹\release-artifacts\collection-revival-extension-beta-v0.2.3.zip`
+- 扩展校验：PASS；未复用旧 `0.2.2` 构建。
+
+## Preview Smoke
+
+Vercel 控制面确认上述 Preview 为 Ready；但本执行环境无法建立到 `*.vercel.app:443` 的连接。`vercel curl` 已生成部署保护绕过令牌后仍在 TLS 连接阶段超时；直接 HTTPS 头请求同样超时；远程浏览器访问被安全策略拒绝。因此无法用合成数据完成 `/`、`/old-import`、`/import`、`/albums`、`/today`、`/settings` 的页面级 smoke，也不能诚实地标记为用户可复验。
+
+- PR：未创建
+- merge main：未执行
+- Promote / Production：未执行
+- migration / activation 产品实现：未修改
 - 真实用户数据：未读取、未接触
 
 `P0_RELEASE_GATE_STATUS: FAIL_BLOCKING`
