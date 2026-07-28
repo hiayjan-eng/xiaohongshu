@@ -343,6 +343,7 @@
     const globalNoteLinkCount = countVisibleNoteLinks(document.body);
     const globalDataNoteIdCount = countDataNoteCandidates(document.body);
     const extractionReady = collectionPageConfirmed && candidateCardCount > 0;
+    const extractionState = extractionReady ? "EXTRACTION_READY" : collectionPageConfirmed ? "EXTRACTION_EMPTY" : "NOT_COLLECTION_PAGE";
     return {
       blocked,
       reason: blocked ? "页面出现登录、验证码或访问限制，扩展已停止扫描，请在浏览器里处理后再继续。" : "",
