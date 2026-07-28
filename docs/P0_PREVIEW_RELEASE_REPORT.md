@@ -62,3 +62,8 @@ Vercel 控制面确认上述 Preview 为 Ready；但本执行环境无法建立�
 `P0_RELEASE_GATE_STATUS: FAIL_BLOCKING`
 
 `P0_PREVIEW_STATUS: FAIL_BLOCKING`
+## 0.2.4 扩展现场热修
+
+本次只交付扩展 Preview 测试包，不修改 Web 业务实现。包版本为 `0.2.4`，目录为 `release-artifacts/extension-beta-preview`，ZIP 为 `release-artifacts/collection-revival-extension-beta-preview-v0.2.4.zip`。包内默认导入目标是分支 Preview 别名的 `/old-import`，并且只加入精确 Preview origin；生产源包仍为 `0.2.3`，默认导入目标不变。
+
+扩展 DOM fixture、Preview packaging profile 和 production profile 均已通过。下一步只等待该 P0 分支的 Preview 别名指向本次提交，再由用户用同一真实收藏页完成复验；不会创建 PR、合并 main、Promote 或部署 Production。
