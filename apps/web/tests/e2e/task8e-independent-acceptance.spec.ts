@@ -114,6 +114,8 @@ test.describe("Task 8E independent release acceptance", () => {
     await expect.poll(async () => (await readTask8eRecords(page, "classificationCorrections")).length).toBeGreaterThan(1);
 
     await page.goto("/settings");
+    await expect(page.getByTestId("indexeddb-storage-status")).toBeVisible();
+    await expect(page.getByTestId("storage-runtime-status")).toContainText("IndexedDB 已启用");
     await page.getByTestId("theme-dawn").click();
     await expect.poll(async () => {
       const settings = await readTask8eRecords<{ key: string; value: unknown }>(page, "settings");
