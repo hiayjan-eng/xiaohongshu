@@ -633,7 +633,7 @@ function buildPayload() {
       duplicateCount: state.duplicateCount || state.scanState.duplicateCount || 0,
       scanMode: state.scanState.mode,
       scanLimit: state.scanState.limit,
-      selectorVersion: "xhs-fav-container-v2"
+      selectorVersion: "xhs-fav-visible-cards-v4"
     },
     items: getSelectedItems()
   };
