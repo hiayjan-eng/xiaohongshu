@@ -260,9 +260,22 @@ async function scanVisibleCards() {
 }
 
 async function startAutoScan() {
+  const limitValue = document.querySelector("input[name='scanLimit']:checked")?.value || "20";
+  const limit = Math.max(10, Math.min(20, Number(limitValue)));
+  state.items = [];
+  state.selectedKeys = new Set();
+  state.duplicateCount = 0;
+  state.scanState = {
+    ...createEmptyScanState(),
+    status: "scanning",
+    stage: "recognizing",
+    limit,
+    pageUrl: state.tabUrl,
+    message: "正在检查当前收藏页…"
+  };
+  setStatus("正在检查当前收藏页…");
+  renderAll();
   try {
-    const limitValue = document.querySelector("input[name='scanLimit']:checked")?.value || "20";
-    const limit = Math.max(10, Math.min(20, Number(limitValue)));
     const response = await sendScannerMessage({
       type: "REVIVAL_START_SCAN",
       limit,
@@ -271,10 +284,13 @@ async function startAutoScan() {
     });
     if (!response?.ok) throw new Error(response?.error || "无法开始扫描");
     hydrateFromScanState(response.scanState);
-    setStatus(response.scanState?.message || "正在扫描旧收藏...");
+    setStatus(response.scanState?.message || `本轮目标 ${limit} 条，正在扫描旧收藏…`);
     renderAll();
   } catch (error) {
-    setStatus(error instanceof Error ? error.message : "扫描失败");
+    const message = error instanceof Error ? error.message : "扫描失败";
+    state.scanState = { ...state.scanState, status: "error", stage: "error", error: message, message };
+    setStatus(message);
+    renderAll();
   }
 }
 
@@ -456,13 +472,13 @@ function renderProgress() {
     : Math.max(0, Math.min(100, Math.round((total / Math.max(1, scan.limit || 1)) * 100)));
 
   elements.progressTitle.textContent = scan.message || (isRunning ? "正在扫描旧收藏" : "等待扫描");
-  elements.progressMode.textContent = isAllMode ? "尽可能扫描全部" : `${scan.limit || 200} 条上限`;
+  elements.progressMode.textContent = isAllMode ? "尽可能扫描全部" : `${scan.limit || 20} 条上限`;
   elements.progressTrack.classList.toggle("indeterminate", isAllMode && isRunning);
   elements.progressTrack.classList.toggle("paused", isPaused);
   elements.progressFill.style.width = isAllMode && isRunning ? "" : `${percent}%`;
   elements.progressPrimary.textContent = isAllMode
     ? `已发现 ${total} 条 · 第 ${scan.batch || 0} 批`
-    : `${Math.min(total, scan.limit || total)} / ${scan.limit || 200} 条`;
+    : `${Math.min(total, scan.limit || total)} / ${scan.limit || 20} 条`;
   elements.progressStage.textContent = STAGE_LABELS[scan.stage] || STAGE_LABELS[scan.status] || "等待扫描";
   elements.status.textContent = scan.status === "error" ? (scan.error || scan.message || "扫描异常") : (scan.message || elements.status.textContent);
 
