@@ -44,6 +44,31 @@ test.describe("classification service core", () => {
     expect(relationship.contentDomain).toBe("情绪与关系");
   });
 
+test("removes a Xiaohongshu share template before classifying the eight P0 semantic samples", () => {
+    const samples = [
+      "竞品流量分析：拆 3 个同赛道账号的流量入口",
+      "亲密关系里如何表达需求和边界",
+      "生日晚餐餐厅候选：人均、距离、氛围和预约",
+      "根本性孤独：写下一个现实场景和小行动",
+      "外贸风口与跨境选品机会",
+      "AI 视频剪辑：完成 30 秒测试视频",
+      "Codex + Chatcut 工作流复现",
+      "Codex 行业提示词整理"
+    ];
+    const results = samples.map((title, index) => classifyCollectionInput({
+      sourceUrl: `https://www.xiaohongshu.com/explore/p0-${index}`,
+      title,
+      rawShareText: `复制这段文字，然后打开【小红书】看笔记。${title}`,
+      userNote: ""
+    }));
+
+    expect(new Set(results.map((result) => result.contentDomain)).size).toBeGreaterThanOrEqual(4);
+    expect(results[1].contentDomain).toBe("情绪与关系");
+    expect(results[2].contentDomain).toBe("出行与探店");
+    expect(results[1].contentSubDomain).not.toBe("小红书运营");
+    expect(results[2].contentSubDomain).not.toBe("小红书运营");
+    expect(results.every((result) => !result.classificationReason.includes("复制这段文字"))).toBeTruthy();
+  });
   test("contains realistic coverage for every domain", () => {
     const coveredDomains = new Set(classificationEvalFixtures.map((fixture) => fixture.expectedDomain));
     [
