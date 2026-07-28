@@ -83,6 +83,32 @@ test.describe("classification, saved intent, and on-demand action cards", () => 
     await expectNoConsoleErrors(errors);
   });
 
+test("persists the P0 action completion path and its output after refresh", async ({ page }) => {
+    await resetDemoData(page);
+    const item = await importTestNote(page, {
+      sourceUrl: "https://www.xiaohongshu.com/explore/p0-action-competitor",
+      title: "竞品流量分析：找 3 个同赛道账号",
+      rawShareText: "复制这段文字，然后打开【小红书】看笔记。竞品流量分析，记录标题钩子、内容形式、评论需求和承接动作。",
+      userNote: "今天整理一个对比表"
+    });
+    await reviveImportedItem(page, item.id);
+
+    await expect(page.getByTestId("action-output-field")).toBeVisible();
+    await page.getByTestId("action-output-field").locator("textarea").fill("完成 3×4 对比表，并写出 1 条测试选题");
+    await page.getByTestId("save-action-output").click();
+    await page.getByTestId("status-today").click();
+    await page.getByTestId("start-action").click();
+    await page.getByTestId("status-completed").click();
+
+    let state = await readAppState(page);
+    expect(state.savedItems.find((entry) => entry.id === item.id)?.status).toBe("completed");
+    expect(state.actionCards.find((entry) => entry.savedItemId === item.id)?.fields["复活产出/备注"]).toContain("3×4 对比表");
+
+    await page.reload();
+    state = await readAppState(page);
+    expect(state.savedItems.find((entry) => entry.id === item.id)?.status).toBe("completed");
+    expect(state.actionCards.find((entry) => entry.savedItemId === item.id)?.fields["复活产出/备注"]).toContain("测试选题");
+  });
   test("shows a clear continue-import action after manual import", async ({ page }) => {
     const errors = collectConsoleErrors(page);
     await resetDemoData(page);
