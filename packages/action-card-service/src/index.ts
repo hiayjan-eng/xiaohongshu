@@ -155,34 +155,20 @@ export function generateSmartAlbums(savedItems: SavedItem[], now = new Date()): 
 
 function buildAlbumClusters(items: SavedItem[]): AlbumCluster[] {
   const domainGroups = new Map<string, SavedItem[]>();
-  const intentGroups = new Map<string, SavedItem[]>();
-  const lowConfidenceItems: SavedItem[] = [];
 
   items.forEach((item) => {
     const domain = normalizeRuntimeCategory(item.contentDomain ?? item.category);
     const subDomain = item.contentSubDomain || item.subCategory || item.keywords[0] || "主题整理";
-    if (item.confidence === "low" || item.classificationConfidence === "low" || domain === "暂存") {
-      lowConfidenceItems.push(item);
-    } else {
-      const domainKey = `${domain}:${subDomain}`;
-      domainGroups.set(domainKey, [...(domainGroups.get(domainKey) ?? []), item]);
-    }
-
-    const intent = normalizeSavedIntent(item.savedIntent || item.intent);
-    const intentKey = `intent:${intent}`;
-    intentGroups.set(intentKey, [...(intentGroups.get(intentKey) ?? []), item]);
+    // 低置信度、暂存项及仅共享“收藏用途”的内容不自动成组，避免为了凑数量跨主题聚合。
+    if (item.confidence === "low" || item.classificationConfidence === "low" || domain === "暂存") return;
+    const domainKey = `${domain}:${subDomain}`;
+    domainGroups.set(domainKey, [...(domainGroups.get(domainKey) ?? []), item]);
   });
 
-  const domainClusters = [...domainGroups.entries()]
+  return [...domainGroups.entries()]
     .filter(([, group]) => group.length >= 2)
     .map(([key, group]) => buildCluster(key, "content_domain", group));
-  const lowConfidenceCluster = lowConfidenceItems.length > 0 ? [buildCluster("暂存:待确认分类", "content_domain", lowConfidenceItems)] : [];
-  const intentClusters = [...intentGroups.entries()]
-    .filter(([, group]) => group.length >= 2)
-    .map(([key, group]) => buildCluster(key, "saved_intent", group));
-  return [...domainClusters, ...lowConfidenceCluster, ...intentClusters].filter((cluster) => cluster.items.length > 0);
 }
-
 function buildCluster(key: string, albumView: "content_domain" | "saved_intent", group: SavedItem[]): AlbumCluster {
   const sortedItems = [...group].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   const first = sortedItems[0];
