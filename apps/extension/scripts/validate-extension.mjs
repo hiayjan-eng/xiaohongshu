@@ -21,7 +21,7 @@ for (const file of requiredFiles) {
 
 const manifest = JSON.parse(readFileSync(new URL("../manifest.json", import.meta.url), "utf8"));
 if (manifest.manifest_version !== 3) throw new Error("Extension must use Manifest V3");
-if (manifest.version !== "0.2.2") throw new Error("Extension version must be 0.2.2");
+if (manifest.version !== "0.2.3") throw new Error("Extension version must be 0.2.2");
 if (!manifest.permissions.includes("activeTab")) throw new Error("activeTab permission is required for user-triggered scanning");
 if (!manifest.permissions.includes("scripting")) throw new Error("scripting permission is required for programmatic content script injection");
 if (!manifest.permissions.includes("storage")) throw new Error("storage permission is required for checkpoint restore");
