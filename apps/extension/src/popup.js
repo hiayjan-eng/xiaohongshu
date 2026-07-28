@@ -9,8 +9,10 @@ const SETTINGS_KEY = "revival-extension-settings";
 const CHECKPOINT_KEY = "revival-extension-checkpoint";
 const SCAN_STATE_KEY = "revival-extension-scan-state";
 // 收藏页路径属于登录用户，不能猜测或拼接 profile URL。
+
 const XHS_COLLECTION_URL = "https://www.xiaohongshu.com/";
-const WEB_APP_ORIGINS = BUILD_PROFILE.webAppOrigins;const STAGES = ["recognizing", "loading", "extracting", "deduping", "complete"];
+const WEB_APP_ORIGINS = BUILD_PROFILE.webAppOrigins;
+const STAGES = ["recognizing", "loading", "extracting", "deduping", "complete"];
 const STAGE_LABELS = {
   recognizing: "识别页面",
   loading: "加载收藏",
@@ -38,7 +40,6 @@ const state = {
 
 const elements = {
   extensionVersion: document.querySelector("#extensionVersion"),
-  buildProfile: document.querySelector("#buildProfile"),
   buildProfile: document.querySelector("#buildProfile"),
   webAppUrl: document.querySelector("#webAppUrl"),
   autoScrollToggle: document.querySelector("#autoScrollToggle"),
@@ -83,7 +84,6 @@ init();
 
 async function init() {
   elements.extensionVersion.textContent = chrome.runtime.getManifest().version;
-  elements.buildProfile.textContent = BUILD_PROFILE.label;
   elements.buildProfile.textContent = BUILD_PROFILE.label;
   const stored = await chrome.storage.local.get([SETTINGS_KEY, CHECKPOINT_KEY, SCAN_STATE_KEY]);
   state.webAppUrl = stored[SETTINGS_KEY]?.webAppUrl || DEFAULT_WEB_APP_URL;
