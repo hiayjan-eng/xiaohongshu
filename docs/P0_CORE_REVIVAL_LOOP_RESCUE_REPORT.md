@@ -25,3 +25,6 @@
 请用同样的 8 条真实语义样本复验：打开首页后手动进入收藏页、扫描 10 或 20 条、确认诊断中的候选 / 有效 / 过滤数量；再检查分类、专辑是否拒绝跨主题聚合，以及任选一条完成“加入今日 → 开始 → 保存产出 → 标记完成 → 刷新”。
 
 `P0_CORE_REVIVAL_LOOP_STATUS: READY_FOR_USER_RETEST`
+## Preview 发布门更新（2026-07-28）
+
+按原始顺序拆分 `pnpm check` 后，前四个子项通过；`check:e2e-core-general` 明确出现 2 项失败，因此本轮 Preview 创建已停止。详见 `docs/P0_PREVIEW_RELEASE_REPORT.md`。
