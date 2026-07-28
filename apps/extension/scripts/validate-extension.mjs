@@ -192,7 +192,7 @@ function assertRealCollectionDomFixture() {
   const exports = loadScannerTestExports(fixture, "https://www.xiaohongshu.com/user/profile/fixture?subTab=note&tab=fav");
   const status = exports.getPageStatus();
   if (!status.collectionPageConfirmed || !status.favoriteRouteSignal || status.extractionState !== "EXTRACTION_READY") {
-    throw new Error(`Real collection URL fixture should confirm the favorites page before extraction: ${JSON.stringify(status)}`);
+    throw new Error("Real collection URL fixture should confirm the favorites page before extraction.");
   }
   const result = exports.scanVisibleXhsCards();
   if (result.items.length === 0) throw new Error("Real collection fixture should extract visible cards through fallback candidates.");
@@ -448,6 +448,7 @@ function isFakeElementVisible(element) {
 
 function matchesFakeSelector(element, selector) {
   if (!selector) return false;
+  if (selector === "[role='tab'][aria-selected='true']") return element.getAttribute("role") === "tab" && element.getAttribute("aria-selected") === "true";
   if (selector === "*") return true;
   if (/^[a-z]+$/i.test(selector)) return element.tagName.toLowerCase() === selector.toLowerCase();
   if (selector === "a[href]") return element.tagName === "A" && Boolean(element.href);
