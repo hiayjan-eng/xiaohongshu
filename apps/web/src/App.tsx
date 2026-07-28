@@ -4237,7 +4237,13 @@ function StatusButtons(props: { item: SavedItem; changeStatus: (itemId: string, 
     <div className="status-buttons" aria-label="行动完成路径">
       {props.item.status === "not_started" && <button onClick={() => props.changeStatus(props.item.id, "today")} data-testid="status-today">加入今日</button>}
       {!completed && <button className="primary-button" onClick={() => props.changeStatus(props.item.id, "in_progress")} data-testid="start-action">开始行动</button>}
-      {!completed && <button onClick={() => props.changeStatus(props.item.id, "completed")} data-testid="status-completed">标记完成</button>}
+      <button
+        onClick={() => props.changeStatus(props.item.id, "completed")}
+        data-testid="status-completed"
+        aria-label={completed ? "已完成，重复确认不会重复计数" : "标记完成"}
+      >
+        {completed ? "已完成" : "标记完成"}
+      </button>
       {!completed && <button onClick={() => props.changeStatus(props.item.id, "snoozed")} data-testid="status-snoozed">暂时搁置</button>}
       {completed && <button onClick={() => props.changeStatus(props.item.id, "in_progress")} data-testid="undo-completed">撤销完成</button>}
     </div>
