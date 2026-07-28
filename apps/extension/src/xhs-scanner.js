@@ -353,6 +353,7 @@
       activeFavoriteTab,
       collectionPageConfirmed,
       extractionReady,
+      extractionState,
       // Kept for existing callers: page identity is independent from extraction readiness.
       looksCollection: collectionPageConfirmed,
       activeTab,
