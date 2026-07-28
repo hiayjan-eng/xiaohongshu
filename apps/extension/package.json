@@ -5,6 +5,9 @@
   "description": "Collection Revival browser extension Beta for user-triggered visible DOM scanning.",
   "scripts": {
     "typecheck": "node ./scripts/validate-extension.mjs",
-    "build": "node ./scripts/build-extension.mjs"
+    "test:dom": "node ./scripts/validate-extension.mjs",
+    "test:profiles": "node ./scripts/verify-extension-profiles.mjs",
+    "build": "node ./scripts/build-extension.mjs",
+    "build:preview": "node ./scripts/build-extension.mjs --preview"
   }
 }
