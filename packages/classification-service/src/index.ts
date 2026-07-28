@@ -25,6 +25,7 @@ export interface FieldSeparatedText {
   userNote: string;
   badges: string[];
   sourceUrl: string;
+  normalizedContentText: string;
   textForClassification: string;
 }
 
@@ -99,7 +100,7 @@ export const DOMAIN_SUBDOMAINS: Record<ContentDomain, string[]> = {
 };
 
 const prototypes: Prototype[] = [
-  p("内容创作", "小红书运营", "账号定位、内容运营、数据复盘和涨粉方法", "creative_topic", ["小红书运营", "账号运营", "爆款笔记", "涨粉", "数据复盘"], ["小红书", "账号", "笔记", "运营", "复盘", "流量", "发布", "内容"], ["小红书账号运营复盘模板", "生活方式账号一周选题规划", "爆款笔记标题结构拆解"], ["招聘内容运营", "内容运营岗位"]),
+  p("内容创作", "小红书运营", "账号定位、内容运营、数据复盘和涨粉方法", "creative_topic", ["小红书运营", "账号运营", "爆款笔记", "涨粉", "数据复盘"], ["账号", "笔记", "运营", "复盘", "流量", "发布", "内容"], ["小红书账号运营复盘模板", "生活方式账号一周选题规划", "爆款笔记标题结构拆解"], ["招聘内容运营", "内容运营岗位"]),
   p("内容创作", "封面设计", "封面、标题、排版和图文视觉参考", "creative_topic", ["封面设计", "封面", "标题排版", "图文排版"], ["标题", "封面", "排版", "构图", "视觉", "图文", "模板"], ["小红书封面设计技巧", "封面标题排版参考", "图文笔记封面构图"], ["商品封面价格"]),
   p("内容创作", "视频剪辑", "短视频剪辑、运镜、脚本和拍摄后期", "creative_topic", ["视频剪辑", "AI 剪辑", "短视频教程", "运镜"], ["剪辑", "短视频", "拍摄", "脚本", "字幕", "转场", "运镜"], ["AI 剪辑视频教程", "剪映新手 7 天入门", "探店视频运镜脚本"], ["剪辑岗位招聘"]),
   p("AI 与效率", "AI 工具", "AI 工具、Codex、ChatGPT、Claude 等工具用法", "tool", ["AI工具", "AI 工具", "Codex", "ChatGPT", "Claude", "Gemini"], ["AI", "工具", "代码助手", "模型", "插件", "智能体", "生成"], ["3个方法让 Codex 帮你干活", "AI工具日常工作流入门", "用 ChatGPT 整理资料"], ["AI公司招聘"]),
@@ -109,11 +110,11 @@ const prototypes: Prototype[] = [
   p("工作与职业", "创业团队", "创业公司、团队招募、合伙人和早期团队机会", "team", ["创业公司", "加入我的公司", "合伙人", "团队招募"], ["团队", "早期", "招募", "共创", "远程", "办公", "创业伙伴"], ["加入我的创业团队", "寻找早期合伙人", "广深优先创业公司招人"], ["创业经营方法"]),
   p("工作与职业", "职场成长", "职场技能、工作沟通、管理和职业发展", "career", ["职场成长", "职业规划", "升职", "绩效"], ["职场", "同事", "老板", "汇报", "管理", "成长", "沟通"], ["职场新人如何汇报工作", "职业规划三年路线", "如何做向上管理"], ["亲密关系沟通"]),
   p("商业与经营", "独立站运营", "独立站、跨境独立站、流量和转化运营", "business", ["独立站", "shopify", "Shopify"], ["站点", "落地页", "转化率", "流量", "投放", "复购", "GMV"], ["拆解一个赚钱的独立站", "独立站如何提高转化率", "Shopify 选品案例"], ["独立站招聘运营"]),
-  p("商业与经营", "跨境电商", "跨境、电商、供应链、海外市场和运营", "business", ["跨境电商", "跨境选品", "亚马逊", "TikTok Shop"], ["跨境", "电商", "供应链", "出海", "海外", "运营", "产品"], ["独立站招聘跨境运营", "跨境电商选品清单", "TikTok Shop 爆品复盘"], ["跨境运营岗位招聘"]),
+  p("商业与经营", "跨境电商", "跨境、电商、供应链、海外市场和运营", "business", ["跨境电商", "跨境选品", "亚马逊", "TikTok Shop"], ["跨境", "外贸", "电商", "供应链", "出海", "海外", "运营", "产品", "风口"], ["独立站招聘跨境运营", "跨境电商选品清单", "TikTok Shop 爆品复盘"], ["跨境运营岗位招聘"]),
   p("商业与经营", "选品与定价", "选品、价格、溢价、毛利、客单价和产品策略", "business", ["选品", "定价", "情绪溢价", "客单价", "毛利"], ["价格", "溢价", "商品", "产品", "利润", "成本", "转化", "卖出"], ["几块串珠卖出10倍情绪溢价", "情绪价值如何提高商品客单价", "低成本产品怎么做溢价"], ["情绪表达需求"]),
   p("商业与经营", "商业模式", "商业模式、营收、创业经营和变现方式", "business", ["商业模式", "营收", "变现", "创业经营"], ["复购", "销售", "增长", "案例", "收入", "模型", "品牌"], ["创业公司如何做员工激励", "一个小店如何做复购", "商业案例拆解"], ["创业公司招聘"]),
   p("出行与探店", "展览活动", "展览、美术馆、周末活动和城市文化路线", "place", ["展览", "美术馆", "展", "周末展览"], ["深圳", "广州", "上海", "周末", "路线", "门票", "开放时间"], ["深圳周末展览路线", "上海近期展览清单", "广州周末美术馆"], ["深圳公司招聘"]),
-  p("出行与探店", "咖啡餐厅", "咖啡店、餐厅、甜品店和探店消费信息", "place", ["咖啡店", "餐厅", "探店", "brunch"], ["人均", "营业时间", "预约", "店名", "甜品", "小吃"], ["深圳周末咖啡店", "广州安静咖啡店 brunch", "成都甜品探店"], ["餐饮门店经营"]),
+  p("出行与探店", "咖啡餐厅", "咖啡店、餐厅、甜品店和探店消费信息", "place", ["咖啡店", "餐厅", "探店", "brunch", "生日晚餐"], ["人均", "营业时间", "预约", "店名", "甜品", "小吃"], ["深圳周末咖啡店", "广州安静咖啡店 brunch", "成都甜品探店"], ["餐饮门店经营"]),
   p("出行与探店", "旅行攻略", "城市旅行、路线、交通和预算", "place", ["旅行攻略", "路线", "周边游", "民宿"], ["大理", "成都", "杭州", "徒步", "交通", "预算", "景点"], ["大理 3 天慢旅行路线", "杭州周边徒步一日路线", "成都周末路线"], ["城市招聘"]),
   p("饮食与健康", "家常备餐", "菜谱、备餐、食材和购物清单", "dish", ["低卡晚餐", "备餐", "菜谱", "食材清单"], ["做饭", "早餐", "便当", "空气炸锅", "鸡胸肉", "购物清单"], ["低卡晚餐备餐", "空气炸锅鸡胸肉便当", "10 分钟高蛋白早餐"], ["餐饮经营"]),
   p("饮食与健康", "健身运动", "健身、训练、运动和体态管理", "fitness", ["健身", "训练计划", "瑜伽", "普拉提"], ["运动", "跑步", "拉伸", "体态", "组数", "动作"], ["20 分钟居家训练", "普拉提体态改善", "跑步新手计划"], ["运动品牌营销"]),
@@ -263,14 +264,28 @@ export function classifyCollectionInput(input: ClassificationInput, corrections:
 export function separateClassificationFields(input: ClassificationInput): FieldSeparatedText {
   const rawTitle = input.title || extractTitleFromText(input.rawShareText) || extractTitleFromText(input.visibleText || "");
   const hashtags = unique([...(input.hashtags ?? []), ...extractHashtags(input.rawShareText), ...extractHashtags(input.visibleText || "")]);
-  const visibleText = cleanField(input.visibleText || input.rawShareText).slice(0, 480);
-  const title = cleanField(rawTitle).slice(0, 80);
+  const title = normalizeContentText(rawTitle).slice(0, 80);
+  const visibleText = normalizeContentText(input.visibleText || input.rawShareText).slice(0, 480);
   const userNote = cleanField(input.userNote);
   const sourceUrl = cleanField(input.sourceUrl);
   const author = cleanField(input.author || extractAuthor(input.rawShareText));
   const badges = unique(input.badges ?? []);
-  const textForClassification = [userNote, title, hashtags.join(" "), visibleText, badges.join(" ")].filter(Boolean).join(" ");
-  return { title, hashtags, author, visibleText, userNote, badges, sourceUrl, textForClassification };
+  const normalizedContentText = unique([title, visibleText]).filter(Boolean).join(" ");
+  // 分享模板只说明来源和分享动作，不参与主题判断；原文仍由调用方保存。
+  const textForClassification = [userNote, title, hashtags.join(" "), normalizedContentText, badges.join(" ")].filter(Boolean).join(" ");
+  return { title, hashtags, author, visibleText, userNote, badges, sourceUrl, normalizedContentText, textForClassification };
+}
+
+export function normalizeContentText(value: string): string {
+  return cleanField(value)
+    .replace(/https?:\/\/\S+/gi, " ")
+    .replace(/复制这段文字(?:后)?[，,。；;\s]*/g, " ")
+    .replace(/打开[【\[]?小红书[】\]]?(?:查看?|看)?(?:笔记)?/g, " ")
+    .replace(/去?小红书(?:查看?|看)?(?:笔记)?/g, " ")
+    .replace(/(?:分享自|来自)小红书/g, " ")
+    .replace(/小红书号?[：:]?\s*\S+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function scoreByRules(fields: FieldSeparatedText): Map<string, { prototype: Prototype; score: number; reasons: string[] }> {
