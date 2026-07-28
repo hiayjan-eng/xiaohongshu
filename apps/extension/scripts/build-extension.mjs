@@ -44,7 +44,7 @@ const outputManifest = structuredClone(sourceManifest);
 if (isPreview) {
   outputManifest.version = profile.version;
   outputManifest.name = "收藏复活扫描 Preview 测试包";
-  outputManifest.host_permissions = [...new Set([...(outputManifest.host_permissions || []), `${previewOrigin}/*`)];
+  outputManifest.host_permissions = [...new Set([...(outputManifest.host_permissions || []), `${previewOrigin}/*`])];
   outputManifest.content_scripts = (outputManifest.content_scripts || []).map((entry) => {
     if (!(entry.js || []).includes("src/web-bridge.js")) return entry;
     return { ...entry, matches: [...new Set([...(entry.matches || []), `${previewOrigin}/*`])] };
