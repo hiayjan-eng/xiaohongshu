@@ -4,7 +4,7 @@
 
   const SCAN_STATE_KEY = "revival-extension-scan-state";
   const CHECKPOINT_KEY = "revival-extension-checkpoint";
-  const SELECTOR_VERSION = "xhs-fav-visible-cards-v3";
+  const SELECTOR_VERSION = "xhs-fav-visible-cards-v4";
   const STAGES = {
     recognizing: "识别页面",
     loading: "加载收藏",
@@ -151,8 +151,7 @@
     return {
       status: "idle",
       stage: "recognizing",
-      mode: "limit",
-      limit: 200,
+      $110,
       autoScroll: true,
       batch: 0,
       lastAdded: 0,
@@ -311,7 +310,9 @@
   async function completeScan(message) {
     runtime.state.status = "completed";
     runtime.state.stage = "complete";
-    runtime.state.message = message;
+    runtime.state.message = runtime.state.items.length === 0 && runtime.state.pageStatus?.collectionPageConfirmed
+      ? "已确认在收藏页，但暂未识别到可见收藏卡片。请展开诊断查看提取线索后再试。"
+      : message;
     runtime.state.lastAdded = 0;
     await persistState();
   }
@@ -328,20 +329,30 @@
     const text = normalizeScannedText(document.body?.innerText || "").slice(0, 4000);
     const blocked = /验证码|验证|安全验证|登录后查看|请先登录|访问频繁|稍后再试/.test(text);
     const isXhs = /xiaohongshu\.com|xhslink\.com/i.test(location.hostname);
-    const activeTab = detectActiveTab();
+    const pageUrl = new URL(String(location.href || ""), window.location.href);
+    const profilePage = /\/user\/profile\//.test(pageUrl.pathname);
+    const favUrl = pageUrl.searchParams.get("tab") === "fav";
+    const activeFavoriteElement = findActiveCollectionTabElement();
+    const activeTab = normalizeScannedText(activeFavoriteElement?.textContent || "").slice(0, 18) || (favUrl ? "收藏" : "");
+    const activeFavoriteTab = Boolean(activeFavoriteElement);
+    const collectionPageConfirmed = isXhs && profilePage && !blocked && (favUrl || activeFavoriteTab);
     const root = findCollectionRoot();
-    const pageUrl = String(location.href || "");
-    const profilePage = /\/user\/profile\//.test(pageUrl);
-    const favUrl = /[?&]tab=fav(?:&|$)/.test(pageUrl);
-    const activeFavoriteTab = /收藏|favorite|fav/i.test(activeTab);
-    const candidateCardCount = root ? countVisibleNoteLinks(root.element) : 0;
-    // 真实收藏页需同时具备个人主页和已加载卡片，并由 URL 或激活标签确认；不靠旧 URL 猜测。
-    const looksCollection = isXhs && !blocked && profilePage && candidateCardCount > 0 && (favUrl || activeFavoriteTab);
+    const candidateCardCount = root ? countCardCandidates(root.element) : 0;
+    const globalVisibleLinkCount = countVisibleAnchors(document.body);
+    const globalNoteLinkCount = countVisibleNoteLinks(document.body);
+    const globalDataNoteIdCount = countDataNoteCandidates(document.body);
+    const extractionReady = collectionPageConfirmed && candidateCardCount > 0;
     return {
       blocked,
       reason: blocked ? "页面出现登录、验证码或访问限制，扩展已停止扫描，请在浏览器里处理后再继续。" : "",
       isXhs,
-      looksCollection,
+      profilePage,
+      favoriteRouteSignal: favUrl,
+      activeFavoriteTab,
+      collectionPageConfirmed,
+      extractionReady,
+      // Kept for existing callers: page identity is independent from extraction readiness.
+      looksCollection: collectionPageConfirmed,
       activeTab,
       containerType: root?.containerType || "unknown",
       selectorVersion: SELECTOR_VERSION,
@@ -351,7 +362,13 @@
         profilePage,
         favUrl,
         activeFavoriteTab,
+        collectionPageConfirmed,
+        extractionReady,
         candidateCardCount,
+        primaryVisibleLinkCount: root ? countVisibleAnchors(root.element) : 0,
+        globalVisibleLinkCount,
+        globalNoteLinkCount,
+        globalDataNoteIdCount,
         validFavoriteCount: 0,
         filteredCount: 0,
         filteredReasons: {}
@@ -361,28 +378,110 @@
 
   function scanVisibleXhsCards() {
     const pageStatus = getPageStatus();
-    if (!pageStatus.looksCollection) return { items: [], pageStatus };
-    const rootInfo = findCollectionRoot();
+    if (pageStatus.blocked || !pageStatus.collectionPageConfirmed) return { items: [], pageStatus };
+
+    const primaryRoot = findCollectionRoot();
+    const primary = collectCardsFromRoot(primaryRoot, pageStatus);
+    const shouldFallback = primary.items.length === 0 && primaryRoot?.element && primaryRoot.element !== document.body;
+    const fallback = shouldFallback
+      ? collectCardsFromRoot({ element: document.body, containerType: "document-body-fallback" }, pageStatus)
+      : { items: [], diagnostics: emptyExtractionDiagnostics() };
+    const items = dedupeWithinBatch([...primary.items, ...fallback.items]).slice(0, 20);
+    const diagnostics = {
+      ...pageStatus.diagnostics,
+      candidateCardCount: primary.diagnostics.candidateCardCount,
+      validFavoriteCount: items.length,
+      filteredCount: primary.diagnostics.filteredCount + fallback.diagnostics.filteredCount,
+      filteredReasons: {
+        ...primary.diagnostics.filteredReasons,
+        fallbackUsed: shouldFallback ? 1 : 0,
+        fallbackCandidateCount: fallback.diagnostics.candidateCardCount
+      },
+      fallbackUsed: shouldFallback
+    };
+    pageStatus.extractionReady = items.length > 0;
+    pageStatus.diagnostics = diagnostics;
+    return { items, pageStatus };
+  }
+
+  function collectCardsFromRoot(rootInfo, pageStatus) {
     const root = rootInfo?.element || document.body;
     const allAnchors = Array.from(root.querySelectorAll("a[href]"));
     const visibleAnchors = allAnchors.filter((anchor) => isElementVisible(anchor));
     const noteAnchors = visibleAnchors.filter((anchor) => isLikelyXhsNoteUrl(anchor.href));
-    const cards = noteAnchors.map((anchor) => extractCard(anchor, root, rootInfo, pageStatus)).filter(Boolean);
-    const items = dedupeWithinBatch(cards).slice(0, 20);
+    const anchorCards = noteAnchors.map((anchor) => extractCard(anchor, root, rootInfo, pageStatus)).filter(Boolean);
+    const dataCards = Array.from(root.querySelectorAll("[data-note-id], [data-id]"))
+      .filter((container) => isDataNoteCandidate(container))
+      .map((container) => extractCardFromContainer(container, rootInfo, pageStatus))
+      .filter(Boolean);
+    const items = dedupeWithinBatch([...anchorCards, ...dataCards]);
     const filteredReasons = {
       hidden: Math.max(0, allAnchors.length - visibleAnchors.length),
       nonNoteLink: Math.max(0, visibleAnchors.length - noteAnchors.length),
-      invalidCard: Math.max(0, noteAnchors.length - cards.length),
-      duplicate: Math.max(0, cards.length - items.length)
+      invalidCard: Math.max(0, noteAnchors.length - anchorCards.length),
+      dataNoteId: dataCards.length,
+      duplicate: Math.max(0, anchorCards.length + dataCards.length - items.length)
     };
-    pageStatus.diagnostics = {
-      ...pageStatus.diagnostics,
-      candidateCardCount: noteAnchors.length,
-      validFavoriteCount: items.length,
-      filteredCount: Object.values(filteredReasons).reduce((total, value) => total + value, 0),
-      filteredReasons
+    return {
+      items,
+      diagnostics: {
+        candidateCardCount: noteAnchors.length + countDataNoteCandidates(root),
+        filteredCount: Object.values(filteredReasons).reduce((total, value) => total + value, 0),
+        filteredReasons
+      }
     };
-    return { items, pageStatus };
+  }
+
+  function emptyExtractionDiagnostics() {
+    return { candidateCardCount: 0, filteredCount: 0, filteredReasons: {} };
+  }
+
+  function countVisibleAnchors(root) {
+    return Array.from(root?.querySelectorAll?.("a[href]") || []).filter((anchor) => isElementVisible(anchor)).length;
+  }
+
+  function countCardCandidates(root) {
+    return countVisibleNoteLinks(root) + countDataNoteCandidates(root);
+  }
+
+  function countDataNoteCandidates(root) {
+    return Array.from(root?.querySelectorAll?.("[data-note-id], [data-id]") || []).filter((element) => isDataNoteCandidate(element)).length;
+  }
+
+  function isDataNoteCandidate(element) {
+    if (!isReasonableCard(element)) return false;
+    const id = String(element.getAttribute("data-note-id") || element.getAttribute("data-id") || "").trim();
+    if (!/^[a-zA-Z0-9_-]{6,80}$/.test(id)) return false;
+    return Boolean(element.querySelector("img") || normalizeScannedText(element.innerText || element.textContent || "").length >= 2);
+  }
+
+  function extractCardFromContainer(container, rootInfo, pageStatus) {
+    const noteAnchor = Array.from(container.querySelectorAll("a[href]")).find((anchor) => isElementVisible(anchor) && isLikelyXhsNoteUrl(anchor.href));
+    if (noteAnchor) return extractCard(noteAnchor, container, rootInfo, pageStatus);
+    const noteId = String(container.getAttribute("data-note-id") || container.getAttribute("data-id") || "").trim();
+    const sourceUrl = /^[a-zA-Z0-9_-]{6,80}$/.test(noteId) ? `https://www.xiaohongshu.com/explore/${encodeURIComponent(noteId)}` : "";
+    const rawText = normalizeScannedText(container.innerText || container.textContent || "");
+    const title = sanitizeTitle(pickTitle(container, container), rawText);
+    if (!sourceUrl && !title && !rawText) return null;
+    return {
+      title: title || "标题待补充",
+      sourceUrl,
+      coverUrl: findCoverUrl(container),
+      visibleText: rawText.slice(0, 360),
+      rawText,
+      author: pickAuthor(container),
+      noteType: inferNoteType(container),
+      badges: pickBadges(container),
+      metrics: pickMetrics(container),
+      isMissingTitle: !title,
+      isMissingLink: !sourceUrl,
+      isLikelyOwnPost: false,
+      containerType: rootInfo?.containerType || "unknown",
+      activeTab: pageStatus.activeTab || "",
+      isVisible: true,
+      selectorVersion: SELECTOR_VERSION,
+      sourcePlatform: "xiaohongshu"
+    };
   }
 
   function findCollectionRoot() {
@@ -423,26 +522,34 @@
   }
 
   function findActiveCollectionTabElement() {
-    const nodes = Array.from(document.querySelectorAll("[aria-selected='true'], [class*='active'], [class*='selected'], a, button, span, div"));
-    return nodes.find((node) => {
-      const text = normalizeScannedText(node.textContent || "");
-      if (!/收藏|favorite|fav/i.test(text)) return false;
-      if (!isElementVisible(node)) return false;
-      const ariaSelected = node.getAttribute("aria-selected") === "true";
-      const className = String(node.className || "");
-      const activeClass = /active|selected|current/i.test(className);
-      return ariaSelected || activeClass || /tab=fav|type=fav|收藏/i.test(location.href);
-    });
+    const tabSelectors = [
+      "[role='tab'][aria-selected='true']",
+      "[role='tab'][class*='active']",
+      "[role='tab'][class*='selected']",
+      "nav [aria-selected='true']",
+      "nav [class*='active']",
+      "nav [class*='selected']",
+      "[class*='tab'][aria-selected='true']",
+      "[class*='tab'][class*='active']",
+      "[class*='tab'][class*='selected']"
+    ];
+    for (const selector of tabSelectors) {
+      const match = Array.from(document.querySelectorAll(selector)).find((node) => {
+        const text = normalizeScannedText(node.textContent || "");
+        return isElementVisible(node) && /收藏|favorites?|fav/i.test(text);
+      });
+      if (match) return match;
+    }
+    return undefined;
   }
 
   function detectActiveTab() {
     const active = findActiveCollectionTabElement();
     const text = normalizeScannedText(active?.textContent || "");
     if (text) return text.slice(0, 18);
-    if (/tab=fav|type=fav|collection|favorite|fav/i.test(location.href)) return "收藏";
-    return "";
+    const pageUrl = new URL(String(location.href || ""), window.location.href);
+    return pageUrl.searchParams.get("tab") === "fav" ? "收藏" : "";
   }
-
   function findBestNoteContainer(root) {
     const candidates = Array.from(root.querySelectorAll("[class*='feeds'], [class*='note-list'], [class*='content'], main, section"));
     return candidates
@@ -453,7 +560,7 @@
   }
 
   function scoreCollectionCandidate(candidate) {
-    const noteCount = countVisibleNoteLinks(candidate.element);
+    const noteCount = countCardCandidates(candidate.element);
     if (noteCount <= 0) return 0;
     const descriptor = getElementDescriptor(candidate.element);
     let score = noteCount * 10;
