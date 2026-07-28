@@ -10,7 +10,8 @@ const requiredFiles = [
   "src/popup.css",
   "src/web-bridge.js",
   "src/xhs-scanner.js",
-  "src/background.js"
+  "src/background.js",
+  "src/build-profile.js"
 ];
 
 for (const file of requiredFiles) {
@@ -38,7 +39,8 @@ const webBridgeEntry = contentScripts.find((entry) => (entry.js || []).includes(
 const scannerEntry = contentScripts.find((entry) => (entry.js || []).includes("src/xhs-scanner.js"));
 if (!webBridgeEntry) throw new Error("Missing Web Bridge content script entry");
 if (!scannerEntry) throw new Error("Missing Xiaohongshu scanner content script entry");
-if (manifest.background?.service_worker !== "src/background.js") throw new Error("Missing background service worker");
+if (manifest.background?.service_worker !== "src/background.js",
+  "src/build-profile.js") throw new Error("Missing background service worker");
 
 for (const script of ["popup.js", "web-bridge.js", "xhs-scanner.js", "background.js"]) {
   execFileSync(process.execPath, ["--check", fileURLToPath(new URL(`../src/${script}`, import.meta.url))], { stdio: "inherit" });
@@ -53,7 +55,7 @@ const background = readFileSync(new URL("../src/background.js", import.meta.url)
 
 const popupMarkers = ["CHECKPOINT_KEY", "SCAN_STATE_KEY", "pauseScan", "resumeScan", "retryScan", "browser-extension-beta", "autoScrollToggle", "clearCheckpoint", "openOrRefreshWebApp", "ensureWebBridgeScript", "bridgeStatus", "scannerStatus", "progressTrack", "filterSelect"];
 const bridgeMarkers = ["COLLECTION_REVIVAL_EXTENSION_READY", "COLLECTION_REVIVAL_EXTENSION_PING", "COLLECTION_REVIVAL_EXTENSION_PONG", "COLLECTION_REVIVAL_EXTENSION_SCAN_STATUS_REQUEST", "COLLECTION_REVIVAL_EXTENSION_SCAN_STATUS", "requestId", "protocolVersion", "collection-revival-web-bridge-v1", "collectionRevivalExtensionVersion", "collection-revival-extension-bridge", "scan-progress-sync"];
-const scannerMarkers = ["REVIVAL_GET_PAGE_STATUS", "REVIVAL_START_SCAN", "REVIVAL_PAUSE_SCAN", "REVIVAL_RESUME_SCAN", "REVIVAL_GET_SCAN_STATE", "scrollOneStep", "findCollectionRoot", "isElementVisible", "normalizeScannedText", "blocked", "验证码", "xhs-fav-visible-cards-v3"];
+const scannerMarkers = ["REVIVAL_GET_PAGE_STATUS", "REVIVAL_START_SCAN", "REVIVAL_PAUSE_SCAN", "REVIVAL_RESUME_SCAN", "REVIVAL_GET_SCAN_STATE", "scrollOneStep", "findCollectionRoot", "isElementVisible", "normalizeScannedText", "blocked", "验证码", "xhs-fav-visible-cards-v4"];
 const backgroundMarkers = ["onInstalled", "onStartup", "executeScript", "web-bridge.js"];
 for (const marker of popupMarkers) {
   if (!popupJs.includes(marker) && !popupHtml.includes(marker)) throw new Error(`Missing popup beta capability marker: ${marker}`);
@@ -161,6 +163,7 @@ function assertScannerBehavior() {
   if (accepted !== 2) throw new Error(`trimToLimit should keep only 2 accepted items, got ${accepted}`);
 
   assertScannerRangeWithMockDom();
+  assertRealCollectionDomFixture();
 
   const scannerRequirements = [
     "findCollectionRoot",
@@ -174,13 +177,45 @@ function assertScannerBehavior() {
     "containerType",
     "activeTab",
     "selectorVersion",
-    "scoreCollectionCandidate"
+    "scoreCollectionCandidate",
+    "collectionPageConfirmed",
+    "EXTRACTION_EMPTY",
+    "document-body-fallback",
+    "extractCardFromContainer"
   ];
   for (const requirement of scannerRequirements) {
     if (!scanner.includes(requirement)) throw new Error(`Missing scanner range/text requirement: ${requirement}`);
   }
 }
 
+function assertRealCollectionDomFixture() {
+  const fixture = createRealCollectionFixture();
+  const exports = loadScannerTestExports(fixture, "https://www.xiaohongshu.com/user/profile/fixture?subTab=note&tab=fav");
+  const status = exports.getPageStatus();
+  if (!status.collectionPageConfirmed || !status.favoriteRouteSignal || status.extractionState !== "EXTRACTION_READY") {
+    throw new Error("Real collection URL fixture should confirm the favorites page before extraction.");
+  }
+  const result = exports.scanVisibleXhsCards();
+  if (result.items.length === 0) throw new Error("Real collection fixture should extract visible cards through fallback candidates.");
+  if (!result.items.every((item) => item.sourceUrl.includes("/explore/") || item.sourceUrl.includes("/discovery/item/"))) {
+    throw new Error("Real collection fixture should not turn profile links into note links.");
+  }
+  if (!result.items.some((item) => item.sourceUrl.includes("fixture-data-note"))) {
+    throw new Error("data-note-id fallback should produce a note source URL.");
+  }
+}
+
+function createRealCollectionFixture() {
+  const activeFavoriteTab = new FakeElement("button", { className: "tab active", text: "收藏", attrs: { role: "tab", "aria-selected": "true" } });
+  const wrongRoot = new FakeElement("section", { className: "profile-header" }, [activeFavoriteTab]);
+  const image = new FakeElement("img", { attrs: { src: "https://img.example/fixture.jpg", alt: "脱敏卡片" }, rect: { width: 160, height: 200 } });
+  const nestedLink = new FakeElement("a", { href: "/discovery/item/fixture-anchor-note?xsec_token=masked", attrs: { href: "/discovery/item/fixture-anchor-note?xsec_token=masked" }, rect: { width: 180, height: 240 } }, [image, new FakeElement("span", { className: "title", text: "脱敏嵌套卡片" })]);
+  const anchorCard = new FakeElement("article", { className: "waterfall-card", rect: { width: 190, height: 260 } }, [nestedLink]);
+  const dataCard = new FakeElement("article", { className: "waterfall-card", attrs: { "data-note-id": "fixture-data-note-01" }, text: "脱敏 data note 卡片", rect: { width: 190, height: 260 } }, [new FakeElement("img", { attrs: { src: "https://img.example/data.jpg" }, rect: { width: 160, height: 200 } })]);
+  const profileLink = new FakeElement("a", { href: "/user/profile/other", attrs: { href: "/user/profile/other" }, text: "作者页", rect: { width: 120, height: 30 } });
+  const cards = new FakeElement("section", { className: "feeds waterfall" }, [anchorCard, dataCard, profileLink]);
+  return createFakeDocument(new FakeElement("body", { text: "收藏" }, [wrongRoot, cards]));
+}
 function assertScannerRangeWithMockDom() {
   const mockDocument = createScannerMockDocument();
   const exports = loadScannerTestExports(mockDocument);
@@ -198,19 +233,19 @@ function assertScannerRangeWithMockDom() {
   if (result.pageStatus?.diagnostics?.validFavoriteCount !== result.items.length) throw new Error("Scanner diagnostics should expose valid favorite counts");
   const ownFavorite = result.items.find((item) => item.title === "我自己也收藏的灵感");
   if (!ownFavorite?.isLikelyOwnPost) throw new Error("Own authored favorite should be marked, not deleted");
-  if (result.items.some((item) => item.isVisible !== true || item.selectorVersion !== "xhs-fav-visible-cards-v3")) {
+  if (result.items.some((item) => item.isVisible !== true || item.selectorVersion !== "xhs-fav-visible-cards-v4")) {
     throw new Error("Scanned items should include visibility and selector diagnostics");
   }
 }
 
-function loadScannerTestExports(documentOverride = createBasicScannerDocument()) {
+function loadScannerTestExports(documentOverride = createBasicScannerDocument(), href = "https://www.xiaohongshu.com/user/profile/test?tab=fav") {
   const context = {
     console,
     setTimeout,
     clearTimeout,
     URL,
     window: undefined,
-    location: { href: "https://www.xiaohongshu.com/user/profile/test?tab=fav", hostname: "www.xiaohongshu.com" },
+    location: { href, hostname: "www.xiaohongshu.com" },
     navigator: { userAgent: "Chrome" },
     chrome: {
       runtime: {
