@@ -2,7 +2,8 @@ const DEFAULT_WEB_APP_URL = "https://xiaohongshu-green.vercel.app/old-import";
 const SETTINGS_KEY = "revival-extension-settings";
 const CHECKPOINT_KEY = "revival-extension-checkpoint";
 const SCAN_STATE_KEY = "revival-extension-scan-state";
-const XHS_COLLECTION_URL = "https://www.xiaohongshu.com/user/profile";
+// 收藏页路径属于登录用户，不能猜测或拼接 profile URL。
+const XHS_COLLECTION_URL = "https://www.xiaohongshu.com/";
 const WEB_APP_ORIGINS = ["https://xiaohongshu-green.vercel.app", "http://localhost:5173", "http://127.0.0.1:5173"];
 const STAGES = ["recognizing", "loading", "extracting", "deduping", "complete"];
 const STAGE_LABELS = {
@@ -54,6 +55,8 @@ const elements = {
   bridgeStatus: document.querySelector("#bridgeStatus"),
   scannerStatus: document.querySelector("#scannerStatus"),
   supportStatus: document.querySelector("#supportStatus"),
+  selectorVersion: document.querySelector("#selectorVersion"),
+  scanDiagnostics: document.querySelector("#scanDiagnostics"),
   status: document.querySelector("#status"),
   statsGrid: document.querySelector("#statsGrid"),
   count: document.querySelector("#count"),
@@ -119,7 +122,7 @@ function createEmptyScanState() {
     status: "idle",
     stage: "recognizing",
     mode: "limit",
-    limit: 200,
+    limit: 20,
     batch: 0,
     lastAdded: 0,
     noNewRounds: 0,
@@ -249,12 +252,12 @@ async function scanVisibleCards() {
 
 async function startAutoScan() {
   try {
-    const limitValue = document.querySelector("input[name='scanLimit']:checked")?.value || "200";
-    const limit = limitValue === "all" ? null : Number(limitValue);
+    const limitValue = document.querySelector("input[name='scanLimit']:checked")?.value || "20";
+    const limit = Math.max(10, Math.min(20, Number(limitValue)));
     const response = await sendScannerMessage({
       type: "REVIVAL_START_SCAN",
       limit,
-      mode: limit ? "limit" : "all",
+      mode: "limit",
       autoScroll: Boolean(elements.autoScrollToggle.checked)
     });
     if (!response?.ok) throw new Error(response?.error || "无法开始扫描");
@@ -362,6 +365,11 @@ function updateDiagnostics(tabUrl, result) {
     : isWebAppUrl(tabUrl)
       ? "可检测扩展连接"
       : "不支持扫描";
+  const diagnostics = result.pageStatus?.diagnostics || state.scanState?.diagnostics;
+  elements.selectorVersion.textContent = result.pageStatus?.selectorVersion || state.scanState?.selectorVersion || "等待扫描";
+  elements.scanDiagnostics.textContent = diagnostics
+    ? `${diagnostics.candidateCardCount ?? 0} / ${diagnostics.validFavoriteCount ?? 0} / ${diagnostics.filteredCount ?? 0}`
+    : "等待扫描";
 }
 
 function updatePageHealth(tabUrl, pageStatus) {
@@ -374,7 +382,7 @@ function updatePageHealth(tabUrl, pageStatus) {
     elements.pageHealth.className = "page-health warn";
     elements.pageHealth.textContent = isWebAppUrl(tabUrl)
       ? "当前是收藏复活网页。要扫描旧收藏，请切到你本人小红书收藏页；要检测连接，可以回到网页点击检测。"
-      : "当前标签页不是小红书收藏页。请先打开你本人的小红书网页版收藏页。";
+      : "请先打开小红书首页，再由你自己进入「我」→「收藏」。扩展不会猜测个人主页链接，也不会模拟登录。";
     return;
   }
   if (pageStatus?.blocked) {
@@ -385,7 +393,7 @@ function updatePageHealth(tabUrl, pageStatus) {
   const activeText = pageStatus?.activeTab ? `当前标签：${pageStatus.activeTab}。` : "";
   elements.pageHealth.className = pageStatus?.looksCollection ? "page-health ok" : "page-health warn";
   elements.pageHealth.textContent = pageStatus?.looksCollection
-    ? `${activeText}已识别本人收藏页或疑似收藏页，可以开始扫描当前可见收藏。`
+    ? `${activeText}已识别收藏页，可以开始扫描当前已加载的可见收藏。`
     : `${activeText}已检测到小红书页面，但还不能确认是收藏页。请先切到“收藏”标签。`;
 }
 
