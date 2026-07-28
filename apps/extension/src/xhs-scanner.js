@@ -151,7 +151,8 @@
     return {
       status: "idle",
       stage: "recognizing",
-      $110,
+      mode: "limit",
+      limit: 20,
       autoScroll: true,
       batch: 0,
       lastAdded: 0,
