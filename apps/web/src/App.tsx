@@ -696,6 +696,15 @@ export function AppContent({ initialState, initialSettings, runtime, writeGate, 
     }));
   }
 
+  function saveActionOutput(cardId: string, output: string) {
+    setState((current) => ({
+      ...current,
+      actionCards: current.actionCards.map((card) =>
+        card.id === cardId ? { ...card, fields: { ...card.fields, "复活产出/备注": output.trim() }, updatedAt: new Date().toISOString() } : card
+      )
+    }));
+    setToast(output.trim() ? "产出已保存，可以标记完成" : "已清空产出备注");
+  }
   function updateCardField(cardId: string, field: "title" | "goal" | "nextAction", value: string) {
     setState((current) => ({
       ...current,
@@ -1602,6 +1611,7 @@ export function AppContent({ initialState, initialSettings, runtime, writeGate, 
               changeStatus={changeStatus}
               updateSavedNote={updateSavedNote}
               updateCardField={updateCardField}
+              saveActionOutput={saveActionOutput}
               updateTaskStatus={updateTaskStatus}
               regenerateActionCard={regenerateActionCard}
               addActionCardToPlan={addActionCardToPlan}
@@ -2168,7 +2178,7 @@ function ImportView(props: {
               <p className="quiet-copy">这条收藏信息较少，分类可能不准。可以补充一句“我为什么收藏它”，再选择复活用途生成行动卡。</p>
             )}
             {props.importSessionCount >= 3 && <p className="quiet-copy">你已经连续导入了 {props.importSessionCount} 条，可以去智能专辑看看系统整理出的主题。</p>}
-            {usingMock && <p className="quiet-copy">当前使用：本地规则 / Mock AI。生成质量可能有限，配置真实 AI 后分类和行动卡会更具体。</p>}
+            {usingMock && <p className="quiet-copy">当前为本地规则模式，分类与行动建议为基础版，可人工修改；不会自动上传收藏内容。</p>}
           </div>
           <div className="card-actions">
             <button className="primary-button" onClick={() => props.reviveSavedItem(props.lastImportResult!.item.id)} data-testid="revive-imported-item">复活这条</button>
@@ -2200,7 +2210,7 @@ function ImportView(props: {
           <span><Share2 size={18} /> 导入一条新收藏</span>
           <small>第一次测试，先从这里开始</small>
         </div>
-        {usingMock && <p className="quiet-copy">当前使用：本地规则 / Mock AI。它能跑通流程，但真实 AI 会让分类和行动卡更贴近原帖主题。</p>}
+        {usingMock && <p className="quiet-copy">当前为本地规则模式，分类与行动建议为基础版，可人工修改；不会自动上传收藏内容。</p>}
         <QuickImportForm input={props.importInput} setInput={props.setImportInput} onSubmit={props.handleImport} isLoading={props.isImporting} />
         <ImportSamplePreview onUseSample={props.setImportInput} />
       </section>
@@ -2974,6 +2984,7 @@ function DetailView(props: {
   changeStatus: (itemId: string, status: ItemStatus) => void;
   updateSavedNote: (itemId: string, userNote: string) => void;
   updateCardField: (cardId: string, field: "title" | "goal" | "nextAction", value: string) => void;
+  saveActionOutput: (cardId: string, output: string) => void;
   updateTaskStatus: (cardId: string, taskId: string, status: ItemStatus) => void;
   regenerateActionCard: (itemId: string) => void;
   addActionCardToPlan: (cardId: string) => void;
@@ -2981,6 +2992,7 @@ function DetailView(props: {
   onContinueImport: () => void;
 }) {
   const [noteDraft, setNoteDraft] = useState(props.item.userNote);
+  const [outputDraft, setOutputDraft] = useState(String(props.card.fields["复活产出/备注"] ?? ""));
   const lowConfidence = props.item.classificationConfidence === "low";
   function saveNoteAndRegenerate() {
     props.updateSavedNote(props.item.id, noteDraft);
@@ -3026,6 +3038,11 @@ function DetailView(props: {
             <textarea value={props.card.nextAction} onChange={(event) => props.updateCardField(props.card.id, "nextAction", event.target.value)} />
           </label>
 
+          <label className="edit-field" data-testid="action-output-field">
+            <span>产出 / 备注</span>
+            <textarea value={outputDraft} onChange={(event) => setOutputDraft(event.target.value)} placeholder="写下这次完成了什么、链接、结论或下一步" />
+          </label>
+          <button className="secondary-action" onClick={() => props.saveActionOutput(props.card.id, outputDraft)} data-testid="save-action-output">保存产出</button>
           <div className="field-grid compact-fields">
             <div className="field-card"><span>为什么值得复活</span><strong>{props.card.whySaved}</strong></div>
             <div className="field-card"><span>打开原帖后重点看</span><strong>{props.card.openOriginalFocus.join(" / ")}</strong></div>
@@ -4215,14 +4232,14 @@ function SearchResultRow(props: {
 }
 
 function StatusButtons(props: { item: SavedItem; changeStatus: (itemId: string, status: ItemStatus) => void }) {
-  const statuses: ItemStatus[] = ["not_started", "today", "in_progress", "completed", "snoozed"];
+  const completed = props.item.status === "completed";
   return (
-    <div className="status-buttons">
-      {statuses.map((status) => (
-        <button key={status} data-testid={`status-${status}`} className={props.item.status === status ? "active" : ""} onClick={() => props.changeStatus(props.item.id, status)}>
-          {DISPLAY_STATUS_LABELS[status]}
-        </button>
-      ))}
+    <div className="status-buttons" aria-label="行动完成路径">
+      {props.item.status === "not_started" && <button onClick={() => props.changeStatus(props.item.id, "today")} data-testid="status-today">加入今日</button>}
+      {!completed && <button className="primary-button" onClick={() => props.changeStatus(props.item.id, "in_progress")} data-testid="start-action">开始行动</button>}
+      {!completed && <button onClick={() => props.changeStatus(props.item.id, "completed")} data-testid="status-completed">标记完成</button>}
+      {!completed && <button onClick={() => props.changeStatus(props.item.id, "snoozed")} data-testid="status-snoozed">暂时搁置</button>}
+      {completed && <button onClick={() => props.changeStatus(props.item.id, "in_progress")} data-testid="undo-completed">撤销完成</button>}
     </div>
   );
 }
