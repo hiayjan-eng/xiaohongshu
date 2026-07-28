@@ -109,6 +109,8 @@ export interface SavedItem {
   sourcePlatform: "xiaohongshu" | "manual" | "other";
   sourceUrl: string;
   rawShareText: string;
+  /** Derived locally from rawShareText for classification; rawShareText is retained unchanged. */
+  normalizedContentText?: string;
   title: string;
   userNote: string;
   contentDomain: ContentDomain;
