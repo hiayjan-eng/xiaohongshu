@@ -120,6 +120,7 @@ export function createSavedItemRecord(
     sourcePlatform: detectPlatform(input.sourceUrl),
     sourceUrl: input.sourceUrl,
     rawShareText: input.rawShareText,
+    normalizedContentText: normalizeContentText(input.title, input.rawShareText),
     title: displayTitle,
     userNote: input.userNote,
     contentDomain,
@@ -927,4 +928,16 @@ function isTextNormalizationUncertain(rawTitle: string, cleanedTitle: string, di
 
 function isString(value: unknown): value is string {
   return typeof value === "string";
+}
+function normalizeContentText(title: string, rawShareText: string): string {
+  return `${title} ${rawShareText}`
+    .normalize("NFC")
+    .replace(/https?:\/\/\S+/gi, " ")
+    .replace(/复制这段文字(?:后)?[，,。；;\s]*/g, " ")
+    .replace(/打开[【\[]?小红书[】\]]?(?:查看?|看)?(?:笔记)?/g, " ")
+    .replace(/去?小红书(?:查看?|看)?(?:笔记)?/g, " ")
+    .replace(/(?:分享自|来自)小红书/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 480);
 }
