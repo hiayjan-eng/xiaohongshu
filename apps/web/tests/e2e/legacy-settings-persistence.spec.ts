@@ -39,6 +39,15 @@ async function assertNoActivationStorage(page: Page) {
   }))).toEqual({ marker: null, databases: [] });
 }
 
+async function selectThemeWhenReady(page: Page, currentThemeId: "dawn" | "lavender-mint", nextThemeId: "dawn" | "lavender-mint") {
+  await expect(page.getByTestId(`theme-${currentThemeId}`)).toHaveAttribute("aria-pressed", "true");
+  const nextTheme = page.getByTestId(`theme-${nextThemeId}`);
+  await expect(nextTheme).toBeVisible();
+  await expect(nextTheme).toBeEnabled();
+  await nextTheme.click({ trial: true });
+  await nextTheme.click();
+}
+
 test.describe("Legacy settings authority", () => {
   test("uses the standalone theme key over an obsolete app-state settings snapshot", async ({ page }) => {
     await seedOnceThenReload(page, "dawn");
@@ -51,8 +60,7 @@ test.describe("Legacy settings authority", () => {
 
   test("persists a legacy fixture theme change through refresh without overwriting state or achievements", async ({ page }) => {
     await seedOnceThenReload(page, "lavender-mint");
-    await expect(page.getByTestId("theme-lavender-mint")).toHaveAttribute("aria-pressed", "true");
-    await page.getByTestId("theme-dawn").click();
+    await selectThemeWhenReady(page, "lavender-mint", "dawn");
     await expect.poll(() => page.evaluate(() => window.localStorage.getItem("collection-revival-theme"))).toBe("dawn");
     await page.reload();
     await expect(page.getByTestId("theme-dawn")).toHaveAttribute("aria-pressed", "true");
