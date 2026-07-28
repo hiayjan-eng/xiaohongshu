@@ -4,7 +4,7 @@
 
   const SCAN_STATE_KEY = "revival-extension-scan-state";
   const CHECKPOINT_KEY = "revival-extension-checkpoint";
-  const SELECTOR_VERSION = "xhs-fav-container-v2";
+  const SELECTOR_VERSION = "xhs-fav-visible-cards-v3";
   const STAGES = {
     recognizing: "识别页面",
     loading: "加载收藏",
@@ -88,6 +88,11 @@
       (async () => {
         try {
           await hydrateState();
+          const pageStatus = getPageStatus();
+          if (pageStatus.blocked || !pageStatus.looksCollection) {
+            sendResponse({ ok: false, error: pageStatus.reason || "当前页面还不能确认是收藏标签。请先进入「我」→「收藏」。", scanState: runtime.state, pageStatus });
+            return;
+          }
           await scanOnce(false);
           runtime.state.status = "completed";
           runtime.state.stage = "complete";
@@ -119,8 +124,8 @@
             ...createEmptyState(),
             status: "scanning",
             stage: "recognizing",
-            mode: message.mode === "all" ? "all" : "limit",
-            limit: Number.isFinite(message.limit) ? Number(message.limit) : null,
+            mode: "limit",
+            limit: Math.max(10, Math.min(20, Number.isFinite(message.limit) ? Number(message.limit) : 20)),
             autoScroll: message.autoScroll !== false,
             pageUrl: window.location.href,
             pageStatus,
@@ -267,6 +272,7 @@
     runtime.state.batch += 1;
     runtime.state.noNewRounds = added === 0 ? runtime.state.noNewRounds + 1 : 0;
     runtime.state.pageStatus = scanResult.pageStatus;
+    runtime.state.diagnostics = scanResult.pageStatus.diagnostics;
     runtime.state.message = added > 0
       ? `本轮新增 ${added} 条，已发现 ${runtime.state.items.length} 条。`
       : `本轮没有新增，已发现 ${runtime.state.items.length} 条。`;
@@ -324,7 +330,13 @@
     const isXhs = /xiaohongshu\.com|xhslink\.com/i.test(location.hostname);
     const activeTab = detectActiveTab();
     const root = findCollectionRoot();
-    const looksCollection = Boolean(root) && (/收藏|favorite|collection|fav/i.test(activeTab + " " + location.href) || /收藏/.test(text));
+    const pageUrl = String(location.href || "");
+    const profilePage = /\/user\/profile\//.test(pageUrl);
+    const favUrl = /[?&]tab=fav(?:&|$)/.test(pageUrl);
+    const activeFavoriteTab = /收藏|favorite|fav/i.test(activeTab);
+    const candidateCardCount = root ? countVisibleNoteLinks(root.element) : 0;
+    // 真实收藏页需同时具备个人主页和已加载卡片，并由 URL 或激活标签确认；不靠旧 URL 猜测。
+    const looksCollection = isXhs && !blocked && profilePage && candidateCardCount > 0 && (favUrl || activeFavoriteTab);
     return {
       blocked,
       reason: blocked ? "页面出现登录、验证码或访问限制，扩展已停止扫描，请在浏览器里处理后再继续。" : "",
@@ -333,7 +345,17 @@
       activeTab,
       containerType: root?.containerType || "unknown",
       selectorVersion: SELECTOR_VERSION,
-      url: location.href
+      url: location.href,
+      diagnostics: {
+        pageType: profilePage ? "user-profile" : "other",
+        profilePage,
+        favUrl,
+        activeFavoriteTab,
+        candidateCardCount,
+        validFavoriteCount: 0,
+        filteredCount: 0,
+        filteredReasons: {}
+      }
     };
   }
 
@@ -342,14 +364,25 @@
     if (!pageStatus.looksCollection) return { items: [], pageStatus };
     const rootInfo = findCollectionRoot();
     const root = rootInfo?.element || document.body;
-    const anchors = Array.from(root.querySelectorAll("a[href]"))
-      .filter((anchor) => isElementVisible(anchor))
-      .filter((anchor) => isLikelyXhsNoteUrl(anchor.href));
-    const cards = anchors
-      .map((anchor) => extractCard(anchor, root, rootInfo, pageStatus))
-      .filter(Boolean);
-
-    return { items: dedupeWithinBatch(cards).slice(0, 260), pageStatus };
+    const allAnchors = Array.from(root.querySelectorAll("a[href]"));
+    const visibleAnchors = allAnchors.filter((anchor) => isElementVisible(anchor));
+    const noteAnchors = visibleAnchors.filter((anchor) => isLikelyXhsNoteUrl(anchor.href));
+    const cards = noteAnchors.map((anchor) => extractCard(anchor, root, rootInfo, pageStatus)).filter(Boolean);
+    const items = dedupeWithinBatch(cards).slice(0, 20);
+    const filteredReasons = {
+      hidden: Math.max(0, allAnchors.length - visibleAnchors.length),
+      nonNoteLink: Math.max(0, visibleAnchors.length - noteAnchors.length),
+      invalidCard: Math.max(0, noteAnchors.length - cards.length),
+      duplicate: Math.max(0, cards.length - items.length)
+    };
+    pageStatus.diagnostics = {
+      ...pageStatus.diagnostics,
+      candidateCardCount: noteAnchors.length,
+      validFavoriteCount: items.length,
+      filteredCount: Object.values(filteredReasons).reduce((total, value) => total + value, 0),
+      filteredReasons
+    };
+    return { items, pageStatus };
   }
 
   function findCollectionRoot() {
@@ -707,7 +740,7 @@
 
   function updateMilestones(existing, count) {
     const milestones = new Set(existing || []);
-    [100, 300, 500, 1000].forEach((value) => {
+    [10, 20].forEach((value) => {
       if (count >= value) milestones.add(`已找回 ${value} 条旧收藏`);
     });
     return [...milestones];
