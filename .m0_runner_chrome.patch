@@ -1,0 +1,13 @@
+diff --git a/apps/extension/scripts/run-full-scan-spike.mjs b/apps/extension/scripts/run-full-scan-spike.mjs
+--- a/apps/extension/scripts/run-full-scan-spike.mjs
++++ b/apps/extension/scripts/run-full-scan-spike.mjs
+@@ -21,7 +21,10 @@
+   resolve(extensionRoot, "src", "full-scan-content.js")
+ ];
+ 
+-const browser = await chromium.launch({ headless: true });
++const browser = await chromium.launch({
++  headless: true,
++  executablePath: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
++});
+ const context = await browser.newContext();
