@@ -1,4 +1,4 @@
-﻿# 收藏复活系统 V0.1 核心收藏库 Phase 1 基线审计
+# 收藏复活系统 V0.1 核心收藏库 Phase 1 基线审计
 
 `V0_1_CORE_LIBRARY_STATUS: FAIL_BLOCKING`
 
