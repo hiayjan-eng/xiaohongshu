@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { analyzeSourceUrl, diagnoseSavedItems, normalizeSavedContent } from "@revival/database";
+import { analyzeSourceUrl, diagnoseSavedItems, getPreferredSourceUrl, normalizeSavedContent } from "@revival/database";
 import { processImportBatch } from "@revival/import-service";
 import { readAppState, STORAGE_KEY, submitQuickImportForm } from "./helpers";
 
@@ -18,6 +18,8 @@ test.describe("V0.1 Phase 2 data quality", () => {
     expect(first.sourceId).toBe(NOTE_ID);
     expect(first.canonicalSourceUrl).toContain(`/explore/${NOTE_ID}`);
     expect(second.sourceId).toBe(first.sourceId);
+    expect(getPreferredSourceUrl({ sourceUrl: noteUrl(NOTE_ID, "raw"), canonicalSourceUrl: first.canonicalSourceUrl })).toContain("/discovery/item/");
+    expect(getPreferredSourceUrl({ sourceUrl: noteUrl(NOTE_ID, "raw"), canonicalSourceUrl: first.canonicalSourceUrl, userCorrectedSourceUrl: noteUrl(OTHER_NOTE_ID, "corrected") })).toContain(OTHER_NOTE_ID);
 
     const profile = analyzeSourceUrl(`https://www.xiaohongshu.com/user/profile/${NOTE_ID}`);
     expect(profile.status).toBe("invalid");
