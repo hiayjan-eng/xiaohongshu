@@ -58,6 +58,7 @@ import {
   SAVED_INTENTS,
   STATUS_LABELS,
   type ActionCard,
+  type ActionIntentKey,
   type AppState,
   type Category,
   type ExtensionImportPayload,
@@ -95,6 +96,7 @@ const SMART_ALBUM_MATCH_THRESHOLDS = {
 } as const;
 type PoolViewMode = "cards" | "table";
 type ImportSuccessResult = { item: SavedItem; card?: ActionCard };
+type ActionScheduleInput = { cardId: string; plannedDate: string; estimatedMinutes: 10 | 20 | 30 | 60; note: string };
 
 const navItems: Array<{ key: ViewKey; label: string; icon: typeof LayoutDashboard }> = [
   { key: "dashboard", label: "今日复活", icon: LayoutDashboard },
@@ -721,12 +723,25 @@ export function AppContent({ initialState, initialSettings, runtime, writeGate, 
       return;
     }
 
+    const selectedActionIntent = mapReviveIntentToActionIntent(reviveIntent);
+    if (selectedActionIntent === "organize_only") {
+      const now = new Date().toISOString();
+      setState((current) => ({
+        ...current,
+        savedItems: current.savedItems.map((entry) => entry.id === itemId
+          ? { ...entry, savedIntent: "以后查阅", intent: "以后查阅", status: "not_started", updatedAt: now }
+          : entry)
+      }));
+      setToast("已整理留存，不会强制创建行动卡");
+      return;
+    }
+
     const existingCard = state.actionCards.find((entry) => entry.savedItemId === itemId);
-    const intentText = reviveIntent ? `\n你准备拿它做什么：${reviveIntent}` : "";
-    setToast(existingCard ? "正在重新生成行动卡..." : "正在为这条收藏生成行动卡...");
+    setToast(existingCard ? "正在按新用途重新生成行动卡…" : "正在按选定用途生成行动卡…");
     const draft = await aiClient.regenerateActionCard(itemId, {
       savedItem: item,
-      userNote: `${item.userNote}${intentText}`.trim()
+      userNote: item.userNote,
+      selectedActionIntent
     });
     const now = new Date().toISOString();
 
@@ -755,6 +770,8 @@ export function AppContent({ initialState, initialSettings, runtime, writeGate, 
                   followUp: draft.followUp,
                   fields: draft.structuredFields,
                   tasks: cloneTasksForCard(entry.id, draft.tasks),
+                  generatedFromIntent: draft.generatedFromIntent,
+                  templateVersion: draft.templateVersion,
                   updatedAt: now
                 }
               : entry
@@ -773,7 +790,7 @@ export function AppContent({ initialState, initialSettings, runtime, writeGate, 
     });
     setSelectedItemId(itemId);
     setActiveView("detail");
-    setToast(aiClient.getStatus().fallbackActive ? "已用本地规则生成行动卡" : "已生成行动卡");
+    setToast("已按选定用途生成行动卡");
   }
 
   async function regenerateActionCard(itemId: string) {
@@ -1192,38 +1209,128 @@ export function AppContent({ initialState, initialSettings, runtime, writeGate, 
     setToast("已撤销上次分类修改");
   }
 
-  function addActionCardToPlan(cardId: string) {
-    const card = state.actionCards.find((entry) => entry.id === cardId);
+  function addActionCardToPlan(input: ActionScheduleInput) {
+    const card = state.actionCards.find((entry) => entry.id === input.cardId);
     const item = state.savedItems.find((entry) => entry.id === card?.savedItemId);
-    if (!card || !item) return;
-    const dateInput = window.prompt("准备哪天做？可填：今天 / 明天 / 本周 / 2026-07-20", "今天")?.trim() || "今天";
-    const estimatedInput = window.prompt("预计用时（分钟）：10 / 20 / 30 / 60", parseEstimatedMinutes(card.estimatedTime).toString())?.trim() || "20";
-    const nextAction = window.prompt("下一步行动，可以微调", card.nextAction)?.trim() || card.nextAction;
+    if (!card || !item) {
+      setToast("保存计划失败，数据没有被修改");
+      return;
+    }
+    const plannedDate = new Date(`${input.plannedDate}T09:00:00`);
+    if (Number.isNaN(plannedDate.getTime())) {
+      setToast("请选择有效的计划日期");
+      return;
+    }
     const now = new Date();
+    const existing = state.planCards?.find((entry) => entry.actionCardId === card.id);
     const planCard: PlanCard = {
-      id: createLocalId("plan_card"),
+      id: existing?.id ?? createLocalId("plan_card"),
       savedItemId: item.id,
       actionCardId: card.id,
       title: card.title,
       sourceTitle: formatItemTitle(item),
-      plannedDate: parsePlanDate(dateInput, now).toISOString(),
-      estimatedMinutes: clampEstimatedMinutes(Number(estimatedInput)),
-      oneNextStep: nextAction,
+      plannedDate: plannedDate.toISOString(),
+      estimatedMinutes: input.estimatedMinutes,
+      actualMinutes: existing?.actualMinutes,
+      note: input.note.trim(),
+      oneNextStep: card.nextAction,
       doneCriteria: card.doneCriteria,
       status: "planned",
       reminderEnabled: false,
-      createdAt: now.toISOString()
+      createdAt: existing?.createdAt ?? now.toISOString(),
+      updatedAt: now.toISOString()
     };
+    const scheduledStatus: ItemStatus = isSameDate(plannedDate, now) ? "scheduled_today" : "scheduled";
     setState((current) => ({
       ...current,
-      planCards: [planCard, ...(current.planCards ?? [])],
-      savedItems: current.savedItems.map((entry) =>
-        entry.id === item.id ? { ...entry, status: entry.status === "not_started" ? "today" : entry.status, updatedAt: now.toISOString() } : entry
-      )
+      planCards: [planCard, ...(current.planCards ?? []).filter((entry) => entry.actionCardId !== card.id)],
+      savedItems: current.savedItems.map((entry) => entry.id === item.id
+        ? { ...entry, status: scheduledStatus, updatedAt: now.toISOString() }
+        : entry)
     }));
-    setToast(isSameDate(planCard.plannedDate, new Date()) ? "已加入今天的计划卡" : "已加入轻量计划卡");
+    setToast(`已安排到${formatPlanDateLabel(planCard.plannedDate)} · ${planCard.estimatedMinutes} 分钟`);
   }
 
+  function addActionCardToToday(cardId: string) {
+    const card = state.actionCards.find((entry) => entry.id === cardId);
+    if (!card) {
+      setToast("加入今日失败，数据没有被修改");
+      return;
+    }
+    const existing = state.planCards?.find((entry) => entry.actionCardId === cardId);
+    addActionCardToPlan({
+      cardId,
+      plannedDate: formatLocalDateInput(new Date()),
+      estimatedMinutes: normalizePlanMinutes(existing?.estimatedMinutes ?? parseEstimatedMinutes(card.estimatedTime)),
+      note: existing?.note ?? ""
+    });
+    setToast("已加入今天，可以现在开始");
+  }
+
+  function startAction(cardId: string) {
+    const card = state.actionCards.find((entry) => entry.id === cardId);
+    if (!card) return;
+    const now = new Date().toISOString();
+    setState((current) => ({
+      ...current,
+      planCards: (current.planCards ?? []).map((entry) => entry.actionCardId === cardId ? { ...entry, status: "doing", updatedAt: now } : entry),
+      savedItems: current.savedItems.map((entry) => entry.id === card.savedItemId ? { ...entry, status: "in_progress", updatedAt: now } : entry)
+    }));
+    setToast("行动已开始，完成后保存产出");
+  }
+
+  function snoozeAction(cardId: string) {
+    const card = state.actionCards.find((entry) => entry.id === cardId);
+    if (!card) return;
+    const now = new Date().toISOString();
+    setState((current) => ({
+      ...current,
+      planCards: (current.planCards ?? []).map((entry) => entry.actionCardId === cardId ? { ...entry, status: "cancelled", cancelledAt: now, updatedAt: now } : entry),
+      savedItems: current.savedItems.map((entry) => entry.id === card.savedItemId ? { ...entry, status: "snoozed", updatedAt: now } : entry)
+    }));
+    setToast("已暂时搁置，可以稍后重新安排");
+  }
+
+  function completeAction(cardId: string, output: string, actualMinutes: 10 | 20 | 30 | 60) {
+    const card = state.actionCards.find((entry) => entry.id === cardId);
+    const item = state.savedItems.find((entry) => entry.id === card?.savedItemId);
+    if (!card || !item || item.status !== "in_progress") {
+      setToast("请先开始行动，再标记完成");
+      return;
+    }
+    const now = new Date().toISOString();
+    setState((current) => ({
+      ...current,
+      actionCards: current.actionCards.map((entry) => entry.id === cardId ? {
+        ...entry,
+        fields: { ...entry.fields, "复活产出/备注": output.trim() },
+        outputSavedAt: now,
+        updatedAt: now
+      } : entry),
+      planCards: (current.planCards ?? []).map((entry) => entry.actionCardId === cardId ? {
+        ...entry,
+        status: "done",
+        actualMinutes,
+        completedAt: entry.completedAt ?? now,
+        updatedAt: now
+      } : entry),
+      savedItems: current.savedItems.map((entry) => entry.id === item.id ? { ...entry, status: "completed", updatedAt: now } : entry)
+    }));
+    triggerCompletionReward(updateItemStatus(state.savedItems, item.id, "completed"));
+    if (state.planCards?.some((entry) => entry.actionCardId === cardId)) unlockAchievements(["plan_finished"]);
+  }
+
+  function undoCompletedAction(cardId: string) {
+    const card = state.actionCards.find((entry) => entry.id === cardId);
+    if (!card) return;
+    const now = new Date().toISOString();
+    setState((current) => ({
+      ...current,
+      planCards: (current.planCards ?? []).map((entry) => entry.actionCardId === cardId ? { ...entry, status: "doing", completedAt: undefined, updatedAt: now } : entry),
+      savedItems: current.savedItems.map((entry) => entry.id === card.savedItemId ? { ...entry, status: "in_progress", updatedAt: now } : entry)
+    }));
+    setToast("已撤销完成，行动回到进行中");
+  }
   function updatePlanCardStatus(planCardId: string, status: PlanCardStatus) {
     const now = new Date().toISOString();
     const previousSnapshot = state;
