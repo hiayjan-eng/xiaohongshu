@@ -2,10 +2,11 @@
   "name": "@revival/extension",
   "version": "0.1.0",
   "private": true,
-  "description": "Collection Revival browser extension Beta for user-triggered visible DOM scanning.",
+  "description": "Collection Revival browser extension Beta and M0 full-scan technical spike.",
   "scripts": {
-    "typecheck": "node ./scripts/validate-extension.mjs",
+    "typecheck": "node ./scripts/validate-extension.mjs && node ./scripts/validate-full-scan-spike.mjs",
     "test:dom": "node ./scripts/validate-extension.mjs",
+    "test:full-scan-spike": "node ./scripts/run-full-scan-spike.mjs",
     "test:profiles": "node ./scripts/verify-extension-profiles.mjs",
     "build": "node ./scripts/build-extension.mjs",
     "build:preview": "node ./scripts/build-extension.mjs --preview"
