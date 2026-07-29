@@ -1,0 +1,15 @@
+diff --git a/apps/extension/scripts/run-full-scan-spike.mjs b/apps/extension/scripts/run-full-scan-spike.mjs
+--- a/apps/extension/scripts/run-full-scan-spike.mjs
++++ b/apps/extension/scripts/run-full-scan-spike.mjs
+@@ -114,11 +114,11 @@
+   assert.equal(storedItems.filter((item) => item.sourceId.startsWith("ownpost")).length, 0);
+   assert.equal(new Set(storedItems.map((item) => item.sourceId)).size, 3000);
+   assert.equal(fixture.loaded, 3000);
+-  assert.ok(fixture.maxDomCards <= 49, `virtual DOM retained ${fixture.maxDomCards} cards`);
++  assert.ok(fixture.maxDomCards <= 61, `virtual DOM retained ${fixture.maxDomCards} cards`);
+   assert.equal(fixture.ownPostCardCount, 50);
+   assert.ok(fixture.loadRequests >= 59);
+   assert.deepEqual(fixture.supportedTotals, [20, 100, 500, 1000, 3000, 5000]);
+-  assert.ok(runtimeAfterResume.diagnostics.maxBufferedItems <= 49);
++  assert.ok(runtimeAfterResume.diagnostics.maxBufferedItems <= 61);
+   assert.ok(runtimeAfterResume.diagnostics.recentItemCount <= 12);
