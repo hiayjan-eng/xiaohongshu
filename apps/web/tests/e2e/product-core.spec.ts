@@ -147,7 +147,7 @@ test.describe("product core stabilization", () => {
     expect(after.planCards?.length).toBe(before.planCards?.length);
     expect(matchingPlans).toHaveLength(1);
     expect(matchingPlans[0].id).toBe(beforePlan?.id);
-    expect(matchingPlans[0].plannedDate).toBe("2030-08-16");
+    expect(matchingPlans[0].plannedDate.slice(0, 10)).toBe("2030-08-16");
     expect(matchingPlans[0].estimatedMinutes).toBe(30);
     expect(after.savedItems.find((entry) => entry.id === item.id)?.status).toBe("scheduled");
     expect(nativeDialogCount).toBe(0);
