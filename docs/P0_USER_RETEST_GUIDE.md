@@ -43,3 +43,14 @@ ZIP：`C:\Users\86178\Documents\小红书收藏夹\release-artifacts\collection-
 如果卡片被识别，进度上限只能显示 10 或 20，不能出现 `0/200`。如果暂时识别为零，页面仍应显示“已确认收藏页”，并给出提取根、链接和 data-note 计数；可用“复制脱敏诊断”回传，不要复制或发送真实收藏标题、作者、链接或 ID。
 
 点击导入时，0.2.4 Preview 测试包默认只会打开：`https://xiaohongshu-git-p0-core-revival-loop-rescue-ayj.vercel.app/old-import`。
+## P0 行动执行闭环复验
+
+请使用分支 Preview：`https://xiaohongshu-git-p0-core-revival-loop-rescue-ayj.vercel.app`。导入一条 AI 图文方法收藏，进入“查看收藏索引”，选择“学会这个方法”。行动卡应显示用途模板 `learn_method / action-intent-v1`，产出应为“1 张测试图文 + 1 份 3-5 步操作清单”，不能出现内容选题、标题钩子或封面结构任务。
+
+依次执行：加入今日 → 刷新 → 开始行动 → 填写并保存产出 → 标记完成 → 关闭第一次复活提示 → 刷新。加入今日后提示应为“已加入今天，可以现在开始”，今日和行动计划中只能存在一张对应 PlanCard；刷新后仍是同一收藏。完成后应继续显示保存的产出、预计/实际用时和下一步，统计只增加一次。
+
+再用同一收藏切换“用在工作里”和“变成自己的内容”，目标、步骤、产出、完成标准应明显不同；选择“只是整理留存”后应回到收藏索引且不保留行动卡。加入计划应只出现产品内弹窗，验证今天/明天/自选日期、10/20/30/60 分钟、备注、Escape 关闭和修改计划不重复。手机宽度下弹窗不得横向溢出。
+
+本轮不需要重新验收 Extension 0.2.4、智能专辑、迁移、main 或 Production。
+
+`P0_ACTION_EXECUTION_STATUS: READY_FOR_USER_RETEST`

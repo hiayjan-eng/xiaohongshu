@@ -67,3 +67,10 @@ Vercel 控制面确认上述 Preview 为 Ready；但本执行环境无法建立�
 本次只交付扩展 Preview 测试包，不修改 Web 业务实现。包版本为 `0.2.4`，目录为 `release-artifacts/extension-beta-preview`，ZIP 为 `release-artifacts/collection-revival-extension-beta-preview-v0.2.4.zip`。包内默认导入目标是分支 Preview 别名的 `/old-import`，并且只加入精确 Preview origin；生产源包仍为 `0.2.3`，默认导入目标不变。
 
 扩展 DOM fixture、Preview packaging profile 和 production profile 均已通过。下一步只等待该 P0 分支的 Preview 别名指向本次提交，再由用户用同一真实收藏页完成复验；不会创建 PR、合并 main、Promote 或部署 Production。
+## P0 行动执行闭环
+
+本轮代码验证基准为 `a10f49bd75867726ceb23c11b744485d4bbb7399`，分支为 `p0-core-revival-loop-rescue`。`pnpm typecheck`、`pnpm build`、`pnpm check:e2e-core-general`（126/126）和 `git diff --check` 均通过。新增用途绑定、今日 upsert、产品内计划弹窗、明确状态机、产出/完成持久化与同收藏详情路由；未修改 Extension 0.2.4、存储迁移、智能专辑算法、main 或 Production。
+
+Preview 继续使用分支别名：`https://xiaohongshu-git-p0-core-revival-loop-rescue-ayj.vercel.app`。最终同 SHA 状态与合成 Smoke 以本次发布流程的 Vercel 检查为准；不会创建 PR、merge main、Promote 或部署 Production。
+
+`P0_ACTION_EXECUTION_STATUS: READY_FOR_USER_RETEST`
