@@ -731,12 +731,17 @@ export function AppContent({ initialState, initialSettings, runtime, writeGate, 
     const selectedActionIntent = mapReviveIntentToActionIntent(reviveIntent);
     if (selectedActionIntent === "organize_only") {
       const now = new Date().toISOString();
-      setState((current) => ({
-        ...current,
-        savedItems: current.savedItems.map((entry) => entry.id === itemId
-          ? { ...entry, savedIntent: "以后查阅", intent: "以后查阅", status: "not_started", updatedAt: now }
-          : entry)
-      }));
+      setState((current) => {
+        const removedCardIds = new Set(current.actionCards.filter((entry) => entry.savedItemId === itemId).map((entry) => entry.id));
+        return {
+          ...current,
+          savedItems: current.savedItems.map((entry) => entry.id === itemId
+            ? { ...entry, savedIntent: "以后查阅", intent: "以后查阅", status: "not_started", updatedAt: now }
+            : entry),
+          actionCards: current.actionCards.filter((entry) => entry.savedItemId !== itemId),
+          planCards: (current.planCards ?? []).filter((entry) => !removedCardIds.has(entry.actionCardId))
+        };
+      });
       setToast("已整理留存，不会强制创建行动卡");
       return;
     }
