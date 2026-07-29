@@ -100,6 +100,7 @@ type ActionScheduleInput = { cardId: string; plannedDate: string; estimatedMinut
 
 const navItems: Array<{ key: ViewKey; label: string; icon: typeof LayoutDashboard }> = [
   { key: "dashboard", label: "今日复活", icon: LayoutDashboard },
+  { key: "plans", label: "行动计划", icon: CalendarCheck },
   { key: "import", label: "导入中心", icon: Import },
   { key: "albums", label: "智能专辑", icon: LayoutGrid },
   { key: "search", label: "搜索找回", icon: Search },
@@ -1244,7 +1245,7 @@ export function AppContent({ initialState, initialSettings, runtime, writeGate, 
       createdAt: existing?.createdAt ?? now.toISOString(),
       updatedAt: now.toISOString()
     };
-    const scheduledStatus: ItemStatus = isSameDate(plannedDate, now) ? "scheduled_today" : "scheduled";
+    const scheduledStatus: ItemStatus = isSameDate(plannedDate.toISOString(), now) ? "scheduled_today" : "scheduled";
     setState((current) => ({
       ...current,
       planCards: [planCard, ...(current.planCards ?? []).filter((entry) => entry.actionCardId !== card.id)],
@@ -1752,7 +1753,7 @@ export function AppContent({ initialState, initialSettings, runtime, writeGate, 
           )}
 
           {activeView === "plans" && (
-            <PlansView plans={plans} actionCards={state.actionCards} savedItems={state.savedItems} viewActionCard={viewActionCard} copyPlan={copyPlan} />
+            <PlansView plans={plans} planCards={state.planCards ?? []} actionCards={state.actionCards} savedItems={state.savedItems} viewActionCard={viewActionCard} copyPlan={copyPlan} />
           )}
 
           {activeView === "albums" && (
@@ -2109,12 +2110,7 @@ function DashboardView(props: {
                     <small>{formatDate(planCard.plannedDate)} · 完成标准：{planCard.doneCriteria} · {planCard.status === "doing" ? "进行中" : planCard.status === "done" ? "已完成" : "计划中"}</small>
                   </div>
                   <div className="plan-card-actions">
-                    <button onClick={() => props.updatePlanCardStatus(planCard.id, "doing")}>开始</button>
-                    <button onClick={() => props.updatePlanCardStatus(planCard.id, "done")}>完成</button>
-                    <button onClick={() => props.postponePlanCard(planCard.id)}>延期到明天</button>
-                    <button onClick={() => props.reschedulePlanCard(planCard.id)}>更换日期</button>
-                    <button onClick={() => props.cancelPlanCard(planCard.id)}>取消计划</button>
-                    <button onClick={() => props.viewPlanSource(planCard)}>查看来源收藏</button>
+                    <button className="primary-button" onClick={() => props.viewPlanSource(planCard)}>打开行动主操作区</button>
                   </div>
                 </article>
               ))}
@@ -3272,7 +3268,7 @@ function ProductConfirmDialog(props: { title: string; description: string; confi
   </div></div>;
 }
 
-function useDialogFocus(dialogRef: React.RefObject<HTMLDivElement>, onEscape: () => void) {
+function useDialogFocus(dialogRef: React.RefObject<HTMLDivElement | null>, onEscape: () => void) {
   useEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog) return;
@@ -3295,6 +3291,7 @@ function useDialogFocus(dialogRef: React.RefObject<HTMLDivElement>, onEscape: ()
 }
 function PlansView(props: {
   plans: Plan[];
+  planCards: PlanCard[];
   actionCards: ActionCard[];
   savedItems: SavedItem[];
   viewActionCard: (itemId: string) => void;
@@ -3309,6 +3306,20 @@ function PlansView(props: {
         </div>
         <p className="page-lead">计划库已从主流程降级：先整理旧收藏和复活单条行动，只有用户主动把行动卡加入计划时，这里才承接 3 天、7 天或 30 天节奏。</p>
       </div>
+
+      <section className="tool-panel" data-testid="scheduled-plan-cards">
+        <PanelHeader icon={<CalendarCheck size={18} />} title="已安排的行动" meta={`${props.planCards.filter((entry) => entry.status !== "cancelled").length} 项`} />
+        <div className="plan-card-list">
+          {props.planCards.filter((entry) => entry.status !== "cancelled").map((planCard) => (
+            <button key={planCard.id} onClick={() => props.viewActionCard(planCard.savedItemId)}>
+              <span>{formatPlanDateLabel(planCard.plannedDate)} · {planCard.estimatedMinutes} 分钟</span>
+              <strong>{planCard.title}</strong>
+              <small>{planCard.status === "done" ? "已完成" : planCard.status === "doing" ? "进行中" : "已安排"}</small>
+            </button>
+          ))}
+          {props.planCards.filter((entry) => entry.status !== "cancelled").length === 0 && <p className="quiet-copy">还没有主动安排的行动。</p>}
+        </div>
+      </section>
 
       <div className="plans-grid">
         {props.plans.length === 0 && <EmptyState title="计划库暂时收起" text="当前阶段不再自动把每条收藏排成计划，先从智能专辑里挑 1 条复活会更轻。后续需要 3 天/7 天计划时，再从行动卡主动加入。" />}
