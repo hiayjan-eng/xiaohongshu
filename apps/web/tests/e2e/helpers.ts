@@ -38,7 +38,13 @@ type AppState = {
     id: string;
     savedItemId: string;
     title: string;
+    goal: string;
     nextAction: string;
+    output?: string;
+    doneCriteria?: string;
+    generatedFromIntent?: string;
+    templateVersion?: string;
+    outputSavedAt?: string;
     fields: Record<string, string | string[]>;
     tasks: unknown[];
   }>;
@@ -53,6 +59,8 @@ type AppState = {
     oneNextStep: string;
     doneCriteria?: string;
     status: string;
+    note?: string;
+    actualMinutes?: number;
     cancelledAt?: string;
   }>;
   classificationCorrections?: Array<{ id: string; savedItemId: string; correctedDomain: string; correctedSubDomain: string }>;
