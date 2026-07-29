@@ -198,3 +198,26 @@ main 修改、merge、PR、Preview/Production 部署：均否；仅当前审计�
 2. 修复基线审计 Blocking。
 
 Phase 1 到此停止。
+## 十一、Phase 2 更新（2026-07-29）
+
+`V0_1_PHASE2_STATUS: READY_FOR_USER_VALIDATION`
+
+Phase 2 已按 `收藏复活系统_V0.1_Phase2_扫描原帖与数据质量.md` 完成代码收敛，未进入分类、专辑、搜索、行动卡、迁移或 Production：
+
+- 扫描目标从 10/20 扩展为 10/20/50/100/200，移除 20 条硬截断；
+- checkpoint 补齐 target、发现/有效/重复/无效、阶段、最后卡片、滚动位置、开始/更新时间、暂停与完成状态；
+- 暂停后滚动结束会在提取前再次检查停止状态；popup 和扩展脚本重新加载通过本地状态恢复；
+- 去重改为 sourceId → canonicalSourceUrl → title + author + normalized excerpt hash，并区分批内、库内和 unresolved duplicates；
+- SavedItem 补齐 sourceId、canonicalSourceUrl、sourceUrlStatus、lastUrlCheckedAt、userCorrectedSourceUrl、rawText、normalizedTitle、normalizedContent、normalizationVersion、normalizationWarnings、author 和 importedAt；
+- 原帖入口统一选择用户修复值、有效 raw URL、canonical 兜底，profile URL 不当作笔记，提供失效提示和修复入口；
+- 设置页新增只读脱敏数据完整性诊断；
+- 产出只绑定 V0.1 分支 Preview 精确 origin 的 0.2.5-preview 测试包，Production manifest/域名未改动。
+
+自动验证结果为 extension validation/DOM/checkpoint PASS，Phase 2 与原帖专项 8/8 PASS，storage-runtime 70/70、storage-service 181/181、核心 E2E 132/132 PASS。真实用户数据仍未接触，20/100/200 真实扫描和 20 条真实原帖可达率尚未执行，所以 Phase 1 记录的真实基线缺口现在从“实现 Blocking”转为“待用户真实验收”，不能把 Phase 2 写成 PASS。
+
+详细证据见：
+
+- `docs/V0_1_PHASE2_SCAN_REPORT.md`
+- `docs/V0_1_PHASE2_ORIGINAL_LINK_REPORT.md`
+- `docs/V0_1_PHASE2_DATA_QUALITY_REPORT.md`
+- `docs/V0_1_PHASE2_USER_TEST_GUIDE.md`
