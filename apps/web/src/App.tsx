@@ -1718,14 +1718,19 @@ export function AppContent({ initialState, initialSettings, runtime, writeGate, 
             <DetailView
               item={selectedItem}
               card={selectedCard}
+              planCard={(state.planCards ?? []).find((entry) => entry.actionCardId === selectedCard.id)}
               openSource={openSource}
-              changeStatus={changeStatus}
               updateSavedNote={updateSavedNote}
               updateCardField={updateCardField}
               saveActionOutput={saveActionOutput}
               updateTaskStatus={updateTaskStatus}
               regenerateActionCard={regenerateActionCard}
-              addActionCardToPlan={addActionCardToPlan}
+              addActionCardToToday={addActionCardToToday}
+              saveActionPlan={addActionCardToPlan}
+              startAction={startAction}
+              snoozeAction={snoozeAction}
+              completeAction={completeAction}
+              undoCompletedAction={undoCompletedAction}
               setActiveView={setActiveView}
               onContinueImport={continueImport}
             />
