@@ -118,6 +118,8 @@ export function normalizeActionCardDraft(value: unknown, fallback: ActionCardDra
     ifInfoMissing,
     followUp,
     tasks: readTasks(raw.tasks, fallback.tasks),
+    generatedFromIntent: fallback.generatedFromIntent,
+    templateVersion: fallback.templateVersion,
     structuredFields: readStructuredFields(raw.structuredFields ?? raw.fields, { ...fallback.structuredFields, 打开原帖后重点看什么: openOriginalFocus, 产出物: output, 完成标准: doneCriteria, 避免: avoidDoing })
   };
 }
