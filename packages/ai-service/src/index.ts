@@ -66,6 +66,7 @@ export interface RegenerateActionCardOptions {
   title?: string;
   rawShareText?: string;
   userNote?: string;
+  selectedActionIntent?: ActionIntentKey;
 }
 
 export interface ImportBatchSummary {
@@ -177,6 +178,7 @@ export class OpenAICompatibleProvider implements AiProvider {
 
   async regenerateActionCard(savedItemId: string, options: RegenerateActionCardOptions = {}): Promise<ActionCardDraft> {
     const fallback = await Promise.resolve(this.fallback.regenerateActionCard(savedItemId, options));
+    if (options.selectedActionIntent) return fallback;
     if (!this.config.apiKey) return this.withFallback(fallback, "AI API key is not configured", "blocked");
     try {
       const raw = await this.requestJson([{ role: "system", content: COLLECTION_REVIVAL_SYSTEM_PROMPT }, { role: "user", content: buildRegenerateActionCardPrompt({ savedItemId, ...options }) }]);
@@ -316,6 +318,7 @@ export class AiHttpClient implements AiProvider {
 
   async regenerateActionCard(savedItemId: string, options: RegenerateActionCardOptions = {}): Promise<ActionCardDraft> {
     const fallback = await Promise.resolve(this.fallback.regenerateActionCard(savedItemId, options));
+    if (options.selectedActionIntent) return fallback;
     const data = await this.callTask<ActionCardDraft>("regenerate_action_card", { savedItemId, ...compactRegenerateOptions(options) }, fallback);
     return normalizeActionCardDraft(data, fallback);
   }
@@ -364,6 +367,7 @@ function compactRegenerateOptions(options: RegenerateActionCardOptions): Regener
     title: options.title,
     rawShareText: options.rawShareText,
     userNote: options.userNote,
+    selectedActionIntent: options.selectedActionIntent,
     savedItem: item ? compactSavedItemForAi(item) : undefined
   };
 }
@@ -709,8 +713,11 @@ function buildSummary(input: ShareInput, category: Category, subCategory: string
   if (category === "暂存" || confidence === "low") return `这条收藏目前信息偏少，系统先按“${subCategory}”保存；补充一句收藏原因后，可以生成更具体的行动建议。`;
   return `这条收藏看起来与“${subCategory}”有关，可以先围绕“${topic}”做一个 5-30 分钟的小行动，而不是继续放在收藏夹里。`;
 }
-function generateActionCard(category: Category, subCategory: string, input: ShareInput, keywords: string[], entities: EntityTag[], confidence: ClassificationConfidence, savedIntent: SavedIntent | ReviveIntent | string): ActionCardDraft {
+function generateActionCard(category: Category, subCategory: string, input: ShareInput, keywords: string[], entities: EntityTag[], confidence: ClassificationConfidence, savedIntent: SavedIntent | ReviveIntent | string, selectedActionIntent?: ActionIntentKey): ActionCardDraft {
   const topic = pickTopic(input, keywords, entities, category);
+  if (selectedActionIntent) {
+    return buildActionCardForIntent({ intent: selectedActionIntent, title: topic, summary: buildSummary(input, category, subCategory, keywords, confidence), contentTheme: category, contentSubDomain: subCategory });
+  }
   if (category === "暂存" || confidence === "low" || isLowInformationInput(input)) return buildLowInfoCard(topic, input, keywords, String(savedIntent));
   const common = { category, subCategory, topic };
 
