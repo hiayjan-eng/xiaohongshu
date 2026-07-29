@@ -128,7 +128,7 @@ function assertProgressAndListUi() {
   }
 }
 
-function assertScannerBehavior() {
+async function assertScannerBehavior() {
   const exports = loadScannerTestExports();
   const cleaned = exports.normalizeScannedText("  标题\u200B \uFEFF😆\n\nCodex&nbsp;教程  ");
   if (cleaned !== "标题 😆 Codex 教程") throw new Error(`normalizeScannedText failed: ${cleaned}`);
@@ -169,6 +169,8 @@ function assertScannerBehavior() {
   for (const field of ["targetCount", "discoveredCount", "validCount", "duplicateCount", "invalidCount", "currentStage", "lastVisibleCardKey", "scrollPosition", "paused", "completed"]) {
     if (!(field in emptyState)) throw new Error("Checkpoint field missing: " + field);
   }
+
+  await assertCheckpointRecovery();
 
   const trimmed = exports.trimToLimit([
     { title: "1", sourceUrl: "https://www.xiaohongshu.com/explore/1" },
@@ -255,7 +257,9 @@ function assertScannerRangeWithMockDom() {
   }
 }
 
-function loadScannerTestExports(documentOverride = createBasicScannerDocument(), href = "https://www.xiaohongshu.com/user/profile/test?tab=fav") {
+function loadScannerTestExports(documentOverride = createBasicScannerDocument(), href = "https://www.xiaohongshu.com/user/profile/test?tab=fav", storedState = {}) {
+  let messageListener;
+  const storageData = { ...storedState };
   const context = {
     console,
     setTimeout,
@@ -266,13 +270,16 @@ function loadScannerTestExports(documentOverride = createBasicScannerDocument(),
     navigator: { userAgent: "Chrome" },
     chrome: {
       runtime: {
-        onMessage: { addListener() {} }
+        onMessage: { addListener(listener) { messageListener = listener; } }
       },
       storage: {
         local: {
-          async get() { return {}; },
-          async set() {},
-          async remove() {}
+          async get(keys) {
+            const names = Array.isArray(keys) ? keys : [keys];
+            return Object.fromEntries(names.filter((key) => key in storageData).map((key) => [key, storageData[key]]));
+          },
+          async set(values) { Object.assign(storageData, values); },
+          async remove(keys) { (Array.isArray(keys) ? keys : [keys]).forEach((key) => delete storageData[key]); }
         }
       }
     },
@@ -284,6 +291,7 @@ function loadScannerTestExports(documentOverride = createBasicScannerDocument(),
     scrollY: 0,
     innerHeight: 900,
     scrollBy() {},
+    scrollTo({ top }) { this.scrollY = top; },
     getComputedStyle(element) {
       const hidden = !isFakeElementVisible(element);
       return { display: hidden ? "none" : "block", visibility: hidden ? "hidden" : "visible", opacity: hidden ? "0" : "1" };
@@ -310,7 +318,43 @@ function loadScannerTestExports(documentOverride = createBasicScannerDocument(),
   })();
   `);
   vm.runInNewContext(instrumented, context, { filename: "xhs-scanner.js" });
+  context.__scannerTestExports.__messageListener = messageListener;
+  context.__scannerTestExports.__storageData = storageData;
   return context.__scannerTestExports;
+}
+
+async function assertCheckpointRecovery() {
+  const stored = {
+    "revival-extension-scan-state": {
+      status: "paused",
+      stage: "loading",
+      targetCount: 100,
+      limit: 100,
+      discoveredCount: 1,
+      validCount: 1,
+      duplicateCount: 0,
+      invalidCount: 0,
+      currentStage: "loading",
+      lastVisibleCardKey: "source:phase2-recovery-note",
+      scrollPosition: 480,
+      paused: true,
+      completed: false,
+      items: [{ sourceId: "phase2-recovery-note", sourceUrl: "https://www.xiaohongshu.com/explore/phase2-recovery-note", scanKey: "source:phase2-recovery-note" }],
+      selectedKeys: ["source:phase2-recovery-note"]
+    }
+  };
+  const exports = loadScannerTestExports(createBasicScannerDocument(), "https://www.xiaohongshu.com/user/profile/test?tab=fav", stored);
+  const response = await new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error("checkpoint recovery timed out")), 1000);
+    exports.__messageListener({ type: "REVIVAL_GET_SCAN_STATE" }, {}, (value) => {
+      clearTimeout(timeout);
+      resolve(value);
+    });
+  });
+  if (!response.ok || response.scanState.targetCount !== 100 || response.scanState.discoveredCount !== 1 || !response.scanState.paused) {
+    throw new Error("Extension reload should restore the latest scan checkpoint");
+  }
+  if (response.scanState.items[0]?.sourceId !== "phase2-recovery-note") throw new Error("Checkpoint recovery lost stable sourceId");
 }
 
 function createBasicScannerDocument() {
@@ -503,7 +547,7 @@ function hasAncestorClassContaining(element, value) {
 
 assertPopupStructure();
 assertProgressAndListUi();
-assertScannerBehavior();
+await assertScannerBehavior();
 
 console.log("extension beta manifest and scripts ok");
 
