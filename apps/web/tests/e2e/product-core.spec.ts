@@ -77,35 +77,43 @@ test.describe("product core stabilization", () => {
       userNote: "下次写图文时想复用"
     });
     let state = await readAppState(page);
-    expect(state.planCards?.length ?? 0).toBe(0);
+    const planCountBefore = state.planCards?.length ?? 0;
 
-    await page.getByTestId("revive-imported-item").click({ force: true });
+    await page.getByTestId("revive-imported-item").click();
     await expect.poll(async () => (await readAppState(page)).actionCards.some((card) => card.savedItemId === item.id)).toBe(true);
 
-    let dialogIndex = 0;
+    let nativeDialogCount = 0;
     page.on("dialog", async (dialog) => {
-      dialogIndex += 1;
-      await dialog.accept(dialogIndex === 1 ? "今天" : dialogIndex === 2 ? "20" : dialog.defaultValue());
+      nativeDialogCount += 1;
+      await dialog.dismiss();
     });
-    await page.getByTestId("add-to-plan-card").click({ force: true });
+    await page.getByTestId("add-to-plan-card").click();
+    await expect(page.getByTestId("action-plan-dialog")).toBeVisible();
+    await page.getByRole("button", { name: "今天", exact: true }).click();
+    await page.getByLabel("20 分钟").check();
+    await page.getByPlaceholder("例如：先完成一张测试图，不扩展选题").fill("先做一张测试封面");
+    await page.getByTestId("save-action-plan").click();
 
     state = await readAppState(page);
-    expect(state.planCards?.length).toBeGreaterThanOrEqual(1);
-    expect(state.planCards?.[0].savedItemId).toBe(item.id);
-    expect(state.planCards?.[0].sourceTitle).toContain("小红书封面设计技巧");
+    const createdPlan = state.planCards?.find((plan) => plan.savedItemId === item.id);
+    expect(state.planCards?.length).toBe(planCountBefore + 1);
+    expect(createdPlan?.sourceTitle).toContain("小红书封面设计技巧");
+    expect(createdPlan?.estimatedMinutes).toBe(20);
+    expect(createdPlan?.note).toBe("先做一张测试封面");
+    expect(nativeDialogCount).toBe(0);
+
     await page.goto("/dashboard");
-    await expect(page.getByTestId("today-plan-cards")).toBeVisible();
     await expect(page.getByTestId("today-plan-cards")).toContainText("来源：小红书封面设计技巧");
-
-    await page.getByRole("button", { name: "取消计划" }).first().click({ force: true });
+    await page.getByRole("button", { name: "打开行动主操作区" }).click();
+    await page.getByTestId("status-snoozed").click();
     state = await readAppState(page);
-    expect(state.planCards?.[0].status).toBe("cancelled");
-    expect(state.planCards?.[0].cancelledAt).toBeTruthy();
+    expect(state.savedItems.find((entry) => entry.id === item.id)?.status).toBe("snoozed");
+    expect(state.planCards?.find((plan) => plan.savedItemId === item.id)?.status).toBe("cancelled");
 
     await expectNoConsoleErrors(errors);
   });
 
-  test("postpones a plan card without duplicating it", async ({ page }) => {
+  test("updates a plan card through the product dialog without duplicating it", async ({ page }) => {
     const errors = collectConsoleErrors(page);
     await resetDemoData(page);
     const item = await importTestNote(page, {
@@ -114,25 +122,38 @@ test.describe("product core stabilization", () => {
       rawShareText: "AI 工具、自动化流程和 Codex 工作流入门",
       userNote: "想把其中一个方法用到项目里"
     });
-    await page.getByTestId("revive-imported-item").click({ force: true });
+    await page.getByTestId("revive-imported-item").click();
     await expect.poll(async () => (await readAppState(page)).actionCards.some((card) => card.savedItemId === item.id)).toBe(true);
 
+    let nativeDialogCount = 0;
     page.on("dialog", async (dialog) => {
-      await dialog.accept(dialog.defaultValue() || "今天");
+      nativeDialogCount += 1;
+      await dialog.dismiss();
     });
-    await page.getByTestId("add-to-plan-card").click({ force: true });
-    await page.goto("/dashboard");
+    await page.getByTestId("add-to-plan-card").click();
+    await page.getByTestId("save-action-plan").click();
     const before = await readAppState(page);
-    expect(before.planCards?.length).toBeGreaterThanOrEqual(1);
-    await page.getByRole("button", { name: "延期到明天" }).first().click({ force: true });
+    const beforePlan = before.planCards?.find((plan) => plan.savedItemId === item.id);
+    expect(beforePlan).toBeTruthy();
+
+    await page.getByRole("button", { name: "修改计划" }).click();
+    await expect(page.getByTestId("action-plan-dialog")).toBeVisible();
+    await page.getByTestId("plan-date-input").fill("2030-08-16");
+    await page.getByLabel("30 分钟").check();
+    await page.getByTestId("save-action-plan").click();
+
     const after = await readAppState(page);
+    const matchingPlans = after.planCards?.filter((plan) => plan.savedItemId === item.id) ?? [];
     expect(after.planCards?.length).toBe(before.planCards?.length);
-    expect(after.planCards?.[0].status).toBe("planned");
-    expect(after.planCards?.[0].plannedDate).not.toBe(before.planCards?.[0].plannedDate);
+    expect(matchingPlans).toHaveLength(1);
+    expect(matchingPlans[0].id).toBe(beforePlan?.id);
+    expect(matchingPlans[0].plannedDate).toBe("2030-08-16");
+    expect(matchingPlans[0].estimatedMinutes).toBe(30);
+    expect(after.savedItems.find((entry) => entry.id === item.id)?.status).toBe("scheduled");
+    expect(nativeDialogCount).toBe(0);
 
     await expectNoConsoleErrors(errors);
   });
-
   test("migrates scanned title text without destroying special characters or emoji", () => {
     const report = migrateScannedTextV3({
       schemaVersion: 2,
