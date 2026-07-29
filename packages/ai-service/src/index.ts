@@ -2,6 +2,7 @@ import { CATEGORIES } from "@revival/shared-types";
 import { classifyCollectionInput } from "@revival/classification-service";
 import type {
   ActionCardDraft,
+  ActionIntentKey,
   AiClassificationResult,
   Category,
   ClassificationConfidence,
@@ -34,7 +35,9 @@ import {
   type AiResponseMeta,
   type AiTask
 } from "./schemas";
+import { buildActionCardForIntent } from "./action-intent-templates";
 export type { AiFallbackReason, AiProxyError, AiProxyResponse, AiProxySuccess, AiResponseMeta, AiTask } from "./schemas";
+import { buildActionCardForIntent } from "./action-intent-templates";
 
 export type AiProviderMode = "mock" | "openai-compatible" | "real";
 export type AiCallStatus = "idle" | "success" | "fallback" | "blocked";
@@ -115,7 +118,7 @@ export class MockAiProvider implements AiProvider {
       title: options.title ?? source?.title ?? "",
       rawShareText: options.rawShareText ?? source?.rawShareText ?? "",
       userNote: options.userNote ?? source?.userNote ?? ""
-    }).actionCard;
+    }, options.selectedActionIntent).actionCard;
   }
 
   summarizeImportBatch(batch: ImportBatch): ImportBatchSummary {
@@ -487,7 +490,7 @@ const entityDictionary: Record<string, string[]> = {
   book_or_idea: ["读书", "书单", "观点", "笔记", "摘抄"]
 };
 
-export function classifyAndGenerateActionCard(input: ShareInput): AiClassificationResult {
+export function classifyAndGenerateActionCard(input: ShareInput, selectedActionIntent?: ActionIntentKey): AiClassificationResult {
   const classification = classifyCollectionInput(input);
   const inference: CategoryInference = {
     category: classification.contentDomain,
@@ -504,7 +507,7 @@ export function classifyAndGenerateActionCard(input: ShareInput): AiClassificati
   const keywords = classification.keywords;
   const entities = classification.entities;
   const summary = buildSummary(input, inference.category, inference.subCategory, keywords, inference.confidence);
-  const actionCard = generateActionCard(inference.category, inference.subCategory, input, keywords, entities, inference.confidence, savedIntent.savedIntent);
+  const actionCard = generateActionCard(inference.category, inference.subCategory, input, keywords, entities, inference.confidence, savedIntent.savedIntent, selectedActionIntent);
   const searchableText = buildSearchableText(input, inference, summary, keywords, entities, actionCard, savedIntent);
   return {
     contentDomain: inference.category,
@@ -780,6 +783,8 @@ function card(common: CardCommon, suffix: string, goal: string, whySaved: string
     ifInfoMissing,
     followUp,
     tasks: tasks.slice(0, 3),
+    generatedFromIntent: "copy_once",
+    templateVersion: "category-v1",
     structuredFields: { 分类: common.category, 二级分类: common.subCategory, 主题: common.topic, ...structuredFields, 收藏意图: whySaved, 打开原帖后重点看什么: openOriginalFocus, 产出物: output, 完成标准: doneCriteria, 避免: avoidDoing }
   };
 }
