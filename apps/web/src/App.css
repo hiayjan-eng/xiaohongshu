@@ -5930,3 +5930,19 @@ select,
   .product-dialog { width: 100%; max-height: 88vh; border-radius: 22px 22px 0 0; padding: 18px; }
   .product-dialog-actions { flex-direction: column-reverse; }
 }
+.intent-rebind-panel {
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  background: var(--color-surface-soft);
+}
+
+.intent-rebind-panel summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.intent-rebind-panel .revive-intent-buttons {
+  margin-top: 10px;
+}
