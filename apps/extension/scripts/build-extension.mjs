@@ -9,17 +9,17 @@ const isPreview = process.argv.includes("--preview");
 const unsupportedArgs = process.argv.slice(2).filter((arg) => arg !== "--preview");
 if (unsupportedArgs.length) throw new Error(`Unsupported extension build option: ${unsupportedArgs.join(", ")}`);
 
-const previewOrigin = "https://xiaohongshu-git-p0-core-revival-loop-rescue-ayj.vercel.app";
+const previewOrigin = "https://xiaohongshu-git-v01-core-library-release-ayj.vercel.app";
 const sourceManifest = JSON.parse(readFileSync(resolve(root, "manifest.json"), "utf8"));
 const profile = isPreview
   ? {
-      id: "p0-preview",
-      label: "Preview 测试包 0.2.4",
-      version: "0.2.4",
+      id: "v0.1-phase2-preview",
+      label: "Preview 测试包 0.2.5-preview",
+      version: "0.2.5",
       defaultWebAppUrl: `${previewOrigin}/old-import`,
       webAppOrigins: [previewOrigin],
-      outDirName: "extension-beta-preview",
-      zipFileName: "collection-revival-extension-beta-preview-v0.2.4.zip"
+      outDirName: "extension-beta-preview-v0.2.5",
+      zipFileName: "collection-revival-extension-beta-preview-v0.2.5.zip"
     }
   : {
       id: "production",
