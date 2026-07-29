@@ -4,7 +4,8 @@
 
   const SCAN_STATE_KEY = "revival-extension-scan-state";
   const CHECKPOINT_KEY = "revival-extension-checkpoint";
-  const SELECTOR_VERSION = "xhs-fav-visible-cards-v4";
+  const SELECTOR_VERSION = "xhs-fav-visible-cards-v5";
+  const SUPPORTED_TARGETS = [10, 20, 50, 100, 200];
   const STAGES = {
     recognizing: "识别页面",
     loading: "加载收藏",
@@ -57,6 +58,9 @@
           ...runtime.state,
           status: "paused",
           stage: "loading",
+          currentStage: "loading",
+          paused: true,
+          completed: false,
           message: `已暂停，当前保留 ${runtime.state.items.length} 条候选收藏。`,
           updatedAt: new Date().toISOString()
         };
@@ -74,7 +78,10 @@
           ...runtime.state,
           status: "scanning",
           stage: "loading",
-          message: "已继续扫描旧收藏。",
+          currentStage: "loading",
+          paused: false,
+          completed: false,
+          message: "已从最近断点继续扫描旧收藏。",
           updatedAt: new Date().toISOString()
         };
         await persistState();
@@ -125,7 +132,8 @@
             status: "scanning",
             stage: "recognizing",
             mode: "limit",
-            limit: Math.max(10, Math.min(20, Number.isFinite(message.limit) ? Number(message.limit) : 20)),
+            limit: normalizeScanTarget(message.limit),
+            targetCount: normalizeScanTarget(message.limit),
             autoScroll: message.autoScroll !== false,
             pageUrl: window.location.href,
             pageStatus,
@@ -153,6 +161,15 @@
       stage: "recognizing",
       mode: "limit",
       limit: 20,
+      targetCount: 20,
+      discoveredCount: 0,
+      validCount: 0,
+      invalidCount: 0,
+      currentStage: "recognizing",
+      lastVisibleCardKey: "",
+      scrollPosition: 0,
+      paused: false,
+      completed: false,
       autoScroll: true,
       batch: 0,
       lastAdded: 0,
@@ -190,6 +207,15 @@
     runtime.state = {
       ...runtime.state,
       totalFound: runtime.state.items.length,
+      targetCount: normalizeScanTarget(runtime.state.targetCount || runtime.state.limit),
+      discoveredCount: runtime.state.items.filter((item) => !item.isDuplicate).length,
+      validCount: runtime.state.items.filter((item) => !item.isDuplicate && item.sourceId && !item.isMissingLink).length,
+      invalidCount: runtime.state.items.filter((item) => !item.isDuplicate && (!item.sourceId || item.isMissingLink)).length,
+      currentStage: runtime.state.stage,
+      lastVisibleCardKey: [...runtime.state.items].reverse().find((item) => !item.isDuplicate)?.scanKey || runtime.state.lastVisibleCardKey || "",
+      scrollPosition: Math.max(0, Math.round(window.scrollY || 0)),
+      paused: runtime.state.status === "paused",
+      completed: runtime.state.status === "completed",
       selectedCount: selectedKeys.length,
       selectedKeys,
       missingLinkCount: runtime.state.items.filter((item) => item.isMissingLink).length,
@@ -203,6 +229,17 @@
         items: runtime.state.items,
         selectedKeys,
         duplicateCount: runtime.state.duplicateCount,
+        targetCount: runtime.state.targetCount,
+        discoveredCount: runtime.state.discoveredCount,
+        validCount: runtime.state.validCount,
+        invalidCount: runtime.state.invalidCount,
+        currentStage: runtime.state.currentStage,
+        lastVisibleCardKey: runtime.state.lastVisibleCardKey,
+        scrollPosition: runtime.state.scrollPosition,
+        startedAt: runtime.state.startedAt,
+        updatedAt: runtime.state.updatedAt,
+        paused: runtime.state.paused,
+        completed: runtime.state.completed,
         pageUrl: runtime.state.pageUrl,
         savedAt: runtime.state.updatedAt
       }
@@ -311,6 +348,9 @@
   async function completeScan(message) {
     runtime.state.status = "completed";
     runtime.state.stage = "complete";
+    runtime.state.currentStage = "complete";
+    runtime.state.paused = false;
+    runtime.state.completed = true;
     runtime.state.message = runtime.state.items.length === 0 && runtime.state.pageStatus?.collectionPageConfirmed
       ? "已确认在收藏页，但暂未识别到可见收藏卡片。请展开诊断查看提取线索后再试。"
       : message;
@@ -389,7 +429,7 @@
     const fallback = shouldFallback
       ? collectCardsFromRoot({ element: document.body, containerType: "document-body-fallback" }, pageStatus)
       : { items: [], diagnostics: emptyExtractionDiagnostics() };
-    const items = dedupeWithinBatch([...primary.items, ...fallback.items]).slice(0, 20);
+    const items = dedupeWithinBatch([...primary.items, ...fallback.items]).slice(0, 200);
     const diagnostics = {
       ...pageStatus.diagnostics,
       candidateCardCount: primary.diagnostics.candidateCardCount,
