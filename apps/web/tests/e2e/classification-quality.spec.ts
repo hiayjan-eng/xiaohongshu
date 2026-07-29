@@ -93,11 +93,12 @@ test("persists the P0 action completion path and its output after refresh", asyn
     });
     await reviveImportedItem(page, item.id);
 
+    await page.getByTestId("add-to-today").click();
+    await expect(page.getByTestId("scheduled-action-summary")).toContainText("已加入今日");
+    await page.getByTestId("start-action").click();
     await expect(page.getByTestId("action-output-field")).toBeVisible();
     await page.getByTestId("action-output-field").locator("textarea").fill("完成 3×4 对比表，并写出 1 条测试选题");
     await page.getByTestId("save-action-output").click();
-    await page.getByTestId("status-today").click();
-    await page.getByTestId("start-action").click();
     await page.getByTestId("status-completed").click();
 
     let state = await readAppState(page);
