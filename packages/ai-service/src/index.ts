@@ -37,7 +37,6 @@ import {
 } from "./schemas";
 import { buildActionCardForIntent } from "./action-intent-templates";
 export type { AiFallbackReason, AiProxyError, AiProxyResponse, AiProxySuccess, AiResponseMeta, AiTask } from "./schemas";
-import { buildActionCardForIntent } from "./action-intent-templates";
 
 export type AiProviderMode = "mock" | "openai-compatible" | "real";
 export type AiCallStatus = "idle" | "success" | "fallback" | "blocked";
