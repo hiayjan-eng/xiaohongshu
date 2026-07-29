@@ -25,14 +25,18 @@ import { cloneTasksForCard, createPlansFromActionCards, generateSmartAlbums, PLA
 import { createAiClient, type AiRuntimeStatus } from "@revival/ai-service";
 import { extensionItemsToImportItems, parseShareInput, processImportBatchAsync, type ImportInputItem, type ProcessImportBatchResult } from "@revival/import-service";
 import {
+  analyzeSourceUrl,
   createActionCardRecord,
   createSavedItemRecord,
+  diagnoseSavedItems,
+  getPreferredSourceUrl,
   createInitialDemoData,
   createSearchLog,
   STORAGE_KEY,
   migrateScannedTextV2,
   migrateScannedTextV3,
   updateItemStatus,
+  type DataQualityDiagnostic,
   type ScannedTextMigrationV3Report
 } from "@revival/database";
 import { getDailyRevivalRecommendations } from "@revival/recommendation-service";
@@ -455,6 +459,7 @@ export function AppContent({ initialState, initialSettings, runtime, writeGate, 
   }, [categoryFilter, poolQuery, smartAlbums, state.actionCards, state.savedItems, statusFilter]);
 
   const insights = useMemo(() => buildInsights(state.savedItems), [state.savedItems]);
+  const dataQuality = useMemo(() => diagnoseSavedItems(state.savedItems), [state.savedItems]);
   const revivalStats = useMemo(() => buildRevivalStats(state.savedItems), [state.savedItems]);
   const unlockedAchievementDisplays = useMemo(
     () =>
@@ -838,8 +843,13 @@ export function AppContent({ initialState, initialSettings, runtime, writeGate, 
   }
 
   function openSource(item: SavedItem, origin: OpenSourceOrigin = "direct") {
-    if (!item.sourceUrl.trim()) {
-      setToast("这条收藏还没有可打开的原帖链接");
+    if (item.sourceUrlStatus === "unavailable") {
+      setToast("原帖可能已删除、不可见或链接已失效");
+      return;
+    }
+    const sourceUrl = getPreferredSourceUrl(item);
+    if (!sourceUrl) {
+      setToast("这条收藏还没有有效的原帖链接，可以在详情页点击“修复链接”");
       return;
     }
 
@@ -851,8 +861,43 @@ export function AppContent({ initialState, initialSettings, runtime, writeGate, 
       setToast(pickMessage(SEARCH_OPEN_MESSAGES));
       unlockAchievements(["search_recall"]);
     }
-    window.open(item.sourceUrl, "_blank", "noopener,noreferrer");
+    window.open(sourceUrl, "_blank", "noopener,noreferrer");
   }
+  function repairSourceUrl(itemId: string) {
+    const item = state.savedItems.find((candidate) => candidate.id === itemId);
+    if (!item) return;
+    const nextUrl = window.prompt("粘贴可打开的小红书原帖链接。原始 sourceUrl 会保留，不会被覆盖。", item.userCorrectedSourceUrl || "");
+    if (nextUrl === null) return;
+    const analysis = analyzeSourceUrl(nextUrl);
+    if (analysis.status !== "valid" || !analysis.sourceId) {
+      setToast("链接无法识别为小红书原帖，请检查后重试");
+      return;
+    }
+    const checkedAt = new Date().toISOString();
+    setState((current) => ({
+      ...current,
+      savedItems: current.savedItems.map((candidate) => candidate.id === itemId ? {
+        ...candidate,
+        userCorrectedSourceUrl: nextUrl.trim(),
+        canonicalSourceUrl: analysis.canonicalSourceUrl,
+        sourceId: analysis.sourceId,
+        sourceUrlStatus: "valid",
+        lastUrlCheckedAt: checkedAt,
+        updatedAt: checkedAt
+      } : candidate)
+    }));
+    setToast("修复链接已保存，刷新后仍会保留");
+  }
+
+  function markSourceUnavailable(itemId: string) {
+    const checkedAt = new Date().toISOString();
+    setState((current) => ({
+      ...current,
+      savedItems: current.savedItems.map((item) => item.id === itemId ? { ...item, sourceUrlStatus: "unavailable", lastUrlCheckedAt: checkedAt, updatedAt: checkedAt } : item)
+    }));
+    setToast("原帖可能已删除、不可见或链接已失效");
+  }
+
   function viewActionCard(itemId: string) {
     setSelectedItemId(itemId);
     setActiveView("detail");
@@ -946,7 +991,15 @@ export function AppContent({ initialState, initialSettings, runtime, writeGate, 
           status: item.status,
           createdAt: item.createdAt,
           updatedAt: now,
+          importedAt: item.importedAt || savedItem.importedAt,
+          sourceUrl: item.sourceUrl,
+          canonicalSourceUrl: item.canonicalSourceUrl || savedItem.canonicalSourceUrl,
+          sourceId: item.sourceId || savedItem.sourceId,
+          sourceUrlStatus: item.sourceUrlStatus || savedItem.sourceUrlStatus,
+          lastUrlCheckedAt: item.lastUrlCheckedAt || savedItem.lastUrlCheckedAt,
+          userCorrectedSourceUrl: item.userCorrectedSourceUrl,
           rawTitle: item.rawTitle || item.title,
+          rawText: item.rawText ?? item.rawShareText,
           cleanedTitle: savedItem.title
         };
       }));
