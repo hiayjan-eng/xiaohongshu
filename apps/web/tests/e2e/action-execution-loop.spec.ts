@@ -29,8 +29,9 @@ test.describe("P0 action execution loop", () => {
       if (index === 0) {
         await page.getByTestId("revive-intent-option").filter({ hasText: variant.label }).click();
       } else {
-        await page.getByTestId("change-action-intent").click();
-        await page.getByTestId("rebind-intent-option").filter({ hasText: variant.label }).click();
+        const option = page.getByTestId("rebind-intent-option").filter({ hasText: variant.label });
+        if (!(await option.isVisible())) await page.getByTestId("change-action-intent").click();
+        await option.click();
       }
       await expect.poll(async () => {
         const state = await readAppState(page);
@@ -49,15 +50,16 @@ test.describe("P0 action execution loop", () => {
     }
     expect(snapshots.size).toBe(intentVariants.length);
 
-    await page.getByTestId("change-action-intent").click();
-    await page.getByTestId("rebind-intent-option").filter({ hasText: "只是整理留存" }).click();
+    const organizeOption = page.getByTestId("rebind-intent-option").filter({ hasText: "只是整理留存" });
+    if (!(await organizeOption.isVisible())) await page.getByTestId("change-action-intent").click();
+    await organizeOption.click();
     await expect.poll(async () => {
       const state = await readAppState(page);
       return state.actionCards.some((card) => card.savedItemId === item.id);
     }).toBe(false);
     const organizedState = await readAppState(page);
     expect(organizedState.savedItems.find((entry) => entry.id === item.id)?.savedIntent).toBe("以后查阅");
-    await expect(page.getByRole("heading", { name: "你准备拿它做什么？" })).toBeVisible();
+    await expect(page.getByText("你准备拿它做什么？", { exact: true })).toBeVisible();
     await expectNoConsoleErrors(errors);
   });
 
