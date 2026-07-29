@@ -492,7 +492,7 @@ function normalizeSavedItem(item: SavedItem): SavedItem {
     canonicalSourceUrl: item.userCorrectedSourceUrl ? source.canonicalSourceUrl : item.canonicalSourceUrl || source.canonicalSourceUrl,
     sourceId: item.userCorrectedSourceUrl ? source.sourceId : item.sourceId || source.sourceId,
     sourceUrlStatus: item.sourceUrlStatus === "unavailable" ? "unavailable" : item.sourceUrlStatus || source.status,
-    lastUrlCheckedAt: item.lastUrlCheckedAt,
+    lastUrlCheckedAt: item.lastUrlCheckedAt || item.updatedAt || item.createdAt,
     rawText,
     normalizedTitle: item.normalizationVersion === NORMALIZATION_VERSION && item.normalizedTitle !== undefined ? item.normalizedTitle : normalized.normalizedTitle,
     normalizedContent: item.normalizationVersion === NORMALIZATION_VERSION && item.normalizedContent !== undefined ? item.normalizedContent : normalized.normalizedContent,
@@ -1030,7 +1030,7 @@ export function analyzeSourceUrl(value: string): SourceUrlAnalysis {
   url.hash = "";
   const isXhs = /(^|\.)xiaohongshu\.com$|(^|\.)xhslink\.com$/i.test(url.hostname);
   if (!isXhs) return { rawUrl, canonicalSourceUrl: url.toString(), status: "partial", warnings: ["source_platform_not_xiaohongshu"] };
-  if (/\/user\/profile(?:\/|$)/i.test(url.pathname)) {
+  if (/\/user\/profile(?:\/|$)/i.test(url.pathname) && !/\/user\/profile\/[a-zA-Z0-9_-]{6,80}\/[a-zA-Z0-9_-]{6,80}(?:\/|$)/i.test(url.pathname)) {
     return { rawUrl, canonicalSourceUrl: "", status: "invalid", warnings: ["profile_url_is_not_note"] };
   }
   const sourceId = extractSourceId(rawUrl);
@@ -1051,12 +1051,14 @@ export function extractSourceId(value: string): string | undefined {
   if (!raw) return undefined;
   try {
     const url = new URL(raw);
-    if (/\/user\/profile(?:\/|$)/i.test(url.pathname)) return undefined;
-    const pathMatch = url.pathname.match(/\/(?:explore|discovery\/item)\/([^/?#]+)/i);
-    const queryCandidate = /\/(?:explore|discovery\/item|note)(?:\/|$)/i.test(url.pathname)
-      ? url.searchParams.get("note_id") || url.searchParams.get("noteId")
+    const profileOnly = /\/user\/profile\/[a-zA-Z0-9_-]{6,80}\/?$/i.test(url.pathname);
+    if (profileOnly) return undefined;
+    const pathMatch = url.pathname.match(/\/(?:explore|discovery\/item|search_result)\/([^/?#]+)/i);
+    const nestedProfileNote = url.pathname.match(/\/user\/profile\/[a-zA-Z0-9_-]{6,80}\/([a-zA-Z0-9_-]{6,80})(?:\/|$)/i);
+    const queryCandidate = /\/(?:explore|discovery\/item|search_result|note)(?:\/|$)/i.test(url.pathname)
+      ? url.searchParams.get("note_id") || url.searchParams.get("noteId") || url.searchParams.get("item_id")
       : undefined;
-    const candidate = decodeURIComponent(pathMatch?.[1] || queryCandidate || "").trim();
+    const candidate = decodeURIComponent(pathMatch?.[1] || nestedProfileNote?.[1] || queryCandidate || "").trim();
     return isValidSourceId(candidate) ? candidate : undefined;
   } catch {
     return isValidSourceId(raw) ? raw : undefined;
