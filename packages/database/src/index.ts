@@ -113,14 +113,28 @@ export function createSavedItemRecord(
   const rawTitle = input.title || input.rawShareText;
   const cleanedTitle = normalizeStoredTitle(input.title, input.rawShareText || aiResult.actionCard?.title);
   const displayTitle = pickDisplayTitle({ cleanedTitle, rawTitle });
+  const rawText = input.rawText ?? input.rawShareText;
+  const source = analyzeSourceUrl(input.sourceUrl);
+  const normalized = normalizeSavedContent(rawTitle, rawText, input.author);
 
   return {
     id: createId("item"),
     userId,
     sourcePlatform: detectPlatform(input.sourceUrl),
     sourceUrl: input.sourceUrl,
+    canonicalSourceUrl: input.canonicalSourceUrl || source.canonicalSourceUrl,
+    sourceId: input.sourceId || source.sourceId,
+    sourceUrlStatus: input.sourceUrlStatus || source.status,
+    lastUrlCheckedAt: input.lastUrlCheckedAt || createdAt,
+    userCorrectedSourceUrl: input.userCorrectedSourceUrl,
     rawShareText: input.rawShareText,
-    normalizedContentText: normalizeContentText(input.title, input.rawShareText),
+    rawText,
+    normalizedContentText: normalized.normalizedContent,
+    normalizedTitle: normalized.normalizedTitle,
+    normalizedContent: normalized.normalizedContent,
+    normalizationVersion: normalized.normalizationVersion,
+    normalizationWarnings: normalized.normalizationWarnings,
+    author: input.author,
     title: displayTitle,
     userNote: input.userNote,
     contentDomain,
@@ -151,6 +165,7 @@ export function createSavedItemRecord(
     searchableText: aiResult.searchableText || buildSearchableText({ ...input, title: displayTitle }, contentDomain, contentSubDomain, savedIntent, aiResult.keywords ?? [], aiResult.entities ?? []),
     status: "not_started",
     createdAt,
+    importedAt: createdAt,
     updatedAt: createdAt
   };
 }
@@ -460,6 +475,7 @@ function normalizeSavedItem(item: SavedItem): SavedItem {
   const whyThisIntent = raw.whyThisIntent || raw.intent || "基于用户备注和内容线索推断收藏用途。";
 
   const rawTitle = (item.rawTitle || item.title || item.rawShareText || "").normalize("NFC");
+  const rawText = item.rawText ?? item.rawShareText ?? "";
   const cleanedTitle = normalizeStoredTitle(item.cleanedTitle || item.title, item.rawShareText);
   const displayTitle = pickDisplayTitle({
     userEditedTitle: item.userEditedTitle,
@@ -467,9 +483,22 @@ function normalizeSavedItem(item: SavedItem): SavedItem {
     rawTitle
   });
 
+  const source = analyzeSourceUrl(item.userCorrectedSourceUrl || item.sourceUrl);
+  const normalized = normalizeSavedContent(rawTitle, rawText, item.author);
+
   return {
     ...item,
-    sourcePlatform: detectPlatform(item.sourceUrl),
+    sourcePlatform: detectPlatform(item.userCorrectedSourceUrl || item.sourceUrl),
+    canonicalSourceUrl: item.userCorrectedSourceUrl ? source.canonicalSourceUrl : item.canonicalSourceUrl || source.canonicalSourceUrl,
+    sourceId: item.userCorrectedSourceUrl ? source.sourceId : item.sourceId || source.sourceId,
+    sourceUrlStatus: item.sourceUrlStatus === "unavailable" ? "unavailable" : item.sourceUrlStatus || source.status,
+    lastUrlCheckedAt: item.lastUrlCheckedAt,
+    rawText,
+    normalizedTitle: item.normalizationVersion === NORMALIZATION_VERSION && item.normalizedTitle !== undefined ? item.normalizedTitle : normalized.normalizedTitle,
+    normalizedContent: item.normalizationVersion === NORMALIZATION_VERSION && item.normalizedContent !== undefined ? item.normalizedContent : normalized.normalizedContent,
+    normalizedContentText: item.normalizationVersion === NORMALIZATION_VERSION && item.normalizedContent !== undefined ? item.normalizedContent : normalized.normalizedContent,
+    normalizationVersion: NORMALIZATION_VERSION,
+    normalizationWarnings: item.normalizationVersion === NORMALIZATION_VERSION ? item.normalizationWarnings ?? [] : normalized.normalizationWarnings,
     status: normalizeItemStatus(item.status),
     contentDomain,
     contentSubDomain,
@@ -950,4 +979,202 @@ function normalizeContentText(title: string, rawShareText: string): string {
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 480);
+}
+export const NORMALIZATION_VERSION = 4;
+
+export interface SourceUrlAnalysis {
+  rawUrl: string;
+  canonicalSourceUrl: string;
+  sourceId?: string;
+  status: "valid" | "partial" | "invalid" | "missing" | "unavailable" | "unchecked";
+  warnings: string[];
+}
+
+export interface NormalizedSavedContent {
+  normalizedTitle: string;
+  normalizedContent: string;
+  normalizationVersion: number;
+  normalizationWarnings: string[];
+}
+
+export interface DataQualityDiagnostic {
+  totalCount: number;
+  withSourceIdCount: number;
+  withValidSourceUrlCount: number;
+  normalizedContentCount: number;
+  emptyTitleCount: number;
+  emptyRawTextCount: number;
+  duplicateCandidateCount: number;
+  unparseableLinkCount: number;
+  userCorrectedLinkCount: number;
+  normalizationWarningCount: number;
+  errors: Array<{ deidentifiedId: string; types: string[] }>;
+}
+
+const SOURCE_ID_PATTERN = /^[a-zA-Z0-9_-]{6,80}$/;
+const INVALID_SOURCE_IDS = new Set(["explore", "discovery", "item", "profile", "user", "home", "search", "note", "notes", "collect"]);
+const TRACKING_QUERY_KEYS = new Set(["source", "xhsshare", "share_from_user_hidden", "appuid", "apptime", "share_id", "share_channel"]);
+
+export function analyzeSourceUrl(value: string): SourceUrlAnalysis {
+  const rawUrl = String(value || "").trim();
+  if (!rawUrl) return { rawUrl, canonicalSourceUrl: "", status: "missing", warnings: ["source_url_missing"] };
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    return { rawUrl, canonicalSourceUrl: "", status: "invalid", warnings: ["source_url_unparseable"] };
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    return { rawUrl, canonicalSourceUrl: "", status: "invalid", warnings: ["source_url_protocol_invalid"] };
+  }
+  url.hash = "";
+  const isXhs = /(^|\.)xiaohongshu\.com$|(^|\.)xhslink\.com$/i.test(url.hostname);
+  if (!isXhs) return { rawUrl, canonicalSourceUrl: url.toString(), status: "partial", warnings: ["source_platform_not_xiaohongshu"] };
+  if (/\/user\/profile(?:\/|$)/i.test(url.pathname)) {
+    return { rawUrl, canonicalSourceUrl: "", status: "invalid", warnings: ["profile_url_is_not_note"] };
+  }
+  const sourceId = extractSourceId(rawUrl);
+  if (/xhslink\.com$/i.test(url.hostname) && !sourceId) {
+    return { rawUrl, canonicalSourceUrl: url.toString(), status: "partial", warnings: ["short_link_requires_live_resolution"] };
+  }
+  if (!sourceId) return { rawUrl, canonicalSourceUrl: url.toString(), status: "partial", warnings: ["source_id_missing"] };
+  const canonical = new URL(`https://www.xiaohongshu.com/explore/${encodeURIComponent(sourceId)}`);
+  for (const key of ["xsec_token", "xsec_source"]) {
+    const token = url.searchParams.get(key);
+    if (token) canonical.searchParams.set(key, token);
+  }
+  return { rawUrl, canonicalSourceUrl: canonical.toString(), sourceId, status: "valid", warnings: [] };
+}
+
+export function extractSourceId(value: string): string | undefined {
+  const raw = String(value || "").trim();
+  if (!raw) return undefined;
+  try {
+    const url = new URL(raw);
+    if (/\/user\/profile(?:\/|$)/i.test(url.pathname)) return undefined;
+    const pathMatch = url.pathname.match(/\/(?:explore|discovery\/item)\/([^/?#]+)/i);
+    const queryCandidate = /\/(?:explore|discovery\/item|note)(?:\/|$)/i.test(url.pathname)
+      ? url.searchParams.get("note_id") || url.searchParams.get("noteId")
+      : undefined;
+    const candidate = decodeURIComponent(pathMatch?.[1] || queryCandidate || "").trim();
+    return isValidSourceId(candidate) ? candidate : undefined;
+  } catch {
+    return isValidSourceId(raw) ? raw : undefined;
+  }
+}
+
+export function isValidSourceId(value: string | undefined): value is string {
+  return Boolean(value && SOURCE_ID_PATTERN.test(value) && !INVALID_SOURCE_IDS.has(value.toLowerCase()));
+}
+
+export function getPreferredSourceUrl(item: Pick<SavedItem, "sourceUrl"> & Partial<Pick<SavedItem, "canonicalSourceUrl" | "userCorrectedSourceUrl">>): string {
+  const corrected = analyzeSourceUrl(item.userCorrectedSourceUrl || "");
+  if (corrected.status === "valid" || corrected.status === "partial") return item.userCorrectedSourceUrl!.trim();
+  const canonical = analyzeSourceUrl(item.canonicalSourceUrl || "");
+  if (canonical.status === "valid" || canonical.status === "partial") return item.canonicalSourceUrl!.trim();
+  const raw = analyzeSourceUrl(item.sourceUrl);
+  return raw.status === "valid" || raw.status === "partial" ? item.sourceUrl.trim() : "";
+}
+
+export function normalizeSavedContent(rawTitle: string, rawText: string, author?: string): NormalizedSavedContent {
+  const warnings: string[] = [];
+  const title = normalizeQualityText(rawTitle)
+    .replace(/^\d+\s*[【[]/, "【")
+    .replace(/\s*[-—|]\s*小红书.*$/i, "")
+    .trim();
+  const authorText = normalizeQualityText(author || "");
+  let content = normalizeQualityText(rawText)
+    .replace(/https?:\/\/\S+/gi, " ")
+    .replace(/复制这段文字(?:后)?[，,。；;\s]*/g, " ")
+    .replace(/(?:然后)?打开[【[]?小红书[】\]]?(?:查看?|看)?(?:笔记)?/g, " ")
+    .replace(/(?:分享自|来自)小红书/g, " ")
+    .replace(/(?:点赞|收藏|评论|分享)\s*(?:\d+(?:\.\d+)?[wW万]?)?/g, " ")
+    .replace(/(?:^|\s)#(?:小红书|热门|推荐|笔记)(?=\s|$)/gi, " ")
+    .replace(/(?:^|\s)\d+(?:\.\d+)?[wW万]?(?=\s|$)/g, " ");
+  if (title) content = removeRepeatedQualitySegment(content, title);
+  if (authorText) content = removeRepeatedQualitySegment(content, authorText);
+  content = normalizeQualityText(content);
+  if (!rawText.trim()) warnings.push("raw_text_empty");
+  if (!title) warnings.push("normalized_title_empty");
+  if (!content) {
+    warnings.push("normalized_content_empty_fallback_raw");
+    content = normalizeQualityText(rawText).slice(0, 2000);
+  }
+  return {
+    normalizedTitle: title || normalizeQualityText(rawTitle).slice(0, 120),
+    normalizedContent: content.slice(0, 2000),
+    normalizationVersion: NORMALIZATION_VERSION,
+    normalizationWarnings: [...new Set(warnings)]
+  };
+}
+
+export function buildStableDedupeKey(input: Partial<Pick<SavedItem, "sourceId" | "canonicalSourceUrl" | "sourceUrl" | "rawTitle" | "title" | "rawText" | "rawShareText" | "normalizedContent" | "author">>): string {
+  const sourceId = input.sourceId || extractSourceId(input.canonicalSourceUrl || input.sourceUrl || "");
+  if (sourceId) return `source-id:${sourceId.toLowerCase()}`;
+  const analysis = analyzeSourceUrl(input.canonicalSourceUrl || input.sourceUrl || "");
+  if (analysis.canonicalSourceUrl && analysis.status !== "invalid" && analysis.status !== "missing") return `source-url:${analysis.canonicalSourceUrl.toLowerCase()}`;
+  const title = normalizeQualityText(input.rawTitle || input.title || "").toLowerCase();
+  const author = normalizeQualityText(input.author || "").toLowerCase();
+  const excerpt = normalizeQualityText(input.normalizedContent || input.rawText || input.rawShareText || "").toLowerCase().slice(0, 160);
+  if (!title || (!author && excerpt.length < 8)) return "";
+  return `fallback:${stableHash(`${title}|${author}|${excerpt}`)}`;
+}
+
+export function diagnoseSavedItems(items: SavedItem[]): DataQualityDiagnostic {
+  const keyCounts = new Map<string, number>();
+  const errors: DataQualityDiagnostic["errors"] = [];
+  let duplicateCandidateCount = 0;
+  for (const item of items) {
+    const key = buildStableDedupeKey(item);
+    if (key) {
+      const count = (keyCounts.get(key) || 0) + 1;
+      keyCounts.set(key, count);
+      if (count > 1) duplicateCandidateCount += 1;
+    }
+    const types: string[] = [];
+    const analysis = analyzeSourceUrl(getPreferredSourceUrl(item) || item.sourceUrl);
+    if (!item.sourceId && !analysis.sourceId) types.push("SOURCE_ID_MISSING");
+    if (analysis.status === "invalid" || analysis.status === "missing") types.push("SOURCE_URL_INVALID");
+    if (!(item.normalizedContent || item.normalizedContentText || "").trim()) types.push("NORMALIZED_CONTENT_EMPTY");
+    if (!(item.rawTitle || item.title || "").trim()) types.push("TITLE_EMPTY");
+    if (!(item.rawText || item.rawShareText || "").trim()) types.push("RAW_TEXT_EMPTY");
+    if ((item.normalizationWarnings || []).length > 0) types.push("NORMALIZATION_WARNING");
+    if (types.length) errors.push({ deidentifiedId: stableHash(item.id).slice(0, 12), types });
+  }
+  return {
+    totalCount: items.length,
+    withSourceIdCount: items.filter((item) => Boolean(item.sourceId || extractSourceId(item.sourceUrl))).length,
+    withValidSourceUrlCount: items.filter((item) => analyzeSourceUrl(getPreferredSourceUrl(item) || item.sourceUrl).status === "valid").length,
+    normalizedContentCount: items.filter((item) => Boolean((item.normalizedContent || item.normalizedContentText || "").trim())).length,
+    emptyTitleCount: items.filter((item) => !(item.rawTitle || item.title || "").trim()).length,
+    emptyRawTextCount: items.filter((item) => !(item.rawText || item.rawShareText || "").trim()).length,
+    duplicateCandidateCount,
+    unparseableLinkCount: items.filter((item) => ["invalid", "missing"].includes(analyzeSourceUrl(getPreferredSourceUrl(item) || item.sourceUrl).status)).length,
+    userCorrectedLinkCount: items.filter((item) => Boolean(item.userCorrectedSourceUrl)).length,
+    normalizationWarningCount: items.reduce((total, item) => total + (item.normalizationWarnings || []).length, 0),
+    errors
+  };
+}
+
+export function stableHash(value: string): string {
+  let hash = 0x811c9dc5;
+  for (const char of String(value || "")) {
+    hash ^= char.codePointAt(0) || 0;
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, "0");
+}
+
+function normalizeQualityText(value: string): string {
+  return String(value || "").normalize("NFC").replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F\u200B\u200C\uFEFF\u00AD]/g, "").replace(/\s+/g, " ").trim();
+}
+
+function removeRepeatedQualitySegment(content: string, segment: string): string {
+  const normalizedSegment = normalizeQualityText(segment);
+  if (!normalizedSegment) return content;
+  return normalizeQualityText(content).replace(new RegExp(escapeQualityRegExp(normalizedSegment), "gi"), " ");
+}
+
+function escapeQualityRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
