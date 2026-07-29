@@ -3091,69 +3091,124 @@ function SavedIndexDetailView(props: {
 function DetailView(props: {
   item: SavedItem;
   card: ActionCard;
+  planCard?: PlanCard;
   openSource: (item: SavedItem, origin?: OpenSourceOrigin) => void;
-  changeStatus: (itemId: string, status: ItemStatus) => void;
   updateSavedNote: (itemId: string, userNote: string) => void;
   updateCardField: (cardId: string, field: "title" | "goal" | "nextAction", value: string) => void;
   saveActionOutput: (cardId: string, output: string) => void;
   updateTaskStatus: (cardId: string, taskId: string, status: ItemStatus) => void;
   regenerateActionCard: (itemId: string) => void;
-  addActionCardToPlan: (cardId: string) => void;
+  addActionCardToToday: (cardId: string) => void;
+  saveActionPlan: (input: ActionScheduleInput) => void;
+  startAction: (cardId: string) => void;
+  snoozeAction: (cardId: string) => void;
+  completeAction: (cardId: string, output: string, actualMinutes: 10 | 20 | 30 | 60) => void;
+  undoCompletedAction: (cardId: string) => void;
   setActiveView: (view: ViewKey) => void;
   onContinueImport: () => void;
 }) {
   const [noteDraft, setNoteDraft] = useState(props.item.userNote);
   const [outputDraft, setOutputDraft] = useState(String(props.card.fields["复活产出/备注"] ?? ""));
+  const [actualMinutes, setActualMinutes] = useState<10 | 20 | 30 | 60>(() => normalizePlanMinutes(props.planCard?.actualMinutes ?? props.planCard?.estimatedMinutes ?? parseEstimatedMinutes(props.card.estimatedTime)));
+  const [planDialogOpen, setPlanDialogOpen] = useState(false);
+  const [emptyCompletionOpen, setEmptyCompletionOpen] = useState(false);
   const lowConfidence = props.item.classificationConfidence === "low";
+  const scheduled = props.item.status === "scheduled_today" || props.item.status === "scheduled";
+
+  useEffect(() => {
+    setOutputDraft(String(props.card.fields["复活产出/备注"] ?? ""));
+  }, [props.card.id, props.card.fields]);
+
   function saveNoteAndRegenerate() {
     props.updateSavedNote(props.item.id, noteDraft);
     window.setTimeout(() => props.regenerateActionCard(props.item.id), 0);
+  }
+
+  function requestCompletion() {
+    if (!outputDraft.trim()) {
+      setEmptyCompletionOpen(true);
+      return;
+    }
+    props.completeAction(props.card.id, outputDraft, actualMinutes);
   }
 
   return (
     <>
       <div className="detail-hero">
         <div>
-          <p className="eyebrow">{props.item.category} / {props.item.subCategory} · 信心：{confidenceLabel(props.item.classificationConfidence)} · {DISPLAY_STATUS_LABELS[props.item.status]}</p>
+          <p className="eyebrow">{props.item.category} / {props.item.subCategory} · 置信：{confidenceLabel(props.item.classificationConfidence)} · {DISPLAY_STATUS_LABELS[props.item.status]}</p>
           <input className="detail-title-input" value={props.card.title} onChange={(event) => props.updateCardField(props.card.id, "title", event.target.value)} />
           <p>{props.item.summary}</p>
           <p className="quiet-copy">{props.item.whyThisCategory}</p>
-          {lowConfidence && <p className="quiet-copy">这条收藏信息较少，分类可能不准，可以补充一句备注后重新生成。</p>}
+          <p className="quiet-copy">用途模板：{props.card.generatedFromIntent ?? "legacy"} · {props.card.templateVersion ?? "legacy"}</p>
+          {lowConfidence && <p className="quiet-copy">这条收藏信息较少，可以补充一句备注后重新生成。</p>}
         </div>
         <div className="detail-actions">
-          <button className="primary-button" onClick={() => props.changeStatus(props.item.id, "scheduled_today")} data-testid="add-to-today">
-            <CalendarCheck size={17} />
-            加入今日
-          </button>
           <button className="secondary-action" onClick={props.onContinueImport} data-testid="detail-continue-import">继续导入一条</button>
-          <button className="secondary-action" onClick={() => props.addActionCardToPlan(props.card.id)} data-testid="add-to-plan-card">加入计划</button>
           <button className="secondary-action" onClick={() => props.setActiveView("import")}>回到导入中心</button>
-          <button className="secondary-action" onClick={() => props.setActiveView("albums")}>查看智能专辑</button>
-          <button className="secondary-action" onClick={() => props.regenerateActionCard(props.item.id)}>Regenerate</button>
-          <button className="icon-text-button" onClick={() => props.openSource(props.item)} data-testid="detail-open-source">
-            <ExternalLink size={17} />
-            打开原帖
-          </button>
+          <button className="secondary-action" onClick={() => props.regenerateActionCard(props.item.id)}>重新生成</button>
+          <button className="icon-text-button" onClick={() => props.openSource(props.item)} data-testid="detail-open-source"><ExternalLink size={17} />打开原帖</button>
         </div>
       </div>
 
       <div className="detail-layout">
         <section className="tool-panel single">
           <PanelHeader icon={<Play size={18} />} title="行动卡" meta={props.card.estimatedTime} />
-          <label className="edit-field">
-            <span>目标</span>
-            <textarea value={props.card.goal} onChange={(event) => props.updateCardField(props.card.id, "goal", event.target.value)} />
-          </label>
-          <label className="edit-field">
-            <span>下一步行动</span>
-            <textarea value={props.card.nextAction} onChange={(event) => props.updateCardField(props.card.id, "nextAction", event.target.value)} />
-          </label>
+          <section className="action-execution-panel" aria-label="行动主操作区" data-testid="action-execution-panel">
+            <div className="action-execution-head">
+              <div><span>当前状态</span><strong>{DISPLAY_STATUS_LABELS[props.item.status]}</strong></div>
+              {props.planCard && <small>{formatPlanDateLabel(props.planCard.plannedDate)} · {props.planCard.estimatedMinutes} 分钟</small>}
+            </div>
 
-          <label className="edit-field" data-testid="action-output-field">
-            <span>产出 / 备注</span>
-            <textarea value={outputDraft} onChange={(event) => setOutputDraft(event.target.value)} placeholder="写下这次完成了什么、链接、结论或下一步" />
-          </label>
-          <button className="secondary-action" onClick={() => props.saveActionOutput(props.card.id, outputDraft)} data-testid="save-action-output">保存产出</button>
+            {(props.item.status === "not_started" || props.item.status === "snoozed") && (
+              <div className="action-execution-actions">
+                <button className="primary-button" onClick={() => props.addActionCardToToday(props.card.id)} data-testid="add-to-today"><CalendarCheck size={17} />加入今日</button>
+                <button className="secondary-action" onClick={() => setPlanDialogOpen(true)} data-testid="add-to-plan-card">加入计划</button>
+              </div>
+            )}
+
+            {scheduled && (
+              <div className="scheduled-action-summary" data-testid="scheduled-action-summary">
+                <p>{props.item.status === "scheduled_today" ? "已加入今日，可以现在开始。" : "行动已经安排。"}</p>
+                {props.planCard?.note && <small>计划备注：{props.planCard.note}</small>}
+                <div className="action-execution-actions">
+                  <button className="primary-button" onClick={() => props.startAction(props.card.id)} data-testid="start-action">开始行动</button>
+                  <button className="secondary-action" onClick={() => setPlanDialogOpen(true)}>修改计划</button>
+                  <button className="ghost-action" onClick={() => props.snoozeAction(props.card.id)} data-testid="status-snoozed">暂时搁置</button>
+                </div>
+              </div>
+            )}
+
+            {props.item.status === "in_progress" && (
+              <div className="in-progress-action" data-testid="in-progress-action">
+                <label className="edit-field" data-testid="action-output-field">
+                  <span>本次产出</span>
+                  <textarea value={outputDraft} onChange={(event) => setOutputDraft(event.target.value)} placeholder="写下这次完成的测试图、清单、结论或链接" />
+                </label>
+                <div className="completion-controls">
+                  <label><span>实际用时</span><select value={actualMinutes} onChange={(event) => setActualMinutes(normalizePlanMinutes(Number(event.target.value)))}>{[10, 20, 30, 60].map((minutes) => <option key={minutes} value={minutes}>{minutes} 分钟</option>)}</select></label>
+                  <small>{props.card.outputSavedAt ? `最后保存：${formatSavedTime(props.card.outputSavedAt)}` : "产出尚未保存"}</small>
+                </div>
+                <div className="action-execution-actions">
+                  <button className="secondary-action" onClick={() => props.saveActionOutput(props.card.id, outputDraft)} data-testid="save-action-output">保存产出</button>
+                  <button className="primary-button" onClick={requestCompletion} data-testid="status-completed">标记完成</button>
+                </div>
+              </div>
+            )}
+
+            {props.item.status === "completed" && (
+              <div className="completed-action-summary" data-testid="completed-action-summary">
+                <strong>已完成</strong>
+                <p>{String(props.card.fields["复活产出/备注"] ?? "未填写产出")}</p>
+                <small>预计 {props.planCard?.estimatedMinutes ?? parseEstimatedMinutes(props.card.estimatedTime)} 分钟 · 实际 {props.planCard?.actualMinutes ?? "未记录"} 分钟</small>
+                <span>下一步：{props.card.followUp}</span>
+                <button className="secondary-action" onClick={() => props.undoCompletedAction(props.card.id)} data-testid="undo-completed">撤销完成</button>
+              </div>
+            )}
+          </section>
+
+          <label className="edit-field"><span>目标</span><textarea value={props.card.goal} onChange={(event) => props.updateCardField(props.card.id, "goal", event.target.value)} /></label>
+          <label className="edit-field"><span>下一步行动</span><textarea value={props.card.nextAction} onChange={(event) => props.updateCardField(props.card.id, "nextAction", event.target.value)} /></label>
           <div className="field-grid compact-fields">
             <div className="field-card"><span>为什么值得复活</span><strong>{props.card.whySaved}</strong></div>
             <div className="field-card"><span>打开原帖后重点看</span><strong>{props.card.openOriginalFocus.join(" / ")}</strong></div>
@@ -3162,57 +3217,77 @@ function DetailView(props: {
             <div className="field-card"><span>避免</span><strong>{props.card.avoidDoing}</strong></div>
             <div className="field-card"><span>后续</span><strong>{props.card.followUp}</strong></div>
           </div>
-
-          <div className="field-grid">
-            {Object.entries(props.card.fields).map(([key, value]) => (
-              <div className="field-card" key={key}>
-                <span>{key}</span>
-                <strong>{formatFieldValue(value)}</strong>
-              </div>
-            ))}
-          </div>
+          <div className="field-grid">{Object.entries(props.card.fields).map(([key, value]) => <div className="field-card" key={key}><span>{key}</span><strong>{formatFieldValue(value)}</strong></div>)}</div>
         </section>
 
         <aside className="detail-side">
           <section className="tool-panel">
             <PanelHeader icon={<CheckCircle2 size={18} />} title="任务" meta={`${props.card.tasks.length} 个`} />
-            <div className="task-list">
-              {props.card.tasks.map((task) => (
-                <TaskRow key={task.id} task={task} onChangeStatus={(status) => props.updateTaskStatus(props.card.id, task.id, status)} />
-              ))}
-            </div>
+            <div className="task-list">{props.card.tasks.map((task) => <TaskRow key={task.id} task={task} onChangeStatus={(status) => props.updateTaskStatus(props.card.id, task.id, status)} />)}</div>
           </section>
-
           <section className="tool-panel">
             <PanelHeader icon={<Archive size={18} />} title="收藏索引" meta={formatDate(props.item.createdAt)} />
-            <div className="tag-list">
-              {props.item.keywords.map((keyword) => <span key={keyword}>{keyword}</span>)}
-            </div>
-            <div className="entity-list">
-              {props.item.entities.map((entity) => <span key={`${entity.type}-${entity.value}`}>{entityLabel(entity.type)}：{entity.value}</span>)}
-            </div>
-            <label className="edit-field">
-              <span>个人备注</span>
-              <textarea value={props.item.userNote} onChange={(event) => props.updateSavedNote(props.item.id, event.target.value)} />
-            </label>
-            {lowConfidence && (
-              <div className="low-info-box">
-                <label className="edit-field">
-                  <span>我收藏它是因为...</span>
-                  <textarea value={noteDraft} onChange={(event) => setNoteDraft(event.target.value)} placeholder="例如：下周末想去 / 想复现这个工具 / 想借鉴封面" />
-                </label>
-                <button className="secondary-action" onClick={saveNoteAndRegenerate}>补充备注并重新生成</button>
-                <p className="quiet-copy">{props.card.ifInfoMissing}</p>
-              </div>
-            )}
-            <StatusButtons item={props.item} changeStatus={props.changeStatus} />
+            <div className="tag-list">{props.item.keywords.map((keyword) => <span key={keyword}>{keyword}</span>)}</div>
+            <label className="edit-field"><span>个人备注</span><textarea value={props.item.userNote} onChange={(event) => props.updateSavedNote(props.item.id, event.target.value)} /></label>
+            {lowConfidence && <div className="low-info-box"><label className="edit-field"><span>我收藏它是因为…</span><textarea value={noteDraft} onChange={(event) => setNoteDraft(event.target.value)} /></label><button className="secondary-action" onClick={saveNoteAndRegenerate}>补充备注并重新生成</button></div>}
           </section>
         </aside>
       </div>
+
+      {planDialogOpen && <ActionPlanDialog card={props.card} planCard={props.planCard} onCancel={() => setPlanDialogOpen(false)} onSave={(input) => { props.saveActionPlan(input); setPlanDialogOpen(false); }} />}
+      {emptyCompletionOpen && <ProductConfirmDialog title="产出还是空的" description="你可以仍然完成，但建议先写下测试结果、清单或一个结论，方便以后查看。" confirmLabel="仍然完成" onCancel={() => setEmptyCompletionOpen(false)} onConfirm={() => { setEmptyCompletionOpen(false); props.completeAction(props.card.id, outputDraft, actualMinutes); }} />}
     </>
   );
 }
 
+function ActionPlanDialog(props: { card: ActionCard; planCard?: PlanCard; onCancel: () => void; onSave: (input: ActionScheduleInput) => void }) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const [plannedDate, setPlannedDate] = useState(() => props.planCard ? formatDateInput(props.planCard.plannedDate) : formatLocalDateInput(new Date()));
+  const [estimatedMinutes, setEstimatedMinutes] = useState<10 | 20 | 30 | 60>(() => normalizePlanMinutes(props.planCard?.estimatedMinutes ?? parseEstimatedMinutes(props.card.estimatedTime)));
+  const [note, setNote] = useState(props.planCard?.note ?? "");
+  useDialogFocus(dialogRef, props.onCancel);
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  return <div className="product-dialog-backdrop"><div className="product-dialog" role="dialog" aria-modal="true" aria-labelledby="action-plan-title" ref={dialogRef} data-testid="action-plan-dialog">
+    <div className="product-dialog-head"><div><span>行动计划</span><h2 id="action-plan-title">{props.planCard ? "修改计划" : "加入计划"}</h2></div><button type="button" onClick={props.onCancel} aria-label="关闭计划弹窗">×</button></div>
+    <div className="plan-date-shortcuts"><button type="button" onClick={() => setPlannedDate(formatLocalDateInput(new Date()))}>今天</button><button type="button" onClick={() => setPlannedDate(formatLocalDateInput(tomorrow))}>明天</button></div>
+    <label><span>计划日期</span><input type="date" value={plannedDate} onChange={(event) => setPlannedDate(event.target.value)} required data-testid="plan-date-input" /></label>
+    <fieldset><legend>预计用时</legend><div className="plan-minute-options">{[10, 20, 30, 60].map((minutes) => <label key={minutes}><input type="radio" name="estimatedMinutes" checked={estimatedMinutes === minutes} onChange={() => setEstimatedMinutes(minutes as 10 | 20 | 30 | 60)} />{minutes} 分钟</label>)}</div></fieldset>
+    <label><span>计划备注（可选）</span><textarea value={note} onChange={(event) => setNote(event.target.value)} placeholder="例如：先完成一张测试图，不扩展选题" /></label>
+    <div className="product-dialog-actions"><button type="button" onClick={props.onCancel}>取消</button><button type="button" className="primary-button" disabled={!plannedDate} onClick={() => props.onSave({ cardId: props.card.id, plannedDate, estimatedMinutes, note })} data-testid="save-action-plan">保存计划</button></div>
+  </div></div>;
+}
+
+function ProductConfirmDialog(props: { title: string; description: string; confirmLabel: string; onCancel: () => void; onConfirm: () => void }) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useDialogFocus(dialogRef, props.onCancel);
+  return <div className="product-dialog-backdrop"><div className="product-dialog compact" role="alertdialog" aria-modal="true" aria-labelledby="product-confirm-title" ref={dialogRef}>
+    <div className="product-dialog-head"><h2 id="product-confirm-title">{props.title}</h2></div><p>{props.description}</p>
+    <div className="product-dialog-actions"><button type="button" onClick={props.onCancel}>取消</button><button type="button" className="primary-button" onClick={props.onConfirm}>{props.confirmLabel}</button></div>
+  </div></div>;
+}
+
+function useDialogFocus(dialogRef: React.RefObject<HTMLDivElement>, onEscape: () => void) {
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    const previous = document.activeElement as HTMLElement | null;
+    const focusable = () => Array.from(dialog.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'));
+    focusable()[0]?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") { event.preventDefault(); onEscape(); return; }
+      if (event.key !== "Tab") return;
+      const items = focusable();
+      if (items.length === 0) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => { document.removeEventListener("keydown", onKeyDown); previous?.focus(); };
+  }, [dialogRef, onEscape]);
+}
 function PlansView(props: {
   plans: Plan[];
   actionCards: ActionCard[];
