@@ -1725,7 +1725,7 @@ export function AppContent({ initialState, initialSettings, runtime, writeGate, 
               updateCardField={updateCardField}
               saveActionOutput={saveActionOutput}
               updateTaskStatus={updateTaskStatus}
-              regenerateActionCard={regenerateActionCard}
+              regenerateActionCard={reviveSavedItem}
               addActionCardToToday={addActionCardToToday}
               saveActionPlan={addActionCardToPlan}
               startAction={startAction}
@@ -2295,7 +2295,7 @@ function ImportView(props: {
           <div className="card-actions">
             <button className="primary-button" onClick={() => props.reviveSavedItem(props.lastImportResult!.item.id)} data-testid="revive-imported-item">复活这条</button>
             <button className="secondary-action" onClick={props.onContinueImport} data-testid="continue-import">继续导入一条</button>
-            <button className="secondary-action" onClick={() => props.viewActionCard(props.lastImportResult!.item.id)}>查看收藏索引</button>
+            <button className="secondary-action" onClick={() => props.viewActionCard(props.lastImportResult!.item.id)} data-testid="view-imported-index">查看收藏索引</button>
             <button className="secondary-action" onClick={() => props.setActiveView("albums")}>查看智能专辑</button>
             <button className="ghost-action" onClick={() => props.setActiveView("search")}>搜索找回试试</button>
           </div>
@@ -3098,7 +3098,7 @@ function DetailView(props: {
   updateCardField: (cardId: string, field: "title" | "goal" | "nextAction", value: string) => void;
   saveActionOutput: (cardId: string, output: string) => void;
   updateTaskStatus: (cardId: string, taskId: string, status: ItemStatus) => void;
-  regenerateActionCard: (itemId: string) => void;
+  regenerateActionCard: (itemId: string, reviveIntent?: ReviveIntent) => void;
   addActionCardToToday: (cardId: string) => void;
   saveActionPlan: (input: ActionScheduleInput) => void;
   startAction: (cardId: string) => void;
@@ -3155,6 +3155,19 @@ function DetailView(props: {
       <div className="detail-layout">
         <section className="tool-panel single">
           <PanelHeader icon={<Play size={18} />} title="行动卡" meta={props.card.estimatedTime} />
+          {(props.item.status === "not_started" || props.item.status === "snoozed") && (
+            <details className="intent-rebind-panel">
+              <summary data-testid="change-action-intent">用途：{props.item.savedIntent} · 更换用途</summary>
+              <p className="quiet-copy">同一条收藏会按用途重建目标、步骤、产出和完成标准。</p>
+              <div className="status-buttons revive-intent-buttons">
+                {REVIVE_INTENTS.map((intent) => (
+                  <button key={intent} onClick={() => props.regenerateActionCard(props.item.id, intent)} data-testid="rebind-intent-option">
+                    {intent}
+                  </button>
+                ))}
+              </div>
+            </details>
+          )}
           <section className="action-execution-panel" aria-label="行动主操作区" data-testid="action-execution-panel">
             <div className="action-execution-head">
               <div><span>当前状态</span><strong>{DISPLAY_STATUS_LABELS[props.item.status]}</strong></div>
