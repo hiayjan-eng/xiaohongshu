@@ -118,10 +118,22 @@ export interface SavedItem {
   id: string;
   userId: string;
   sourcePlatform: "xiaohongshu" | "manual" | "other";
+  /** Original user/import supplied URL. Never overwritten by canonicalization. */
   sourceUrl: string;
+  canonicalSourceUrl?: string;
+  sourceId?: string;
+  sourceUrlStatus?: SourceUrlStatus;
+  lastUrlCheckedAt?: string;
+  userCorrectedSourceUrl?: string;
   rawShareText: string;
+  rawText?: string;
   /** Derived locally from rawShareText for classification; rawShareText is retained unchanged. */
   normalizedContentText?: string;
+  normalizedTitle?: string;
+  normalizedContent?: string;
+  normalizationVersion?: number;
+  normalizationWarnings?: string[];
+  author?: string;
   title: string;
   userNote: string;
   contentDomain: ContentDomain;
@@ -154,8 +166,11 @@ export interface SavedItem {
   embedding?: number[];
   status: ItemStatus;
   createdAt: string;
+  importedAt?: string;
   updatedAt: string;
 }
+
+export type SourceUrlStatus = "valid" | "partial" | "invalid" | "missing" | "unavailable" | "unchecked";
 
 export interface ClassificationCandidate {
   contentDomain: ContentDomain;
@@ -287,8 +302,13 @@ export interface ClassificationCorrection {
 export interface ExtensionScannedItem {
   title: string;
   sourceUrl: string;
+  canonicalSourceUrl?: string;
+  sourceId?: string;
+  sourceUrlStatus?: SourceUrlStatus;
+  lastUrlCheckedAt?: string;
   coverUrl?: string;
   visibleText?: string;
+  rawText?: string;
   author?: string;
   noteType?: "image" | "video" | "unknown";
   sourcePlatform: "xiaohongshu";
@@ -299,6 +319,18 @@ export interface ExtensionImportPayload {
   sourcePlatform: "xiaohongshu";
   scannedAt: string;
   pageUrl?: string;
+  scanSummary?: {
+    version?: string;
+    targetCount?: number;
+    discoveredCount?: number;
+    validCount?: number;
+    duplicateCount?: number;
+    invalidCount?: number;
+    missingLinkCount?: number;
+    filteredCount?: number;
+    currentStage?: string;
+    selectorVersion?: string;
+  };
   items: ExtensionScannedItem[];
 }
 
@@ -326,8 +358,18 @@ export interface ImportBatch {
   createdActionCardCount: number;
   createdAlbumCount: number;
   errorMessage?: string;
+  duplicateBreakdown?: {
+    batchDuplicates: number;
+    existingLibraryDuplicates: number;
+    unresolvedDuplicates: number;
+  };
   scanSummary?: {
     totalFound?: number;
+    targetCount?: number;
+    discoveredCount?: number;
+    validCount?: number;
+    invalidCount?: number;
+    filteredCount?: number;
     selectedCount?: number;
     missingTitleCount?: number;
     missingLinkCount?: number;
@@ -343,6 +385,9 @@ export interface ImportBatchItem {
   id: string;
   batchId: string;
   sourceUrl: string;
+  canonicalSourceUrl?: string;
+  sourceId?: string;
+  sourceUrlStatus?: SourceUrlStatus;
   title: string;
   rawTitle?: string;
   cleanedTitle?: string;
@@ -355,6 +400,7 @@ export interface ImportBatchItem {
   userNote: string;
   status: ImportBatchItemStatus;
   duplicateOfSavedItemId?: string;
+  duplicateKind?: "batch" | "existing_library" | "unresolved";
   errorMessage?: string;
   createdSavedItemId?: string;
   createdActionCardId?: string;
@@ -363,7 +409,14 @@ export interface ImportBatchItem {
 
 export interface ShareInput {
   sourceUrl: string;
+  canonicalSourceUrl?: string;
+  sourceId?: string;
+  sourceUrlStatus?: SourceUrlStatus;
+  lastUrlCheckedAt?: string;
+  userCorrectedSourceUrl?: string;
   rawShareText: string;
+  rawText?: string;
+  author?: string;
   title: string;
   userNote: string;
 }
