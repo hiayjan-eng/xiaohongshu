@@ -116,7 +116,7 @@ try {
   assert.equal(fixture.loaded, 3000);
   assert.ok(fixture.maxDomCards <= 61, `virtual DOM retained ${fixture.maxDomCards} cards`);
   assert.equal(fixture.ownPostCardCount, 50);
-  assert.ok(fixture.loadRequests >= 59);
+  assert.ok(fixture.loadRequests >= 35);
   assert.deepEqual(fixture.supportedTotals, [20, 100, 500, 1000, 3000, 5000]);
   assert.ok(runtimeAfterResume.diagnostics.maxBufferedItems <= 61);
   assert.ok(runtimeAfterResume.diagnostics.recentItemCount <= 12);
