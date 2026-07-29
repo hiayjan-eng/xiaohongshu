@@ -217,7 +217,7 @@ export function AppContent({ initialState, initialSettings, runtime, writeGate, 
   const [lastImportResult, setLastImportResult] = useState<ImportSuccessResult | null>(null);
   const [importSessionCount, setImportSessionCount] = useState(0);
   const [isImporting, setIsImporting] = useState(false);
-  const [selectedItemId, setSelectedItemId] = useState<string | undefined>(state.savedItems[0]?.id);
+  const [selectedItemId, setSelectedItemId] = useState<string | undefined>(() => getInitialDetailItemId() ?? state.savedItems[0]?.id);
   const initialSearchQuery = getInitialSearchQuery();
   const [globalQuery, setGlobalQuery] = useState(initialSearchQuery);
   const [submittedSearch, setSubmittedSearch] = useState(initialSearchQuery);
@@ -365,6 +365,9 @@ export function AppContent({ initialState, initialSettings, runtime, writeGate, 
       }
       if (nextView === "albums") {
         setSelectedAlbumId(getInitialAlbumId());
+      }
+      if (nextView === "detail") {
+        setSelectedItemId(getInitialDetailItemId());
       }
     };
     window.addEventListener("popstate", syncViewFromLocation);
@@ -659,13 +662,14 @@ export function AppContent({ initialState, initialSettings, runtime, writeGate, 
     }
   }
 
-  function triggerCompletionReward(nextItems: SavedItem[]) {
+  function triggerCompletionReward(nextItems: SavedItem[], additionalIds: AchievementId[] = []) {
     const stats = buildRevivalStats(nextItems);
     const achievementIds: AchievementId[] = [];
 
     if (stats.completedTotal >= 1) achievementIds.push("first_revival");
     if (stats.streakDays >= 3) achievementIds.push("three_day_streak");
     if (stats.completedTotal >= 10) achievementIds.push("ten_revivals");
+    additionalIds.forEach((id) => { if (!achievementIds.includes(id)) achievementIds.push(id); });
 
     setRewardBurstId((current) => current + 1);
     setToast(pickMessage(COMPLETION_MESSAGES));
@@ -800,6 +804,7 @@ export function AppContent({ initialState, initialSettings, runtime, writeGate, 
     });
     setSelectedItemId(itemId);
     setActiveView("detail");
+    if (typeof window !== "undefined") window.history.pushState(null, "", `/detail/${encodeURIComponent(itemId)}`);
     setToast("已按选定用途生成行动卡");
   }
 
@@ -851,6 +856,7 @@ export function AppContent({ initialState, initialSettings, runtime, writeGate, 
   function viewActionCard(itemId: string) {
     setSelectedItemId(itemId);
     setActiveView("detail");
+    if (typeof window !== "undefined") window.history.pushState(null, "", `/detail/${encodeURIComponent(itemId)}`);
   }
 
   function bulkSetFilteredStatus(status: ItemStatus) {
@@ -1326,8 +1332,8 @@ export function AppContent({ initialState, initialSettings, runtime, writeGate, 
       } : entry),
       savedItems: current.savedItems.map((entry) => entry.id === item.id ? { ...entry, status: "completed", updatedAt: now } : entry)
     }));
-    triggerCompletionReward(updateItemStatus(state.savedItems, item.id, "completed"));
-    if (state.planCards?.some((entry) => entry.actionCardId === cardId)) unlockAchievements(["plan_finished"]);
+    const completionAchievements: AchievementId[] = state.planCards?.some((entry) => entry.actionCardId === cardId) ? ["plan_finished"] : [];
+    triggerCompletionReward(updateItemStatus(state.savedItems, item.id, "completed"), completionAchievements);
   }
 
   function undoCompletedAction(cardId: string) {
@@ -1370,9 +1376,10 @@ export function AppContent({ initialState, initialSettings, runtime, writeGate, 
     }));
     setLastPlanUndoState(previousSnapshot);
     if (status === "done") {
-      unlockAchievements(["plan_finished"]);
       if (previousItem?.status !== "completed") {
-        triggerCompletionReward(updateItemStatus(state.savedItems, planCard?.savedItemId ?? "", "completed"));
+        triggerCompletionReward(updateItemStatus(state.savedItems, planCard?.savedItemId ?? "", "completed"), ["plan_finished"]);
+      } else {
+        unlockAchievements(["plan_finished"]);
       }
     }
   }
@@ -1410,8 +1417,7 @@ export function AppContent({ initialState, initialSettings, runtime, writeGate, 
   }
 
   function viewPlanSource(planCard: PlanCard) {
-    setSelectedItemId(planCard.savedItemId);
-    setActiveView("detail");
+    viewActionCard(planCard.savedItemId);
   }
 
   function undoPlanChange() {
@@ -4870,6 +4876,12 @@ function getInitialSettingsSubRoute(): SettingsSubRoute {
 function getInitialAlbumId(): string | undefined {
   if (typeof window === "undefined") return undefined;
   const match = window.location.pathname.match(/^\/albums\/([^/]+)/);
+  return match?.[1] ? decodeURIComponent(match[1]) : undefined;
+}
+
+function getInitialDetailItemId(): string | undefined {
+  if (typeof window === "undefined") return undefined;
+  const match = window.location.pathname.match(/^\/detail\/([^/]+)/);
   return match?.[1] ? decodeURIComponent(match[1]) : undefined;
 }
 
