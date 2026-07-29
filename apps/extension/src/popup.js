@@ -13,6 +13,7 @@ const SCAN_STATE_KEY = "revival-extension-scan-state";
 const XHS_COLLECTION_URL = "https://www.xiaohongshu.com/";
 const WEB_APP_ORIGINS = BUILD_PROFILE.webAppOrigins;
 const STAGES = ["recognizing", "loading", "extracting", "deduping", "complete"];
+const SUPPORTED_TARGETS = [10, 20, 50, 100, 200];
 const STAGE_LABELS = {
   recognizing: "识别页面",
   loading: "加载收藏",
@@ -136,6 +137,15 @@ function createEmptyScanState() {
     stage: "recognizing",
     mode: "limit",
     limit: 20,
+    targetCount: 20,
+    discoveredCount: 0,
+    validCount: 0,
+    invalidCount: 0,
+    currentStage: "recognizing",
+    lastVisibleCardKey: "",
+    scrollPosition: 0,
+    paused: false,
+    completed: false,
     batch: 0,
     lastAdded: 0,
     noNewRounds: 0,
@@ -265,7 +275,7 @@ async function scanVisibleCards() {
 
 async function startAutoScan() {
   const limitValue = document.querySelector("input[name='scanLimit']:checked")?.value || "20";
-  const limit = Math.max(10, Math.min(20, Number(limitValue)));
+  const limit = normalizeScanTarget(limitValue);
   state.items = [];
   state.selectedKeys = new Set();
   state.duplicateCount = 0;
@@ -274,6 +284,7 @@ async function startAutoScan() {
     status: "scanning",
     stage: "recognizing",
     limit,
+    targetCount: limit,
     pageUrl: state.tabUrl,
     message: "正在检查当前收藏页…"
   };
@@ -424,6 +435,14 @@ async function copyDiagnostics() {
     validFavoriteCount: diagnostics.validFavoriteCount ?? 0,
     filteredCount: diagnostics.filteredCount ?? 0,
     filteredReasons: diagnostics.filteredReasons || {},
+    targetCount: state.scanState?.targetCount || state.scanState?.limit || 20,
+    discoveredCount: state.scanState?.discoveredCount || 0,
+    validCount: state.scanState?.validCount || 0,
+    duplicateCount: state.scanState?.duplicateCount || 0,
+    invalidCount: state.scanState?.invalidCount || 0,
+    currentStage: state.scanState?.currentStage || state.scanState?.stage || "unknown",
+    paused: Boolean(state.scanState?.paused),
+    completed: Boolean(state.scanState?.completed),
     selectorVersion: pageStatus.selectorVersion || state.scanState?.selectorVersion || "unknown"
   };
   try {
@@ -463,6 +482,10 @@ function normalizeItems(items) {
     .map((item) => ({
       title: normalizeText(item.title || ""),
       sourceUrl: (item.sourceUrl || "").trim(),
+      canonicalSourceUrl: (item.canonicalSourceUrl || "").trim() || undefined,
+      sourceId: (item.sourceId || "").trim() || undefined,
+      sourceUrlStatus: item.sourceUrlStatus || (item.sourceUrl ? "partial" : "missing"),
+      lastUrlCheckedAt: item.lastUrlCheckedAt,
       coverUrl: item.coverUrl || undefined,
       visibleText: normalizeText(item.visibleText || ""),
       rawText: item.rawText,
@@ -497,7 +520,8 @@ function renderAll() {
 
 function renderProgress() {
   const scan = state.scanState;
-  const total = state.items.length || scan.totalFound || 0;
+  const total = scan.discoveredCount || state.items.filter((item) => !item.isDuplicate).length || scan.totalFound || 0;
+  const valid = scan.validCount || state.items.filter((item) => !item.isDuplicate && item.sourceId).length;
   const selected = getSelectedItems().length;
   const isRunning = scan.status === "scanning";
   const isPaused = scan.status === "paused";
@@ -505,16 +529,16 @@ function renderProgress() {
   const isAllMode = scan.mode === "all" || !scan.limit;
   const percent = isAllMode
     ? isComplete ? 100 : 0
-    : Math.max(0, Math.min(100, Math.round((total / Math.max(1, scan.limit || 1)) * 100)));
+    : Math.max(0, Math.min(100, Math.round((valid / Math.max(1, scan.targetCount || scan.limit || 1)) * 100)));
 
   elements.progressTitle.textContent = scan.message || (isRunning ? "正在扫描旧收藏" : "等待扫描");
-  elements.progressMode.textContent = isAllMode ? "尽可能扫描全部" : `${scan.limit || 20} 条上限`;
+  elements.progressMode.textContent = isAllMode ? "尽可能扫描全部" : `${scan.targetCount || scan.limit || 20} 条目标`;
   elements.progressTrack.classList.toggle("indeterminate", isAllMode && isRunning);
   elements.progressTrack.classList.toggle("paused", isPaused);
   elements.progressFill.style.width = isAllMode && isRunning ? "" : `${percent}%`;
   elements.progressPrimary.textContent = isAllMode
     ? `已发现 ${total} 条 · 第 ${scan.batch || 0} 批`
-    : `${Math.min(total, scan.limit || total)} / ${scan.limit || 20} 条`;
+    : `${Math.min(valid, scan.targetCount || scan.limit || valid)} / ${scan.targetCount || scan.limit || 20} 条有效收藏`;
   elements.progressStage.textContent = STAGE_LABELS[scan.stage] || STAGE_LABELS[scan.status] || "等待扫描";
   elements.status.textContent = scan.status === "error" ? (scan.error || scan.message || "扫描异常") : (scan.message || elements.status.textContent);
 
@@ -654,7 +678,24 @@ function getSelectedItems() {
 }
 
 function itemKey(item) {
-  return item.scanKey || `${item.sourceUrl || ""}|${item.title || ""}`;
+  if (item.sourceId) return `source:${item.sourceId}`;
+  if (item.canonicalSourceUrl) return `url:${item.canonicalSourceUrl}`;
+  if (item.scanKey) return item.scanKey;
+  return `fallback:${stableHash([item.title || "", item.author || "", normalizeText(item.visibleText || item.rawText || "").slice(0, 160)].join("|"))}`;
+}
+
+function stableHash(value) {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+function normalizeScanTarget(value) {
+  const numeric = Number(value);
+  return SUPPORTED_TARGETS.includes(numeric) ? numeric : 20;
 }
 
 function buildPayload() {
@@ -665,11 +706,15 @@ function buildPayload() {
     pageUrl: state.pageUrl,
     scanSummary: {
       version: chrome.runtime.getManifest().version,
-      totalFound: state.items.length,
+      targetCount: state.scanState.targetCount || state.scanState.limit || 20,
+      discoveredCount: state.scanState.discoveredCount || state.items.filter((item) => !item.isDuplicate).length,
+      validCount: state.scanState.validCount || state.items.filter((item) => !item.isDuplicate && item.sourceId).length,
       duplicateCount: state.duplicateCount || state.scanState.duplicateCount || 0,
+      invalidCount: state.scanState.invalidCount || state.items.filter((item) => !item.isDuplicate && !item.sourceId).length,
+      filteredCount: state.scanState.diagnostics?.filteredCount || 0,
       scanMode: state.scanState.mode,
       scanLimit: state.scanState.limit,
-      selectorVersion: "xhs-fav-visible-cards-v4"
+      selectorVersion: "xhs-fav-visible-cards-v5"
     },
     items: getSelectedItems()
   };
@@ -704,6 +749,17 @@ async function saveSelection() {
     items: state.items,
     selectedKeys: [...state.selectedKeys],
     duplicateCount: state.duplicateCount,
+    targetCount: state.scanState.targetCount,
+    discoveredCount: state.scanState.discoveredCount,
+    validCount: state.scanState.validCount,
+    invalidCount: state.scanState.invalidCount,
+    currentStage: state.scanState.currentStage,
+    lastVisibleCardKey: state.scanState.lastVisibleCardKey,
+    scrollPosition: state.scanState.scrollPosition,
+    startedAt: state.scanState.startedAt,
+    updatedAt: state.scanState.updatedAt,
+    paused: state.scanState.paused,
+    completed: state.scanState.completed,
     pageUrl: state.pageUrl,
     savedAt: new Date().toISOString()
   };
