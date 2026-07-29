@@ -48,6 +48,15 @@ export const REVIVE_INTENTS = [
 ] as const;
 
 export type ReviveIntent = (typeof REVIVE_INTENTS)[number];
+export type ActionIntentKey =
+  | "learn_method"
+  | "copy_once"
+  | "use_at_work"
+  | "make_own_content"
+  | "plan_trip"
+  | "make_purchase_decision"
+  | "reflect"
+  | "organize_only";
 export type ClassificationConfidence = "high" | "medium" | "low";
 export type SmartAlbumPriority = "high" | "medium" | "low";
 export type SmartAlbumView = "content_domain" | "saved_intent";
@@ -55,7 +64,8 @@ export const APP_SCHEMA_VERSION = 3;
 
 export const STATUSES = [
   "not_started",
-  "today",
+  "scheduled_today",
+  "scheduled",
   "in_progress",
   "completed",
   "snoozed"
@@ -65,7 +75,8 @@ export type ItemStatus = (typeof STATUSES)[number];
 
 export const STATUS_LABELS: Record<ItemStatus, string> = {
   not_started: "未开始",
-  today: "已加入今日行动",
+  scheduled_today: "已加入今日",
+  scheduled: "已安排",
   in_progress: "进行中",
   completed: "已完成",
   snoozed: "已搁置"
@@ -179,6 +190,9 @@ export interface ActionCard {
   followUp: string;
   fields: Record<string, string | string[]>;
   tasks: Task[];
+  generatedFromIntent: ActionIntentKey;
+  templateVersion: string;
+  outputSavedAt?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -198,6 +212,8 @@ export interface ActionCardDraft {
   followUp: string;
   tasks: TaskDraft[];
   structuredFields: Record<string, string | string[]>;
+  generatedFromIntent: ActionIntentKey;
+  templateVersion: string;
 }
 
 export type PlanCardStatus = "planned" | "doing" | "done" | "cancelled";
@@ -210,6 +226,8 @@ export interface PlanCard {
   sourceTitle?: string;
   plannedDate: string;
   estimatedMinutes: number;
+  actualMinutes?: number;
+  note?: string;
   oneNextStep: string;
   doneCriteria: string;
   status: PlanCardStatus;
