@@ -54,7 +54,7 @@ const background = readFileSync(new URL("../src/background.js", import.meta.url)
 
 const popupMarkers = ["CHECKPOINT_KEY", "SCAN_STATE_KEY", "pauseScan", "resumeScan", "retryScan", "browser-extension-beta", "autoScrollToggle", "clearCheckpoint", "openOrRefreshWebApp", "ensureWebBridgeScript", "bridgeStatus", "scannerStatus", "progressTrack", "filterSelect"];
 const bridgeMarkers = ["COLLECTION_REVIVAL_EXTENSION_READY", "COLLECTION_REVIVAL_EXTENSION_PING", "COLLECTION_REVIVAL_EXTENSION_PONG", "COLLECTION_REVIVAL_EXTENSION_SCAN_STATUS_REQUEST", "COLLECTION_REVIVAL_EXTENSION_SCAN_STATUS", "requestId", "protocolVersion", "collection-revival-web-bridge-v1", "collectionRevivalExtensionVersion", "collection-revival-extension-bridge", "scan-progress-sync"];
-const scannerMarkers = ["REVIVAL_GET_PAGE_STATUS", "REVIVAL_START_SCAN", "REVIVAL_PAUSE_SCAN", "REVIVAL_RESUME_SCAN", "REVIVAL_GET_SCAN_STATE", "scrollOneStep", "findCollectionRoot", "isElementVisible", "normalizeScannedText", "blocked", "验证码", "xhs-fav-visible-cards-v4"];
+const scannerMarkers = ["REVIVAL_GET_PAGE_STATUS", "REVIVAL_START_SCAN", "REVIVAL_PAUSE_SCAN", "REVIVAL_RESUME_SCAN", "REVIVAL_GET_SCAN_STATE", "scrollOneStep", "findCollectionRoot", "isElementVisible", "normalizeScannedText", "blocked", "验证码", "xhs-fav-visible-cards-v5"];
 const backgroundMarkers = ["onInstalled", "onStartup", "executeScript", "web-bridge.js"];
 for (const marker of popupMarkers) {
   if (!popupJs.includes(marker) && !popupHtml.includes(marker)) throw new Error(`Missing popup beta capability marker: ${marker}`);
@@ -82,7 +82,7 @@ function assertPopupStructure() {
     "more-settings"
   ], "popup first-screen order");
 
-  for (const limitValue of ['value="10"', 'value="20"']) {
+  for (const limitValue of ['value="10"', 'value="20"', 'value="50"', 'value="100"', 'value="200"']) {
     if (!popupHtml.includes(limitValue)) throw new Error(`Missing scan limit option: ${limitValue}`);
   }
 
@@ -147,9 +147,27 @@ function assertScannerBehavior() {
     throw new Error("Non-Xiaohongshu URL should not be recognized");
   }
 
-  const milestones = exports.updateMilestones([], 20);
-  for (const expected of ["已找回 10 条旧收藏", "已找回 20 条旧收藏"]) {
+  const milestones = exports.updateMilestones([], 200);
+  for (const expected of ["已找回 10 条旧收藏", "已找回 20 条旧收藏", "已找回 50 条旧收藏", "已找回 100 条旧收藏", "已找回 200 条旧收藏"]) {
     if (!milestones.includes(expected)) throw new Error(`Missing progress milestone: ${expected}`);
+  }
+
+  for (const target of [10, 20, 50, 100, 200]) {
+    if (exports.normalizeScanTarget(target) !== target) throw new Error("Unsupported scan target: " + target);
+  }
+  if (exports.normalizeScanTarget(999) !== 20) throw new Error("Unknown scan target should safely fall back to 20");
+
+  const noteUrl = "https://www.xiaohongshu.com/discovery/item/6a15293600000000080251c2?xsec_token=masked&xsec_source=pc_collect";
+  if (exports.extractSourceId(noteUrl) !== "6a15293600000000080251c2") throw new Error("sourceId extraction failed");
+  if (!exports.canonicalizeXhsUrl(noteUrl).includes("/explore/6a15293600000000080251c2")) throw new Error("canonical URL failed");
+  if (exports.extractSourceId("https://www.xiaohongshu.com/user/profile/6a15293600000000080251c2")) throw new Error("profile ID must not be treated as sourceId");
+  const firstKey = exports.itemKey({ sourceId: "same-note", sourceUrl: "https://www.xiaohongshu.com/explore/same-note?xsec_token=a" });
+  const secondKey = exports.itemKey({ sourceId: "same-note", sourceUrl: "https://www.xiaohongshu.com/explore/same-note?xsec_token=b" });
+  if (firstKey !== secondKey) throw new Error("query token should not change stable dedupe key");
+
+  const emptyState = exports.createEmptyState();
+  for (const field of ["targetCount", "discoveredCount", "validCount", "duplicateCount", "invalidCount", "currentStage", "lastVisibleCardKey", "scrollPosition", "paused", "completed"]) {
+    if (!(field in emptyState)) throw new Error("Checkpoint field missing: " + field);
   }
 
   const trimmed = exports.trimToLimit([
@@ -232,7 +250,7 @@ function assertScannerRangeWithMockDom() {
   if (result.pageStatus?.diagnostics?.validFavoriteCount !== result.items.length) throw new Error("Scanner diagnostics should expose valid favorite counts");
   const ownFavorite = result.items.find((item) => item.title === "我自己也收藏的灵感");
   if (!ownFavorite?.isLikelyOwnPost) throw new Error("Own authored favorite should be marked, not deleted");
-  if (result.items.some((item) => item.isVisible !== true || item.selectorVersion !== "xhs-fav-visible-cards-v4")) {
+  if (result.items.some((item) => item.isVisible !== true || item.selectorVersion !== "xhs-fav-visible-cards-v5")) {
     throw new Error("Scanned items should include visibility and selector diagnostics");
   }
 }
@@ -282,7 +300,12 @@ function loadScannerTestExports(documentOverride = createBasicScannerDocument(),
       trimToLimit,
       findCollectionRoot,
       scanVisibleXhsCards,
-      getPageStatus
+      getPageStatus,
+      normalizeScanTarget,
+      extractSourceId,
+      canonicalizeXhsUrl,
+      itemKey,
+      createEmptyState
     };
   })();
   `);
