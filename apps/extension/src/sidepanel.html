@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>收藏复活全量扫描</title>
+    <link rel="stylesheet" href="./sidepanel.css" />
+  </head>
+  <body>
+    <main class="panel-shell">
+      <header class="panel-header">
+        <div>
+          <p class="eyebrow">M0 Full Scan · Technical Spike</p>
+          <h1>扫描全部收藏</h1>
+        </div>
+        <span id="statusBadge" class="status-badge" data-status="ready">准备</span>
+      </header>
+
+      <section class="identity-card" aria-label="页面身份">
+        <div>
+          <span>当前页面</span>
+          <strong id="pageIdentity">正在确认…</strong>
+        </div>
+        <div>
+          <span>当前账号</span>
+          <strong id="profileIdentity">仅显示脱敏标识</strong>
+        </div>
+        <p id="safetyMessage">只读取当前收藏面板；无法确认边界时不会开始扫描。</p>
+      </section>
+
+      <section class="primary-actions" aria-label="扫描操作">
+        <button id="startScan" class="primary-button" type="button">扫描全部收藏</button>
+        <div class="secondary-actions">
+          <button id="pauseScan" type="button">暂停</button>
+          <button id="resumeScan" type="button">继续</button>
+          <button id="stopScan" type="button">停止并保留进度</button>
+        </div>
+      </section>
+
+      <section class="progress-card" aria-live="polite">
+        <div class="progress-heading">
+          <span id="progressMessage">等待开始</span>
+          <span id="elapsedTime">00:00</span>
+        </div>
+        <div class="progress-track" aria-hidden="true">
+          <span id="progressFill"></span>
+        </div>
+        <p id="scrollProgress">滚动位置：—</p>
+      </section>
+
+      <section class="stats-grid" aria-label="扫描统计">
+        <div><span>已发现</span><strong id="discoveredCount">0</strong></div>
+        <div><span>有效收藏</span><strong id="validCount">0</strong></div>
+        <div><span>已存在</span><strong id="existingCount">0</strong></div>
+        <div><span>无效</span><strong id="invalidCount">0</strong></div>
+      </section>
+
+      <section class="recent-card">
+        <div class="section-heading">
+          <h2>最近新增</h2>
+          <button id="diagnosticsButton" class="text-button" type="button">查看脱敏诊断</button>
+        </div>
+        <ol id="recentItems" class="recent-list">
+          <li class="empty-row">扫描后只在这里保留最近 12 条。</li>
+        </ol>
+      </section>
+
+      <details id="diagnosticsPanel" class="diagnostics-card">
+        <summary>脱敏诊断</summary>
+        <pre id="diagnosticsOutput">尚无诊断。</pre>
+      </details>
+
+      <footer>
+        <button id="restartScan" class="text-button" type="button">重新开始</button>
+        <button id="importButton" type="button" disabled title="技术 Spike 不接触 Web 产品导入">导入收藏复活（后续 M0）</button>
+      </footer>
+    </main>
+    <script src="./sidepanel.js"></script>
+  </body>
+</html>
