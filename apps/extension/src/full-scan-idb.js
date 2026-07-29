@@ -1,10 +1,12 @@
 (() => {
-  const DB_NAME = "collection-revival-m0-full-scan-spike";
-  const DB_VERSION = 1;
+  const DB_NAME = "collection-revival-m0-preview-v1";
+  const DB_VERSION = 2;
   const SESSION_STORE = "scanSessions";
   const ITEM_STORE = "favoriteItems";
   const SESSION_ITEM_STORE = "scanSessionItems";
+  const IMPORT_STORE = "importBatches";
   const RECENT_LIMIT = 12;
+  const IMPORT_CHUNK_LIMIT = 200;
 
   let databasePromise;
 
@@ -31,6 +33,11 @@
           const sessionItems = database.createObjectStore(SESSION_ITEM_STORE, { keyPath: "sessionItemKey" });
           sessionItems.createIndex("sessionId", "sessionId", { unique: false });
           sessionItems.createIndex("sessionAndSourceId", ["sessionId", "sourceId"], { unique: false });
+        }
+        if (!database.objectStoreNames.contains(IMPORT_STORE)) {
+          const imports = database.createObjectStore(IMPORT_STORE, { keyPath: "importBatchId" });
+          imports.createIndex("scanSessionId", "scanSessionId", { unique: false });
+          imports.createIndex("createdAt", "createdAt", { unique: false });
         }
       };
       request.onsuccess = () => resolve(request.result);
@@ -67,7 +74,7 @@
     const timestamp = nowIso();
     return {
       sessionId: createId("scan"),
-      importBatchId: createId("import"),
+      importBatchId: "",
       profileIdHash: identity.profileIdHash,
       favoritesPageIdentity: identity.favoritesPageIdentity,
       status: "ready",
@@ -78,6 +85,8 @@
       duplicateCount: 0,
       existingCount: 0,
       invalidCount: 0,
+      missingLinkCount: 0,
+      reviewCount: 0,
       newItemCount: 0,
       duplicateInsertCount: 0,
       lastSourceId: "",
@@ -85,8 +94,10 @@
       lastScrollHeight: 0,
       stableNoGrowthCycles: 0,
       retryCount: 0,
-      selectorVersion: identity.selectorVersion || "m0-full-scan-spike-v1",
-      extensionVersion: identity.extensionVersion || "0.2.3-spike",
+      resumeCount: 0,
+      completedAt: "",
+      selectorVersion: identity.selectorVersion || "m0-real-favorites-v3",
+      extensionVersion: identity.extensionVersion || "0.3.0-m0-preview",
       itemsCheckpoint: 0,
       lastErrorCode: "",
       lastErrorMessage: "",
@@ -98,7 +109,7 @@
     assertIdentity(identity);
     if (options.resume !== false) {
       const existing = await findLatestSession(identity.favoritesPageIdentity);
-      if (existing && !["completed", "stopped"].includes(existing.status)) return existing;
+      if (existing && existing.status !== "completed") return existing;
     }
     const database = await openDatabase();
     const session = emptySession(identity);
@@ -165,7 +176,7 @@
     for (const rawItem of items.slice(0, 100)) {
       const item = normalizeItem(rawItem, session);
       const dedupeKey = dedupeKeyFor(item);
-      if (!dedupeKey || !item.sourceId || !item.canonicalSourceUrl) {
+      if (!dedupeKey || !item.sourceId || !item.canonicalSourceUrl || !item.title) {
         const invalidRelationKey = `${sessionId}|invalid:${stableHash(JSON.stringify(rawItem || {}))}`;
         const existingInvalid = await requestResult(sessionItemStore.get(invalidRelationKey));
         if (!existingInvalid) {
@@ -175,10 +186,13 @@
             sourceId: "",
             dedupeKey: "",
             valid: false,
+            reviewReason: !item.sourceId ? "MISSING_SOURCE_ID" : !item.canonicalSourceUrl ? "MISSING_SOURCE_URL" : "MISSING_TITLE",
             capturedAt: item.capturedAt
           });
           session.discoveredCount += 1;
           session.invalidCount += 1;
+          session.reviewCount += 1;
+          if (!item.sourceId || !item.canonicalSourceUrl) session.missingLinkCount += 1;
         } else {
           session.duplicateCount += 1;
         }
@@ -256,6 +270,125 @@
     return items.slice(-RECENT_LIMIT);
   }
 
+  async function listSessionItems(sessionId, options = {}) {
+    const limit = Math.max(1, Math.min(Number(options.limit) || 50, IMPORT_CHUNK_LIMIT));
+    const offset = Math.max(0, Number(options.offset) || 0);
+    const query = clean(options.query).toLowerCase();
+    const database = await openDatabase();
+    const transaction = database.transaction([ITEM_STORE, SESSION_ITEM_STORE], "readonly");
+    let relations = await requestResult(
+      transaction.objectStore(SESSION_ITEM_STORE).index("sessionId").getAll(IDBKeyRange.only(sessionId))
+    );
+    relations = relations.filter((relation) => relation.valid && relation.storageKey);
+    if (options.random === true) {
+      relations.sort((left, right) => stableHash(`${sessionId}|${left.sessionItemKey}`).localeCompare(stableHash(`${sessionId}|${right.sessionItemKey}`)));
+    }
+    const items = [];
+    let matched = 0;
+    for (const relation of relations) {
+      const item = await requestResult(transaction.objectStore(ITEM_STORE).get(relation.storageKey));
+      if (!item) continue;
+      if (query && ![item.title, item.author, item.visibleExcerpt, item.sourceId].some((value) => clean(value).toLowerCase().includes(query))) continue;
+      if (matched >= offset && items.length < limit) items.push(item);
+      matched += 1;
+      if (items.length >= limit && options.random !== true) break;
+    }
+    await transactionDone(transaction);
+    return {
+      items,
+      offset,
+      limit,
+      totalMatched: query || options.random === true ? matched : relations.length,
+      hasMore: offset + items.length < (query || options.random === true ? matched : relations.length)
+    };
+  }
+
+  async function prepareImportBatch(sessionId, origin, extensionVersion) {
+    const session = await getSession(sessionId);
+    if (!session || session.status !== "completed") throw new Error("只有完成并通过核验的扫描才能导入 Preview。");
+    const database = await openDatabase();
+    const importBatch = {
+      importBatchId: createId("import"),
+      scanSessionId: session.sessionId,
+      extensionVersion: clean(extensionVersion || session.extensionVersion || "0.3.0-m0-preview"),
+      targetOrigin: clean(origin),
+      status: "prepared",
+      totalCount: session.validCount,
+      reviewCount: session.invalidCount,
+      createdAt: nowIso(),
+      importedAt: "",
+      result: null
+    };
+    const transaction = database.transaction(IMPORT_STORE, "readwrite");
+    transaction.objectStore(IMPORT_STORE).add(importBatch);
+    await transactionDone(transaction);
+    return importBatch;
+  }
+
+  async function getImportBatch(importBatchId) {
+    const database = await openDatabase();
+    const transaction = database.transaction(IMPORT_STORE, "readonly");
+    const batch = await requestResult(transaction.objectStore(IMPORT_STORE).get(importBatchId));
+    await transactionDone(transaction);
+    return batch || null;
+  }
+
+  async function getImportMeta(importBatchId) {
+    const batch = await getImportBatch(importBatchId);
+    if (!batch) throw new Error("找不到待导入批次。");
+    const session = await getSession(batch.scanSessionId);
+    if (!session) throw new Error("找不到导入批次对应的扫描会话。");
+    return {
+      importBatchId: batch.importBatchId,
+      scanSessionId: batch.scanSessionId,
+      extensionVersion: batch.extensionVersion,
+      createdAt: batch.createdAt,
+      totalCount: session.validCount,
+      reviewCount: session.invalidCount,
+      selectorVersion: session.selectorVersion,
+      status: batch.status
+    };
+  }
+
+  async function getImportChunk(importBatchId, offset = 0, limit = IMPORT_CHUNK_LIMIT) {
+    const batch = await getImportBatch(importBatchId);
+    if (!batch) throw new Error("找不到待导入批次。");
+    const result = await listSessionItems(batch.scanSessionId, { offset, limit });
+    return {
+      importBatchId,
+      scanSessionId: batch.scanSessionId,
+      extensionVersion: batch.extensionVersion,
+      items: result.items,
+      offset: result.offset,
+      nextOffset: result.offset + result.items.length,
+      hasMore: result.hasMore,
+      totalCount: result.totalMatched
+    };
+  }
+
+  async function recordImportResult(importBatchId, result = {}) {
+    const database = await openDatabase();
+    const transaction = database.transaction(IMPORT_STORE, "readwrite");
+    const store = transaction.objectStore(IMPORT_STORE);
+    const batch = await requestResult(store.get(importBatchId));
+    if (!batch) {
+      transaction.abort();
+      throw new Error("找不到待更新的导入批次。");
+    }
+    const next = {
+      ...batch,
+      status: result.status === "rolled_back" ? "rolled_back" : "imported",
+      importedAt: clean(result.importedAt || nowIso()),
+      result: {
+        importedCount: Math.max(0, Number(result.importedCount) || 0),
+        existingCount: Math.max(0, Number(result.existingCount) || 0),
+        reviewCount: Math.max(0, Number(result.reviewCount) || 0)
+      }
+    };
+    store.put(next);
+    await transactionDone(transaction);
+    return next;
+  }
   async function verifySession(sessionId) {
     const database = await openDatabase();
     const transaction = database.transaction([SESSION_STORE, SESSION_ITEM_STORE], "readonly");
@@ -339,8 +472,18 @@
         return { ok: true, verification: await verifySession(message.sessionId) };
       case "M0_FULL_SCAN_GET_DIAGNOSTICS":
         return { ok: true, diagnostics: await getDiagnostics(message.sessionId) };
+      case "M0_FULL_SCAN_LIST_ITEMS":
+        return { ok: true, ...(await listSessionItems(message.sessionId, message.options)) };
       case "M0_FULL_SCAN_RESET_SESSION":
         return { ok: true, session: await resetSession(message.identity) };
+      case "M0_PREVIEW_PREPARE_IMPORT":
+        return { ok: true, importBatch: await prepareImportBatch(message.sessionId, message.origin, message.extensionVersion) };
+      case "M0_PREVIEW_IMPORT_META_REQUEST":
+        return { ok: true, meta: await getImportMeta(message.importBatchId) };
+      case "M0_PREVIEW_IMPORT_CHUNK_REQUEST":
+        return { ok: true, chunk: await getImportChunk(message.importBatchId, message.offset, message.limit) };
+      case "M0_PREVIEW_IMPORT_RESULT":
+        return { ok: true, importBatch: await recordImportResult(message.importBatchId, message.result) };
       default:
         return null;
     }
@@ -386,6 +529,8 @@
       "lastScrollHeight",
       "stableNoGrowthCycles",
       "retryCount",
+      "resumeCount",
+      "completedAt",
       "itemsCheckpoint",
       "lastErrorCode",
       "lastErrorMessage"
@@ -412,11 +557,17 @@
     dedupeKeyFor,
     findLatestSession,
     getDiagnostics,
+    getImportBatch,
+    getImportChunk,
+    getImportMeta,
     getSession,
     handleMessage,
     listRecentItems,
+    listSessionItems,
     openDatabase,
+    prepareImportBatch,
     persistItems,
+    recordImportResult,
     resetSession,
     updateSession,
     verifySession

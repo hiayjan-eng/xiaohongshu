@@ -10,6 +10,9 @@ const playwrightModule = pathToFileURL(
   resolve(repoRoot, "apps", "web", "node_modules", "@playwright", "test", "index.mjs")
 ).href;
 const { chromium } = await import(playwrightModule);
+const targetTotal = Number(process.argv.find((arg) => arg.startsWith("--total="))?.slice("--total=".length) || 3000);
+if (![20, 100, 500, 1000, 3000, 5000].includes(targetTotal)) throw new Error(`Unsupported fixture total: ${targetTotal}`);
+const interruptAt = Math.max(1, Math.min(targetTotal - 1, Number(process.argv.find((arg) => arg.startsWith("--interrupt="))?.slice("--interrupt=".length) || Math.min(1200, Math.floor(targetTotal * 0.4)))));
 
 const fixtureHtml = await readFile(
   resolve(extensionRoot, "tests", "fixtures", "full-scan-virtual-list.html"),
@@ -42,7 +45,7 @@ const cdp = await context.newCDPSession(page);
 const heapBefore = await cdp.send("Runtime.getHeapUsage");
 
 try {
-  await openFixture(page, { total: 3000 });
+  await openFixture(page, { total: targetTotal });
   await page.evaluate(async () => {
     sessionStorage.clear();
     await globalThis.CollectionRevivalFullScanDb.clearDatabaseForTests();
@@ -57,31 +60,33 @@ try {
   const identity = pageStatus.inspection.identity;
   assert.match(identity.profileIdHash, /^[a-f0-9]{8}$/);
 
+  const shouldInterrupt = targetTotal > 50;
   const started = await sendToContent(page, {
     type: "M0_FULL_SCAN_START",
-    debugPauseAfter: 1200
+    debugPauseAfter: shouldInterrupt ? interruptAt : 0
   });
   assert.equal(started.ok, true);
   const sessionId = started.session.sessionId;
-  await waitForSessionStatus(page, sessionId, "paused");
-  const pausedSession = await getSession(page, sessionId);
-  assert.ok(pausedSession.validCount >= 1200 && pausedSession.validCount < 3000);
-  assert.equal(pausedSession.status, "paused");
+  let pausedSession = { validCount: 0 };
 
-  const runtimeBeforeReload = await sendToContent(page, {
-    type: "M0_FULL_SCAN_GET_RUNTIME_DIAGNOSTICS"
-  });
-  assert.equal(runtimeBeforeReload.ok, true);
-  assert.equal(runtimeBeforeReload.diagnostics.observedRootIsBody, false);
-  assert.equal(runtimeBeforeReload.diagnostics.scrollContainerIsInsideFavoritesRoot, true);
+  if (shouldInterrupt) {
+    await waitForSessionStatus(page, sessionId, "paused");
+    pausedSession = await getSession(page, sessionId);
+    assert.ok(pausedSession.validCount >= interruptAt && pausedSession.validCount < targetTotal);
+    assert.equal(pausedSession.status, "paused");
 
-  await page.reload({ waitUntil: "domcontentloaded" });
-  await installExtensionScripts(page);
-  const resumed = await sendToContent(page, { type: "M0_FULL_SCAN_RESUME" });
-  assert.equal(resumed.ok, true);
-  assert.equal(resumed.session.sessionId, sessionId, "resume must keep the same ScanSession");
-  await waitForSessionStatus(page, sessionId, "completed", 30_000);
+    const runtimeBeforeReload = await sendToContent(page, { type: "M0_FULL_SCAN_GET_RUNTIME_DIAGNOSTICS" });
+    assert.equal(runtimeBeforeReload.ok, true);
+    assert.equal(runtimeBeforeReload.diagnostics.observedRootIsBody, false);
+    assert.equal(runtimeBeforeReload.diagnostics.scrollContainerIsInsideFavoritesRoot, true);
 
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await installExtensionScripts(page);
+    const resumed = await sendToContent(page, { type: "M0_FULL_SCAN_RESUME" });
+    assert.equal(resumed.ok, true);
+    assert.equal(resumed.session.sessionId, sessionId, "resume must keep the same ScanSession");
+  }
+  await waitForSessionStatus(page, sessionId, "completed", targetTotal >= 5000 ? 90_000 : 60_000);
   const finalSession = await getSession(page, sessionId);
   const databaseDiagnostics = await page.evaluate(
     (id) => globalThis.CollectionRevivalFullScanDb.getDiagnostics(id),
@@ -101,22 +106,23 @@ try {
   }));
   const storedItems = await listStoredItems(page, identity.favoritesPageIdentity);
 
-  assert.equal(finalSession.discoveredCount, 3000);
-  assert.equal(finalSession.validCount, 3000);
+  assert.equal(finalSession.discoveredCount, targetTotal);
+  assert.equal(finalSession.validCount, targetTotal);
   assert.equal(finalSession.invalidCount, 0);
-  assert.equal(finalSession.newItemCount, 3000);
+  assert.equal(finalSession.newItemCount, targetTotal);
   assert.equal(finalSession.duplicateInsertCount, 0);
   assert.equal(finalSession.status, "completed");
   assert.ok(finalSession.stableNoGrowthCycles >= 5);
   assert.equal(databaseDiagnostics.verification.consistent, true);
-  assert.equal(databaseDiagnostics.verification.uniqueSourceIdCount, 3000);
-  assert.equal(storedItems.length, 3000);
+  assert.equal(databaseDiagnostics.verification.uniqueSourceIdCount, targetTotal);
+  assert.equal(storedItems.length, targetTotal);
   assert.equal(storedItems.filter((item) => item.sourceId.startsWith("ownpost")).length, 0);
-  assert.equal(new Set(storedItems.map((item) => item.sourceId)).size, 3000);
-  assert.equal(fixture.loaded, 3000);
+  assert.equal(new Set(storedItems.map((item) => item.sourceId)).size, targetTotal);
+  assert.equal(fixture.loaded, targetTotal);
   assert.ok(fixture.maxDomCards <= 61, `virtual DOM retained ${fixture.maxDomCards} cards`);
   assert.equal(fixture.ownPostCardCount, 50);
-  assert.ok(fixture.loadRequests >= 35);
+  if (targetTotal >= 3000) assert.ok(fixture.loadRequests >= 35);
+  else if (targetTotal > 50) assert.ok(fixture.loadRequests > 0);
   assert.deepEqual(fixture.supportedTotals, [20, 100, 500, 1000, 3000, 5000]);
   assert.ok(runtimeAfterResume.diagnostics.maxBufferedItems <= 61);
   assert.ok(runtimeAfterResume.diagnostics.recentItemCount <= 12);
@@ -124,16 +130,30 @@ try {
   await verifyBlockingFixture(context, fixtureHtml, scriptPaths, "risk", "RISK_CONTROL");
   await verifyBlockingFixture(context, fixtureHtml, scriptPaths, "login", "LOGIN_EXPIRED");
   await verifyBlockingFixture(context, fixtureHtml, scriptPaths, "network", "NETWORK_ERROR");
-  await verifyFiveThousandFixtureCapability(context, fixtureHtml, scriptPaths);
+  if (targetTotal !== 5000) await verifyFiveThousandFixtureCapability(context, fixtureHtml, scriptPaths);
+
+  await page.evaluate(() => sessionStorage.clear());
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await installExtensionScripts(page);
+  const secondStarted = await sendToContent(page, { type: "M0_FULL_SCAN_START" });
+  assert.equal(secondStarted.ok, true);
+  assert.notEqual(secondStarted.session.sessionId, sessionId, "a completed session must start a new scan session");
+  await waitForSessionStatus(page, secondStarted.session.sessionId, "completed", targetTotal >= 5000 ? 90_000 : 60_000);
+  const secondSession = await getSession(page, secondStarted.session.sessionId);
+  assert.equal(secondSession.validCount, targetTotal);
+  assert.equal(secondSession.newItemCount, 0, "second scan must not create new stored favorites");
+  assert.equal(secondSession.existingCount, targetTotal);
+  assert.equal(secondSession.duplicateInsertCount, 0);
 
   const heapAfter = await cdp.send("Runtime.getHeapUsage");
   const result = {
     status: "PASS",
-    total: 3000,
+    total: targetTotal,
     discoveredCount: finalSession.discoveredCount,
     validCount: finalSession.validCount,
     ownPostFalseImportCount: 0,
     duplicateInsertCount: finalSession.duplicateInsertCount,
+    secondScanNewItemCount: secondSession.newItemCount,
     interruptedAt: pausedSession.validCount,
     resumedFinalCount: finalSession.validCount,
     virtualList: {

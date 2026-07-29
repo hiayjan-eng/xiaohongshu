@@ -1,6 +1,7 @@
 globalThis.__COLLECTION_REVIVAL_BUILD_PROFILE__ = {
   id: "production",
   label: "Production Beta",
+  versionName: "0.2.3",
   defaultWebAppUrl: "https://xiaohongshu-green.vercel.app/old-import",
   webAppOrigins: [
     "https://xiaohongshu-green.vercel.app",

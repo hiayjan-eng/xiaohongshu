@@ -3,29 +3,24 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>收藏复活全量扫描</title>
+    <title>收藏复活 M0 全量扫描 Preview</title>
     <link rel="stylesheet" href="./sidepanel.css" />
   </head>
   <body>
     <main class="panel-shell">
       <header class="panel-header">
         <div>
-          <p class="eyebrow">M0 Full Scan · Technical Spike</p>
+          <p class="eyebrow">M0 全量扫描 Preview 0.3.0</p>
           <h1>扫描全部收藏</h1>
         </div>
         <span id="statusBadge" class="status-badge" data-status="ready">准备</span>
       </header>
 
       <section class="identity-card" aria-label="页面身份">
-        <div>
-          <span>当前页面</span>
-          <strong id="pageIdentity">正在确认…</strong>
-        </div>
-        <div>
-          <span>当前账号</span>
-          <strong id="profileIdentity">仅显示脱敏标识</strong>
-        </div>
-        <p id="safetyMessage">只读取当前收藏面板；无法确认边界时不会开始扫描。</p>
+        <div><span>当前页面</span><strong id="pageIdentity">正在确认…</strong></div>
+        <div><span>当前账号</span><strong id="profileIdentity">仅显示脱敏标识</strong></div>
+        <div><span>selectorVersion</span><strong id="selectorVersion">—</strong></div>
+        <p id="safetyMessage">只读取当前可见收藏面板；无法同时确认所有边界时不会开始扫描。</p>
       </section>
 
       <section class="primary-actions" aria-label="扫描操作">
@@ -38,43 +33,55 @@
       </section>
 
       <section class="progress-card" aria-live="polite">
-        <div class="progress-heading">
-          <span id="progressMessage">等待开始</span>
-          <span id="elapsedTime">00:00</span>
-        </div>
-        <div class="progress-track" aria-hidden="true">
-          <span id="progressFill"></span>
-        </div>
+        <div class="progress-heading"><span id="progressMessage">等待开始</span><span id="elapsedTime">00:00</span></div>
+        <div class="progress-track" aria-hidden="true"><span id="progressFill"></span></div>
         <p id="scrollProgress">滚动位置：—</p>
       </section>
 
       <section class="stats-grid" aria-label="扫描统计">
-        <div><span>已发现</span><strong id="discoveredCount">0</strong></div>
+        <div><span>总发现数</span><strong id="discoveredCount">0</strong></div>
         <div><span>有效收藏</span><strong id="validCount">0</strong></div>
         <div><span>已存在</span><strong id="existingCount">0</strong></div>
-        <div><span>无效</span><strong id="invalidCount">0</strong></div>
+        <div><span>无链接</span><strong id="missingLinkCount">0</strong></div>
+        <div><span>待检查</span><strong id="reviewCount">0</strong></div>
+        <div><span>中断恢复</span><strong id="resumeCount">0</strong></div>
       </section>
 
-      <section class="recent-card">
+      <section class="review-card">
         <div class="section-heading">
-          <h2>最近新增</h2>
-          <button id="diagnosticsButton" class="text-button" type="button">查看脱敏诊断</button>
+          <h2>结果复核</h2>
+          <button id="recentButton" class="text-button" type="button">最近记录</button>
         </div>
-        <ol id="recentItems" class="recent-list">
-          <li class="empty-row">扫描后只在这里保留最近 12 条。</li>
-        </ol>
+        <form id="searchForm" class="search-row">
+          <input id="searchInput" type="search" maxlength="80" placeholder="搜索标题、作者或 sourceId" />
+          <button type="submit">搜索</button>
+          <button id="randomButton" type="button">随机 50 条</button>
+        </form>
+        <p id="reviewSummary" class="muted">扫描结果只从 Extension IndexedDB 分页读取，不会把全量对象放进 Side Panel state。</p>
+        <ol id="resultItems" class="result-list"><li class="empty-row">扫描后显示最近 12 条。</li></ol>
       </section>
 
       <details id="diagnosticsPanel" class="diagnostics-card">
         <summary>脱敏诊断</summary>
+        <div class="diagnostics-actions">
+          <button id="diagnosticsButton" type="button">刷新诊断</button>
+          <button id="exportDiagnostics" type="button">导出脱敏统计</button>
+        </div>
         <pre id="diagnosticsOutput">尚无诊断。</pre>
       </details>
 
-      <footer>
-        <button id="restartScan" class="text-button" type="button">重新开始</button>
-        <button id="importButton" type="button" disabled title="技术 Spike 不接触 Web 产品导入">导入收藏复活（后续 M0）</button>
-      </footer>
+      <section class="import-card">
+        <div>
+          <h2>导入收藏复活 Preview</h2>
+          <p>扫描完成后才可进入精确绑定的 M0 Preview；目标页会先核对新增、已存在和待检查数量，再由你确认导入。</p>
+        </div>
+        <button id="importButton" class="primary-button" type="button" disabled>导入收藏复活</button>
+        <p id="importMessage" class="muted">扫描结束前不会自动导入。</p>
+      </section>
+
+      <footer><button id="restartScan" class="text-button" type="button">重新开始一次扫描</button></footer>
     </main>
+    <script src="./build-profile.js"></script>
     <script src="./sidepanel.js"></script>
   </body>
 </html>

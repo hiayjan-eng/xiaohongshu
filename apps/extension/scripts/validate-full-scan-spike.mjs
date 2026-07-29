@@ -51,27 +51,27 @@ const background = readFileSync(new URL("../src/background.js", import.meta.url)
 const build = readFileSync(new URL("./build-extension.mjs", import.meta.url), "utf8");
 
 for (const marker of [
+  "M0 全量扫描 Preview 0.3.0",
   "扫描全部收藏",
   "暂停",
   "继续",
   "停止并保留进度",
-  "重新开始",
-  "查看脱敏诊断",
-  "导入收藏复活",
-  "recentItems"
+  "重新开始一次扫描",
+  "随机 50 条",
+  "导出脱敏统计",
+  "导入收藏复活"
 ]) {
   if (!sidepanelHtml.includes(marker) && !sidepanelJs.includes(marker)) {
     throw new Error(`Missing Side Panel capability marker: ${marker}`);
   }
 }
-
 for (const marker of [
   "FullScanController",
   "MutationObserver",
   "REQUIRED_STABLE_CYCLES = 5",
   "PERSIST_BATCH_SIZE = 25",
   "FAVORITES_PANEL_NOT_FOUND",
-  "OWN_POST_PANEL_INSIDE_ROOT",
+  "EXCLUDED_PANEL_INSIDE_ROOT",
   "scrollFavoritesContainerToBottom",
   "waitForActivityToSettle",
   "M0_FULL_SCAN_VERIFY_SESSION"
@@ -100,7 +100,9 @@ for (const field of [
   "retryCount",
   "selectorVersion",
   "extensionVersion",
-  "itemsCheckpoint"
+  "itemsCheckpoint",
+  "resumeCount",
+  "completedAt"
 ]) {
   if (!idb.includes(field)) throw new Error(`ScanSession field is not persisted: ${field}`);
 }
@@ -111,7 +113,9 @@ for (const marker of [
   "scanSessionItems",
   "M0_FULL_SCAN_PERSIST_ITEMS",
   "duplicateInsertCount",
-  "uniqueSourceIdCount"
+  "uniqueSourceIdCount",
+  "collection-revival-m0-preview-v1",
+  "M0_PREVIEW_IMPORT_CHUNK_REQUEST"
 ]) {
   if (!idb.includes(marker)) throw new Error(`Missing Extension IndexedDB marker: ${marker}`);
 }
@@ -130,10 +134,10 @@ for (const marker of [
 }
 
 for (const marker of [
-  'importScripts("full-scan-idb.js")',
+  'importScripts("build-profile.js", "full-scan-idb.js")',
   "setPanelBehavior",
   "openPanelOnActionClick",
-  "isFullScanDatabaseMessage"
+  "isDatabaseMessage"
 ]) {
   if (!background.includes(marker)) throw new Error(`Missing background long-task marker: ${marker}`);
 }

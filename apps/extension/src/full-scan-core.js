@@ -1,10 +1,10 @@
 (() => {
-  const SELECTOR_VERSION = "m0-full-scan-spike-v1";
+  const SELECTOR_VERSION = "m0-real-favorites-v3";
   const REQUIRED_STABLE_CYCLES = 5;
   const PERSIST_BATCH_SIZE = 25;
   const RECENT_LIMIT = 12;
-  const ACTIVITY_QUIET_MS = 24;
-  const ACTIVITY_GUARD_MS = 900;
+  const ACTIVITY_QUIET_MS = 360;
+  const ACTIVITY_GUARD_MS = 12000;
 
   class FullScanController {
     constructor(options) {
@@ -63,10 +63,12 @@
         return { ok: false, error: "收藏页身份已变化，未恢复旧扫描会话。" };
       }
 
+      const resumed = options.resume !== false && this.session.status !== "ready";
       this.session = await this.updateSession({
         status: "scanning",
         lastErrorCode: "",
-        lastErrorMessage: ""
+        lastErrorMessage: "",
+        resumeCount: Number(this.session.resumeCount || 0) + (resumed ? 1 : 0)
       });
       this.running = true;
       this.installObserver();
@@ -108,8 +110,13 @@
         maxBufferedItems: this.maxBufferedItems,
         recentItemCount: this.recentItems.length,
         observedRootIsBody: this.root === this.document.body,
+        scrollMode: this.scrollContainer === this.document.scrollingElement ? "window" : "element",
         scrollContainerIsInsideFavoritesRoot: Boolean(
-          this.root && this.scrollContainer && (this.root === this.scrollContainer || this.root.contains(this.scrollContainer))
+          this.root && this.scrollContainer && (
+            this.scrollContainer === this.document.scrollingElement ||
+            this.root === this.scrollContainer ||
+            this.root.contains(this.scrollContainer)
+          )
         ),
         selectorVersion: SELECTOR_VERSION
       };
@@ -232,13 +239,16 @@
     async waitForActivityToSettle() {
       const startedAt = Date.now();
       const startingVersion = this.activityVersion;
-      while (Date.now() - startedAt < ACTIVITY_GUARD_MS) {
+      const quietWindow = this.testMode ? 24 : ACTIVITY_QUIET_MS;
+      const guardWindow = this.testMode ? 1200 : ACTIVITY_GUARD_MS;
+      const minimumWindow = this.testMode ? 24 : 180;
+      const tick = this.testMode ? 8 : 80;
+      while (Date.now() - startedAt < guardWindow) {
+        const elapsed = Date.now() - startedAt;
         const quietFor = Date.now() - this.lastMutationAt;
         const sawActivity = this.activityVersion !== startingVersion;
-        if (!isLoading(this.root) && quietFor >= ACTIVITY_QUIET_MS && (sawActivity || Date.now() - startedAt >= ACTIVITY_QUIET_MS)) {
-          return;
-        }
-        await wait(8);
+        if (!isLoading(this.root) && quietFor >= quietWindow && (sawActivity || elapsed >= minimumWindow)) return;
+        await wait(tick);
       }
     }
 
@@ -254,6 +264,7 @@
       }
       this.session = await this.updateSession({
         status: "completed",
+        completedAt: new Date().toISOString(),
         stableNoGrowthCycles: Math.max(REQUIRED_STABLE_CYCLES, this.session.stableNoGrowthCycles || 0)
       });
       this.running = false;
@@ -317,41 +328,39 @@
 
   function inspectFavoritesPage({ document, location }) {
     const hostname = String(location?.hostname || "").toLowerCase();
-    if (!/(^|\.)xiaohongshu\.com$/.test(hostname)) {
-      return rejected("HOST_NOT_XHS", "当前页面不是小红书页面。");
+    if (!["xiaohongshu.com", "www.xiaohongshu.com"].includes(hostname)) {
+      return rejected("HOST_NOT_XHS", "当前页面不是小红书官方页面。");
     }
     const pathname = String(location?.pathname || "");
-    const profileMatch = pathname.match(/^\/user\/profile\/([^/?#]+)/i);
-    if (!profileMatch) {
-      return rejected("NOT_PROFILE_PAGE", "当前页面不是本人 profile 页面。");
+    const profileMatch = pathname.match(/^\/user\/profile\/([a-zA-Z0-9_-]{6,80})\/?$/i);
+    if (!profileMatch) return rejected("NOT_PROFILE_PAGE", "当前页面不是本人 profile 页面。");
+    if (!confirmOwnProfile(document)) {
+      return rejected("OWN_PROFILE_UNCONFIRMED", "无法确认这是本人主页。为避免导入本人发布内容，本次未开始扫描。");
     }
+
     const params = new URLSearchParams(String(location?.search || ""));
     const tab = String(params.get("tab") || "").toLowerCase();
     if (!["fav", "favorite", "favorites", "collect", "collection"].includes(tab)) {
-      return rejected("FAVORITES_ROUTE_UNCONFIRMED", "URL 未明确表示收藏页，为避免导入本人笔记，本次未开始扫描。");
+      return rejected("FAVORITES_ROUTE_UNCONFIRMED", "URL 未明确表示收藏页。为避免导入本人发布内容，本次未开始扫描。");
     }
 
     const activeFavoriteTab = findVisibleActiveTab(document, "收藏", "favorites");
-    if (!activeFavoriteTab) {
-      return rejected("FAVORITES_TAB_UNCONFIRMED", "未确认可见激活主 tab 为“收藏”。");
-    }
+    if (!activeFavoriteTab) return rejected("FAVORITES_TAB_UNCONFIRMED", "未确认可见激活主 tab 为“收藏”。");
     const activeNotesTab = findVisibleActiveTab(document, "笔记", "notes");
-    if (!activeNotesTab) {
-      return rejected("NOTES_TAB_UNCONFIRMED", "未确认可见激活子 tab 为“笔记”。");
-    }
+    if (!activeNotesTab) return rejected("NOTES_TAB_UNCONFIRMED", "未确认可见激活子 tab 为“笔记”。");
 
     const root = findFavoritesRoot(document, activeFavoriteTab, activeNotesTab);
-    if (!root || root === document.body) {
-      return rejected("FAVORITES_PANEL_NOT_FOUND", "未能严格定位收藏面板，禁止退回 document.body 扫描。");
+    if (!root || root === document.body || !isVisible(root)) {
+      return rejected("FAVORITES_PANEL_NOT_FOUND", "未能严格定位可见收藏面板；禁止退回 document.body 扫描。");
     }
     const ownPostsPanels = findOwnPostsPanels(document);
-    if (ownPostsPanels.some((panel) => root === panel || root.contains(panel))) {
-      return rejected("OWN_POST_PANEL_INSIDE_ROOT", "本人笔记面板位于扫描 root 内，本次未开始扫描。");
+    const likesPanels = findLikesPanels(document);
+    if ([...ownPostsPanels, ...likesPanels].some((panel) => root === panel || root.contains(panel))) {
+      return rejected("EXCLUDED_PANEL_INSIDE_ROOT", "本人发布或点赞面板位于扫描 root 内，本次未开始扫描。");
     }
-    const scrollContainer = findScrollContainer(root);
-    if (!scrollContainer || !(root === scrollContainer || root.contains(scrollContainer))) {
-      return rejected("SCROLL_CONTAINER_UNCONFIRMED", "未能确认收藏面板的真实滚动容器。");
-    }
+
+    const scrollContainer = findScrollContainer(document, root);
+    if (!scrollContainer) return rejected("SCROLL_CONTAINER_UNCONFIRMED", "未能动态确认收藏面板的真实滚动容器。");
     const blocker = findBlockingState(document);
     if (blocker) return rejected(blocker.code, blocker.reason);
 
@@ -364,15 +373,26 @@
         profileIdHash,
         favoritesPageIdentity: `${hostname}|${pathname}|tab=favorites|subtab=notes|profile=${profileIdHash}`,
         selectorVersion: SELECTOR_VERSION,
-        extensionVersion: globalThis.chrome?.runtime?.getManifest?.().version || "0.2.3-spike"
+        extensionVersion: globalThis.chrome?.runtime?.getManifest?.().version_name || globalThis.chrome?.runtime?.getManifest?.().version || "0.3.0-m0-preview"
       },
       diagnostics: {
         rootSelector: describeElement(root),
-        scrollSelector: describeElement(scrollContainer),
+        scrollSelector: scrollContainer === document.scrollingElement ? "window/document.scrollingElement" : describeElement(scrollContainer),
+        scrollMode: scrollContainer === document.scrollingElement ? "window" : "element",
         ownPostsPanelCount: ownPostsPanels.length,
+        likesPanelCount: likesPanels.length,
         selectorVersion: SELECTOR_VERSION
       }
     };
+  }
+
+  function confirmOwnProfile(document) {
+    const explicit = document.querySelector('[data-revival-own-profile="true"], [data-is-self="true"], [data-testid="profile-edit-button"]');
+    if (explicit && isVisible(explicit)) return true;
+    return Array.from(document.querySelectorAll("button, a, [role='button']")).some((element) => {
+      const text = normalizeText(element.textContent);
+      return isVisible(element) && /^(编辑资料|编辑个人资料|Edit profile)$/i.test(text);
+    });
   }
 
   function findVisibleActiveTab(document, expectedText, marker) {
@@ -380,11 +400,19 @@
       `[data-revival-tab="${marker}"][aria-selected="true"], [data-revival-subtab="${marker}"][aria-selected="true"]`
     );
     if (fixture && isVisible(fixture)) return fixture;
-    return Array.from(
-      document.querySelectorAll(
-        '[role="tab"][aria-selected="true"], [role="tab"].active, [role="tab"].selected, .tab.active, .tab.selected'
-      )
-    ).find((element) => isVisible(element) && normalizeText(element.textContent) === expectedText) || null;
+    const selectors = [
+      '[role="tab"][aria-selected="true"]',
+      '[role="tab"][aria-current="page"]',
+      '[role="tab"].active',
+      '[role="tab"].selected',
+      '[class*="tab"].active',
+      '[class*="tab"].selected',
+      '[class*="tab"][class*="active"]',
+      '[class*="tab"][data-state="active"]'
+    ];
+    return Array.from(document.querySelectorAll(selectors.join(","))).find((element) => {
+      return isVisible(element) && normalizeText(element.textContent) === expectedText;
+    }) || null;
   }
 
   function findFavoritesRoot(document, activeFavoriteTab, activeNotesTab) {
@@ -394,40 +422,66 @@
       const controls = tab?.getAttribute?.("aria-controls");
       if (!controls) continue;
       const controlled = document.getElementById(controls);
-      if (controlled && isVisible(controlled) && controlled !== document.body) return controlled;
+      if (controlled && controlled !== document.body && isVisible(controlled) && !isInsideExcludedPanel(controlled)) return controlled;
     }
-    const candidates = Array.from(
-      document.querySelectorAll(
-        "[data-favorites-panel], [class*='favorite'], [class*='favorites'], [class*='collection'], [class*='collect']"
-      )
-    ).filter((element) => element !== document.body && isVisible(element));
+    const candidates = Array.from(document.querySelectorAll([
+      '[role="tabpanel"]',
+      '[data-favorites-panel]',
+      '[data-tab="favorites"]',
+      '[class*="favorite"][class*="panel"]',
+      '[class*="collect"][class*="panel"]',
+      '[class*="note-list"]',
+      '[class*="feeds-container"]',
+      '#user-favorites'
+    ].join(","))).filter((element) => {
+      if (element === document.body || !isVisible(element) || isInsideExcludedPanel(element)) return false;
+      return countCandidateCards(element) > 0 || /暂无收藏|还没有收藏|没有收藏/.test(normalizeText(element.textContent));
+    });
     return candidates.find((element) => {
-      if (findOwnPostsPanels(document).includes(element)) return false;
-      return countCandidateCards(element) > 0;
+      const label = `${element.className || ""} ${element.getAttribute?.("aria-label") || ""}`;
+      if (/favorite|collect|收藏/i.test(label)) return true;
+      let ancestor = activeNotesTab?.parentElement || null;
+      for (let depth = 0; ancestor && depth < 6; depth += 1, ancestor = ancestor.parentElement) {
+        if (ancestor.contains(element) && ancestor.contains(activeFavoriteTab)) return true;
+      }
+      return false;
     }) || null;
   }
 
   function findOwnPostsPanels(document) {
-    return Array.from(
-      document.querySelectorAll(
-        "[data-revival-own-posts-panel], [data-own-posts-panel], [class*='publish-note'], [class*='user-note-list']"
-      )
-    );
+    return Array.from(document.querySelectorAll([
+      "[data-revival-own-posts-panel]",
+      "[data-own-posts-panel]",
+      "[class*='publish-note']",
+      "[class*='user-note-list'][aria-hidden='true']"
+    ].join(",")));
   }
 
-  function findScrollContainer(root) {
+  function findLikesPanels(document) {
+    const explicit = Array.from(document.querySelectorAll("[data-revival-likes-panel], [data-likes-panel], [class*='likes-panel']"));
+    const labelled = Array.from(document.querySelectorAll('[role="tabpanel"], section')).filter((element) => {
+      return normalizeText(element.getAttribute?.("aria-label") || "") === "点赞";
+    });
+    return [...new Set([...explicit, ...labelled])];
+  }
+
+  function findScrollContainer(document, root) {
     const explicit = root.matches?.("[data-revival-scroll-container]")
       ? root
       : root.querySelector?.("[data-revival-scroll-container]");
-    if (explicit) return explicit;
+    if (explicit && isVisible(explicit)) return explicit;
     const candidates = [root, ...Array.from(root.querySelectorAll?.("*") || [])];
-    return candidates.find((element) => {
+    const internal = candidates.find((element) => {
       const style = globalThis.getComputedStyle?.(element);
       const overflow = `${style?.overflowY || ""} ${style?.overflow || ""}`;
-      return /(auto|scroll)/.test(overflow) && Number(element.scrollHeight) > Number(element.clientHeight);
-    }) || root;
+      return /(auto|scroll)/.test(overflow) && Number(element.scrollHeight) > Number(element.clientHeight) + 2;
+    });
+    if (internal) return internal;
+    const scrollingElement = document.scrollingElement || document.documentElement;
+    if (!scrollingElement || scrollingElement === document.body) return null;
+    const pageCanScroll = Number(scrollingElement.scrollHeight) > Number(scrollingElement.clientHeight) + 2;
+    return pageCanScroll && root.getBoundingClientRect?.() ? scrollingElement : null;
   }
-
   function collectCardsFromNodes(nodes, root) {
     const cards = [];
     const seen = new Set();
@@ -437,7 +491,7 @@
       if (isCardElement(node)) candidates.push(node);
       candidates.push(...Array.from(node.querySelectorAll?.(cardSelector()) || []));
       for (const candidate of candidates) {
-        if (!root.contains(candidate) || isInsideOwnPostsPanel(candidate) || seen.has(candidate)) continue;
+        if (!root.contains(candidate) || !isVisible(candidate) || isInsideExcludedPanel(candidate) || seen.has(candidate)) continue;
         seen.add(candidate);
         cards.push(candidate);
       }
@@ -446,8 +500,9 @@
   }
 
   function extractFavoriteCard(card, location) {
-    if (!isVisible(card) || isInsideOwnPostsPanel(card)) return null;
-    const anchor = card.matches?.("a[href]") ? card : card.querySelector?.("a[href]");
+    if (!isVisible(card) || isInsideExcludedPanel(card)) return null;
+    const anchors = card.matches?.("a[href]") ? [card] : Array.from(card.querySelectorAll?.("a[href]") || []);
+    const anchor = anchors.find((entry) => extractSourceId(entry.href, location?.href)) || null;
     const rawSourceUrl = String(anchor?.href || card.getAttribute?.("data-source-url") || "");
     const explicitSourceId = String(card.getAttribute?.("data-source-id") || card.getAttribute?.("data-note-id") || "");
     const sourceId = explicitSourceId || extractSourceId(rawSourceUrl, location?.href);
@@ -508,26 +563,39 @@
   }
 
   function findBlockingState(document) {
+    if (document.defaultView?.navigator?.onLine === false) {
+      return { code: "NETWORK_OFFLINE", reason: "浏览器当前离线，扫描已安全暂停。" };
+    }
     const markers = [
-      ["[data-revival-risk-blocker], [class*='captcha'], [class*='risk-control']", "RISK_CONTROL", "页面出现验证码或风险控制，请手动处理后继续。"],
-      ["[data-revival-login-expired], [class*='login-expired']", "LOGIN_EXPIRED", "登录已过期，请在当前页面重新登录后继续。"],
+      ["[data-revival-risk-blocker], [class*='captcha'], [class*='risk-control'], [id*='captcha']", "RISK_CONTROL", "页面出现验证码或风险控制，请手动处理后点击继续。"],
+      ["[data-revival-login-expired], [class*='login-expired']", "LOGIN_EXPIRED", "登录已失效，请重新登录后点击继续。"],
       ["[data-revival-network-error], [class*='network-error']", "NETWORK_ERROR", "页面网络加载失败，扫描已安全暂停。"]
     ];
     for (const [selector, code, reason] of markers) {
-      const element = Array.from(document.querySelectorAll(selector)).find(isVisible);
-      if (element) return { code, reason };
+      if (Array.from(document.querySelectorAll(selector)).some(isVisible)) return { code, reason };
+    }
+    const dialogs = Array.from(document.querySelectorAll("[role='dialog'], [class*='modal'], [class*='overlay']")).filter(isVisible);
+    for (const dialog of dialogs) {
+      const text = normalizeText(dialog.textContent).slice(0, 500);
+      if (/验证码|安全验证|访问频繁|风险控制|异常访问/.test(text)) return { code: "RISK_CONTROL", reason: "页面出现验证码或风险控制，请手动处理后点击继续。" };
+      if (/登录已失效|重新登录/.test(text)) return { code: "LOGIN_EXPIRED", reason: "登录已失效，请重新登录后点击继续。" };
+      if (/网络.*失败|加载失败|请求失败/.test(text)) return { code: "NETWORK_ERROR", reason: "页面网络加载失败，扫描已安全暂停。" };
     }
     return null;
   }
 
   function scrollFavoritesContainerToBottom(container) {
-    const top = Math.max(0, Number(container.scrollHeight) - Number(container.clientHeight));
-    if (typeof container.scrollTo === "function") container.scrollTo({ top, behavior: "auto" });
+    const current = Math.max(0, Number(container.scrollTop) || 0);
+    const maximum = Math.max(0, Number(container.scrollHeight) - Number(container.clientHeight));
+    const step = Math.max(360, Math.round((Number(container.clientHeight) || 440) * 0.82));
+    const top = Math.min(maximum, current + step);
+    const view = container.ownerDocument?.defaultView;
+    if (container === container.ownerDocument?.scrollingElement && typeof view?.scrollTo === "function") {
+      view.scrollTo({ top, behavior: "auto" });
+    } else if (typeof container.scrollTo === "function") container.scrollTo({ top, behavior: "auto" });
     else container.scrollTop = top;
-    const EventConstructor = container.ownerDocument?.defaultView?.Event || globalThis.Event;
-    if (EventConstructor && typeof container.dispatchEvent === "function") {
-      container.dispatchEvent(new EventConstructor("scroll"));
-    }
+    const EventConstructor = view?.Event || globalThis.Event;
+    if (EventConstructor && typeof container.dispatchEvent === "function") container.dispatchEvent(new EventConstructor("scroll"));
   }
 
   function readGeometry(container) {
@@ -560,7 +628,14 @@
   }
 
   function cardSelector() {
-    return "[data-revival-note-card], [data-note-id], article:has(a[href*='/explore/']), article:has(a[href*='/discovery/item/'])";
+    return [
+      "[data-revival-note-card]",
+      "[data-note-id]",
+      "article:has(a[href*='/explore/'])",
+      "article:has(a[href*='/discovery/item/'])",
+      "[class*='note-item']:has(a[href*='/explore/'])",
+      "[class*='note-card']:has(a[href*='/explore/'])"
+    ].join(",");
   }
 
   function isCardElement(element) {
@@ -571,17 +646,20 @@
     }
   }
 
-  function isInsideOwnPostsPanel(element) {
-    return Boolean(
-      element.closest?.(
-        "[data-revival-own-posts-panel], [data-own-posts-panel], [class*='publish-note'], [class*='user-note-list']"
-      )
-    );
+  function isInsideExcludedPanel(element) {
+    return Boolean(element.closest?.([
+      "[data-revival-own-posts-panel]",
+      "[data-own-posts-panel]",
+      "[data-revival-likes-panel]",
+      "[data-likes-panel]",
+      "[class*='publish-note']",
+      "[class*='likes-panel']"
+    ].join(",")));
   }
 
   function isVisible(element) {
     if (!element?.isConnected) return false;
-    if (element.closest?.("[hidden], [aria-hidden='true']")) return false;
+    if (element.closest?.("[hidden], [aria-hidden='true'], [inert]")) return false;
     const style = globalThis.getComputedStyle?.(element);
     if (style?.display === "none" || style?.visibility === "hidden" || style?.opacity === "0") return false;
     const rect = element.getBoundingClientRect?.();

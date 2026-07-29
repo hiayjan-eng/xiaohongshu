@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex,nofollow" />
+    <title>收藏复活 M0 Preview</title>
+    <link rel="stylesheet" href="/m0-preview/m0-preview.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hero">
+        <div><p class="eyebrow">COLLECTION REVIVAL · LOCAL PREVIEW</p><h1>收藏复活 M0 Preview</h1><p>这是独立的浏览器本地数据空间，不读取、迁移或覆盖 Production 收藏库。</p></div>
+        <span id="connectionBadge" data-state="waiting">等待扩展</span>
+      </header>
+
+      <section class="panel" aria-live="polite">
+        <div class="section-title"><div><p class="step">导入确认</p><h2 id="importTitle">正在读取本地扫描批次…</h2></div><span id="extensionVersion">0.3.0-m0-preview</span></div>
+        <div class="summary-grid">
+          <div><span>本次将导入</span><strong id="totalCount">—</strong></div>
+          <div><span>其中新增</span><strong id="newCount">—</strong></div>
+          <div><span>已存在</span><strong id="existingCount">—</strong></div>
+          <div><span>待检查</span><strong id="reviewCount">—</strong></div>
+        </div>
+        <p id="importStatus" class="status-text">仅在扩展与本页 origin 精确匹配时读取分块数据。</p>
+        <div class="actions">
+          <button id="confirmImport" class="primary" type="button" disabled>确认导入</button>
+          <button id="rollbackImport" class="secondary" type="button" disabled>撤销本次导入</button>
+        </div>
+      </section>
+
+      <section class="panel library-panel">
+        <div class="section-title"><div><p class="step">独立 Preview 收藏库</p><h2>已导入收藏</h2></div><strong id="libraryCount">0 条</strong></div>
+        <p id="libraryMessage" class="status-text">数据仅保存在本页专用 IndexedDB：collection-revival-m0-preview-v1。</p>
+        <ol id="libraryList" class="library-list"><li class="empty">还没有导入收藏。</li></ol>
+      </section>
+    </main>
+    <script src="/m0-preview/m0-preview.js"></script>
+  </body>
+</html>
