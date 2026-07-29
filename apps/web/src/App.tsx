@@ -1380,9 +1380,9 @@ export function AppContent({ initialState, initialSettings, runtime, writeGate, 
 
   function reschedulePlanCard(planCardId: string) {
     const current = state.planCards?.find((planCard) => planCard.id === planCardId);
-    const value = window.prompt("更换到哪天？可填：今天 / 明天 / 2026-07-20", current ? formatDateInput(current.plannedDate) : "明天")?.trim();
-    if (!value) return;
-    updatePlanCardDate(planCardId, parsePlanDate(value, new Date()), "已更新计划日期");
+    if (!current) return;
+    viewPlanSource(current);
+    setToast("请在行动卡主操作区修改计划");
   }
 
   function cancelPlanCard(planCardId: string) {
@@ -2894,7 +2894,7 @@ function PoolView(props: {
     { label: "全部收藏", value: props.allItems.length },
     { label: "尚未复活", value: props.allItems.filter((item) => !actionCardItemIds.has(item.id)).length },
     { label: "已有行动卡", value: actionCardItemIds.size },
-    { label: "已加入计划", value: props.allItems.filter((item) => item.status === "today").length },
+    { label: "已加入计划", value: props.allItems.filter((item) => item.status === "scheduled_today").length },
     { label: "已完成", value: props.allItems.filter((item) => item.status === "completed").length }
   ];
   return (
@@ -2942,7 +2942,7 @@ function PoolView(props: {
             <List size={17} />
           </button>
         </div>
-        <button className="icon-text-button" onClick={() => props.bulkSetFilteredStatus("today")}>
+        <button className="icon-text-button" onClick={() => props.bulkSetFilteredStatus("scheduled_today")}>
           <CalendarCheck size={17} />
           筛选结果加入今日
         </button>
@@ -3121,7 +3121,7 @@ function DetailView(props: {
           {lowConfidence && <p className="quiet-copy">这条收藏信息较少，分类可能不准，可以补充一句备注后重新生成。</p>}
         </div>
         <div className="detail-actions">
-          <button className="primary-button" onClick={() => props.changeStatus(props.item.id, "today")} data-testid="add-to-today">
+          <button className="primary-button" onClick={() => props.changeStatus(props.item.id, "scheduled_today")} data-testid="add-to-today">
             <CalendarCheck size={17} />
             加入今日
           </button>
@@ -4346,7 +4346,7 @@ function StatusButtons(props: { item: SavedItem; changeStatus: (itemId: string, 
   const completed = props.item.status === "completed";
   return (
     <div className="status-buttons" aria-label="行动完成路径">
-      {props.item.status === "not_started" && <button onClick={() => props.changeStatus(props.item.id, "today")} data-testid="status-today">加入今日</button>}
+      {props.item.status === "not_started" && <button onClick={() => props.changeStatus(props.item.id, "scheduled_today")} data-testid="status-today">加入今日</button>}
       {!completed && <button className="primary-button" onClick={() => props.changeStatus(props.item.id, "in_progress")} data-testid="start-action">开始行动</button>}
       <button
         onClick={() => props.changeStatus(props.item.id, "completed")}
@@ -4862,6 +4862,31 @@ function parsePlanDate(value: string, now: Date): Date {
   return date;
 }
 
+function formatLocalDateInput(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function formatPlanDateLabel(value: string): string {
+  const planned = new Date(value);
+  const today = new Date();
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  if (isSameDate(value, today)) return "今天";
+  if (isSameDate(value, tomorrow)) return "明天";
+  return new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric" }).format(planned);
+}
+
+function formatSavedTime(value: string): string {
+  return new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(value));
+}
+
+function normalizePlanMinutes(value: number): 10 | 20 | 30 | 60 {
+  const normalized = clampEstimatedMinutes(value);
+  return normalized === 10 || normalized === 30 || normalized === 60 ? normalized : 20;
+}
 function formatDateInput(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
@@ -4927,6 +4952,20 @@ function hasSourceUrl(item: Pick<SavedItem, "sourceUrl">): boolean {
   return Boolean(item.sourceUrl.trim());
 }
 
+function mapReviveIntentToActionIntent(reviveIntent: ReviveIntent | undefined): ActionIntentKey | undefined {
+  if (!reviveIntent) return undefined;
+  const map: Record<ReviveIntent, ActionIntentKey> = {
+    学会这个方法: "learn_method",
+    照着做一次: "copy_once",
+    用在工作里: "use_at_work",
+    变成自己的内容: "make_own_content",
+    安排一次出行: "plan_trip",
+    做购买决定: "make_purchase_decision",
+    写一条观察或复盘: "reflect",
+    只是整理留存: "organize_only"
+  };
+  return map[reviveIntent];
+}
 function mapReviveIntentToSavedIntent(reviveIntent: ReviveIntent | undefined, fallback: SavedIntent): SavedIntent {
   if (!reviveIntent) return fallback;
   const map: Record<ReviveIntent, SavedIntent> = {
@@ -4973,7 +5012,7 @@ function entityLabel(type: string): string {
 function buildInsights(items: SavedItem[]) {
   const total = items.length;
   const completed = items.filter((item) => item.status === "completed").length;
-  const active = items.filter((item) => ["today", "in_progress", "completed"].includes(item.status)).length;
+  const active = items.filter((item) => ["scheduled_today", "scheduled", "in_progress", "completed"].includes(item.status)).length;
   const categoryCounts = items.reduce<Record<string, number>>((counts, item) => {
     counts[item.category] = (counts[item.category] ?? 0) + 1;
     return counts;
