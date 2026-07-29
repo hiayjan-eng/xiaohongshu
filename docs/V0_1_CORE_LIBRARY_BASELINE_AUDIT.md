@@ -1,14 +1,14 @@
-# 收藏复活系统 V0.1 核心收藏库 Phase 1 基线审计
+﻿# 收藏复活系统 V0.1 核心收藏库 Phase 1 基线审计
 
 `V0_1_CORE_LIBRARY_STATUS: FAIL_BLOCKING`
 
-审计日期：2026-07-29  
-审计分支：`v0.1-core-library-release`  
-起始与当前 HEAD：`1f644ad219716f750a80484f410bffae9cb1f095`  
-基线来源分支：`p0-core-revival-loop-rescue`  
-真实用户数据接触：否  
-Production 功能/配置修改：否  
-main 修改、merge、PR、push、Preview/Production 部署：均否
+审计日期：2026-07-29
+审计分支：`v0.1-core-library-release`
+Phase 1 起始 HEAD：`1f644ad219716f750a80484f410bffae9cb1f095`（最终 HEAD 以交付时 `git rev-parse HEAD` 为准）
+基线来源分支：`p0-core-revival-loop-rescue`
+真实用户数据接触：否
+Production 功能/配置修改：否
+main 修改、merge、PR、Preview/Production 部署：均否；仅当前审计分支保存了 Phase 1 文档与验收集
 
 ## 一、Phase 1 范围与方法
 
