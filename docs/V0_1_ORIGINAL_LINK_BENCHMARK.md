@@ -1,4 +1,4 @@
-﻿# V0.1 原帖链接验收集与基线
+# V0.1 原帖链接验收集与基线
 
 `V0_1_ORIGINAL_LINK_STATUS: FAIL_BLOCKING`
 
