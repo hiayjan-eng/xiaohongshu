@@ -190,8 +190,8 @@ export interface ActionCard {
   followUp: string;
   fields: Record<string, string | string[]>;
   tasks: Task[];
-  generatedFromIntent: ActionIntentKey;
-  templateVersion: string;
+  generatedFromIntent?: ActionIntentKey;
+  templateVersion?: string;
   outputSavedAt?: string;
   createdAt: string;
   updatedAt: string;
