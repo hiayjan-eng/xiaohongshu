@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>M0 全量收藏虚拟列表夹具</title>
+    <style>
+      * { box-sizing: border-box; }
+      body { margin: 0; font: 14px system-ui, sans-serif; background: #f5f5f5; }
+      .tabs { display: flex; gap: 16px; padding: 12px 20px; background: #fff; }
+      [role="tab"] { border: 0; background: transparent; padding: 8px; }
+      [aria-selected="true"] { color: #d44; border-bottom: 2px solid currentColor; }
+      #favorites-panel {
+        position: relative;
+        width: min(760px, calc(100vw - 40px));
+        height: 440px;
+        margin: 20px;
+        overflow-y: auto;
+        border: 1px solid #ddd;
+        background: #fff;
+      }
+      #virtual-spacer { position: relative; min-height: 440px; }
+      #virtual-window { position: absolute; inset: 0 0 auto; }
+      [data-revival-note-card] {
+        position: absolute;
+        left: 12px;
+        right: 12px;
+        height: 40px;
+        display: grid;
+        grid-template-columns: 1fr 160px;
+        align-items: center;
+        border-bottom: 1px solid #eee;
+        background: #fff;
+      }
+      [data-revival-note-card] a { color: #222; text-decoration: none; }
+      [data-author] { color: #777; }
+      #loading {
+        position: sticky;
+        bottom: 0;
+        z-index: 3;
+        display: none;
+        padding: 8px;
+        background: #fff7df;
+        text-align: center;
+      }
+      #loading[data-revival-loading="true"] { display: block; }
+      [data-revival-own-posts-panel] { display: none; }
+      .blocking-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 20;
+        display: grid;
+        place-items: center;
+        background: rgba(255, 255, 255, 0.95);
+      }
+    </style>
+  </head>
+  <body>
+    <nav class="tabs" aria-label="主标签">
+      <button role="tab" aria-selected="false">笔记</button>
+      <button role="tab" aria-selected="true" aria-controls="favorites-panel" data-revival-tab="favorites">收藏</button>
+    </nav>
+    <nav class="tabs" aria-label="收藏子标签">
+      <button role="tab" aria-selected="true" aria-controls="favorites-panel" data-revival-subtab="notes">笔记</button>
+      <button role="tab" aria-selected="false">专辑</button>
+    </nav>
+
+    <section
+      id="favorites-panel"
+      data-revival-favorites-panel
+      data-revival-scroll-container
+      data-active="true"
+      aria-label="收藏笔记面板"
+    >
+      <div id="virtual-spacer">
+        <div id="virtual-window"></div>
+      </div>
+      <div id="loading" data-revival-loading="false">正在加载更多收藏…</div>
+    </section>
+
+    <section data-revival-own-posts-panel aria-hidden="true">
+      <h2>本人发布笔记（扫描器必须排除）</h2>
+      <div id="own-posts"></div>
+    </section>
+
+    <script>
+      (() => {
+        const params = new URLSearchParams(location.search);
+        const supportedTotals = [20, 100, 500, 1000, 3000, 5000];
+        const requestedTotal = Number(params.get("total") || 3000);
+        const total = supportedTotals.includes(requestedTotal) ? requestedTotal : 3000;
+        const mode = params.get("mode") || "normal";
+        const batchSize = 50;
+        const windowSize = 48;
+        const rowHeight = 41;
+        const emptyEvery = 7;
+        const stateKey = `m0-full-scan-fixture:${total}`;
+        const restored = Number(sessionStorage.getItem(stateKey) || 0);
+        let loaded = Math.max(Math.min(restored, total), Math.min(batchSize, total));
+        let loadRequests = 0;
+        let loading = false;
+        let maxDomCards = 0;
+        const panel = document.getElementById("favorites-panel");
+        const spacer = document.getElementById("virtual-spacer");
+        const windowElement = document.getElementById("virtual-window");
+        const loadingElement = document.getElementById("loading");
+
+        renderOwnPosts();
+        renderWindow();
+        installBlockingMode();
+        panel.addEventListener("scroll", () => {
+          const atLoadedBottom = panel.scrollTop + panel.clientHeight >= panel.scrollHeight - 3;
+          if (atLoadedBottom) scheduleNextBatch();
+        });
+
+        function scheduleNextBatch() {
+          if (loading || loaded >= total) return;
+          loading = true;
+          loadRequests += 1;
+          loadingElement.dataset.revivalLoading = "true";
+          const emptyRound = loadRequests % emptyEvery === 0;
+          setTimeout(() => {
+            if (!emptyRound) {
+              loaded = Math.min(total, loaded + batchSize);
+              sessionStorage.setItem(stateKey, String(loaded));
+              renderWindow();
+            }
+            loading = false;
+            loadingElement.dataset.revivalLoading = "false";
+          }, 2);
+        }
+
+        function renderWindow() {
+          const start = Math.max(0, loaded - windowSize);
+          spacer.style.height = `${Math.max(panel.clientHeight, loaded * rowHeight)}px`;
+          windowElement.replaceChildren();
+          windowElement.style.transform = `translateY(${start * rowHeight}px)`;
+          for (let index = start; index < loaded; index += 1) {
+            windowElement.append(createCard(index, false));
+          }
+          if (loaded > 0) {
+            const duplicate = createCard(loaded - 1, false);
+            duplicate.dataset.fixtureDuplicate = "true";
+            windowElement.append(duplicate);
+          }
+          maxDomCards = Math.max(maxDomCards, windowElement.querySelectorAll("[data-revival-note-card]").length);
+        }
+
+        function createCard(index, ownPost) {
+          const sourceId = ownPost
+            ? `ownpost${String(index).padStart(8, "0")}`
+            : `m0note${String(index).padStart(8, "0")}`;
+          const card = document.createElement("article");
+          card.dataset.revivalNoteCard = "true";
+          card.dataset.sourceId = sourceId;
+          card.dataset.title = ownPost ? `本人发布 ${index}` : `虚拟收藏 ${index}`;
+          card.dataset.author = ownPost ? "当前用户" : `作者 ${index % 37}`;
+          card.style.top = `${(index - Math.max(0, loaded - windowSize)) * rowHeight}px`;
+          const link = document.createElement("a");
+          link.href = `https://www.xiaohongshu.com/discovery/item/${sourceId}?xsec_token=fixture-${index}&noise=drop`;
+          const title = document.createElement("span");
+          title.dataset.title = "true";
+          title.textContent = card.dataset.title;
+          link.append(title);
+          const author = document.createElement("span");
+          author.dataset.author = "true";
+          author.textContent = card.dataset.author;
+          card.append(link, author);
+          return card;
+        }
+
+        function renderOwnPosts() {
+          const ownPosts = document.getElementById("own-posts");
+          for (let index = 0; index < 50; index += 1) {
+            ownPosts.append(createCard(index, true));
+          }
+        }
+
+        function installBlockingMode() {
+          if (!["risk", "login", "network"].includes(mode)) return;
+          const overlay = document.createElement("div");
+          overlay.className = "blocking-overlay";
+          if (mode === "risk") {
+            overlay.dataset.revivalRiskBlocker = "true";
+            overlay.textContent = "请完成验证码";
+          } else if (mode === "login") {
+            overlay.dataset.revivalLoginExpired = "true";
+            overlay.textContent = "登录已过期";
+          } else {
+            overlay.dataset.revivalNetworkError = "true";
+            overlay.textContent = "网络加载失败，可稍后继续";
+          }
+          document.body.append(overlay);
+        }
+
+        globalThis.__M0_FULL_SCAN_FIXTURE__ = {
+          total,
+          mode,
+          supportedTotals,
+          get loaded() { return loaded; },
+          get loadRequests() { return loadRequests; },
+          get maxDomCards() { return maxDomCards; },
+          get currentDomCards() {
+            return document.querySelectorAll("#favorites-panel [data-revival-note-card]").length;
+          },
+          get ownPostCardCount() {
+            return document.querySelectorAll("[data-revival-own-posts-panel] [data-revival-note-card]").length;
+          }
+        };
+      })();
+    </script>
+  </body>
+</html>
