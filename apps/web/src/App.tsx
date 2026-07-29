@@ -699,15 +699,19 @@ export function AppContent({ initialState, initialSettings, runtime, writeGate, 
   }
 
   function saveActionOutput(cardId: string, output: string) {
+    if (!output.trim()) {
+      setToast("请先填写本次产出");
+      return;
+    }
+    const now = new Date().toISOString();
     setState((current) => ({
       ...current,
       actionCards: current.actionCards.map((card) =>
-        card.id === cardId ? { ...card, fields: { ...card.fields, "复活产出/备注": output.trim() }, updatedAt: new Date().toISOString() } : card
+        card.id === cardId ? { ...card, fields: { ...card.fields, "复活产出/备注": output.trim() }, outputSavedAt: now, updatedAt: now } : card
       )
     }));
-    setToast(output.trim() ? "产出已保存，可以标记完成" : "已清空产出备注");
-  }
-  function updateCardField(cardId: string, field: "title" | "goal" | "nextAction", value: string) {
+    setToast(`产出已保存 · ${formatSavedTime(now)}`);
+  }  function updateCardField(cardId: string, field: "title" | "goal" | "nextAction", value: string) {
     setState((current) => ({
       ...current,
       actionCards: current.actionCards.map((card) =>
