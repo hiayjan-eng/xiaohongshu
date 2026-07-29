@@ -8,7 +8,8 @@
     "scripting",
     "storage",
     "downloads",
-    "tabs"
+    "tabs",
+    "sidePanel"
   ],
   "host_permissions": [
     "https://xiaohongshu-green.vercel.app/*",
@@ -18,8 +19,10 @@
     "https://xiaohongshu.com/*"
   ],
   "action": {
-    "default_title": "收藏复活扫描",
-    "default_popup": "src/popup.html"
+    "default_title": "收藏复活全量扫描"
+  },
+  "side_panel": {
+    "default_path": "src/sidepanel.html"
   },
   "background": {
     "service_worker": "src/background.js"
@@ -42,7 +45,9 @@
         "https://xiaohongshu.com/*"
       ],
       "js": [
-        "src/xhs-scanner.js"
+        "src/full-scan-core.js",
+        "src/xhs-scanner.js",
+        "src/full-scan-content.js"
       ],
       "run_at": "document_idle"
     }
