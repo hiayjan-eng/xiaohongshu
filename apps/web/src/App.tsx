@@ -1785,6 +1785,8 @@ export function AppContent({ initialState, initialSettings, runtime, writeGate, 
               card={selectedCard}
               planCard={(state.planCards ?? []).find((entry) => entry.actionCardId === selectedCard.id)}
               openSource={openSource}
+              repairSourceUrl={repairSourceUrl}
+              markSourceUnavailable={markSourceUnavailable}
               updateSavedNote={updateSavedNote}
               updateCardField={updateCardField}
               saveActionOutput={saveActionOutput}
@@ -1805,6 +1807,8 @@ export function AppContent({ initialState, initialSettings, runtime, writeGate, 
             <SavedIndexDetailView
               item={selectedItem}
               openSource={openSource}
+              repairSourceUrl={repairSourceUrl}
+              markSourceUnavailable={markSourceUnavailable}
               updateSavedNote={updateSavedNote}
               reviveSavedItem={reviveSavedItem}
               setActiveView={setActiveView}
@@ -1878,6 +1882,7 @@ export function AppContent({ initialState, initialSettings, runtime, writeGate, 
           {activeView === "settings" && settingsSubRoute === "root" && (
             <SettingsView
               userName={state.user.name}
+              dataQuality={dataQuality}
               recommendationLimit={recommendationLimit}
               setRecommendationLimit={setRecommendationLimit}
               resetDemoData={resetDemoData}
@@ -3074,6 +3079,8 @@ function PoolView(props: {
 function SavedIndexDetailView(props: {
   item: SavedItem;
   openSource: (item: SavedItem, origin?: OpenSourceOrigin) => void;
+  repairSourceUrl: (itemId: string) => void;
+  markSourceUnavailable: (itemId: string) => void;
   updateSavedNote: (itemId: string, userNote: string) => void;
   reviveSavedItem: (itemId: string, reviveIntent?: ReviveIntent) => void;
   setActiveView: (view: ViewKey) => void;
@@ -3112,6 +3119,11 @@ function SavedIndexDetailView(props: {
               暂无原帖链接
             </button>
           )}
+          <button className="secondary-action" onClick={() => props.repairSourceUrl(props.item.id)} data-testid="detail-repair-source">修复链接</button>
+          {hasSourceUrl(props.item) && props.item.sourceUrlStatus !== "unavailable" && (
+            <button className="secondary-action" onClick={() => props.markSourceUnavailable(props.item.id)} data-testid="detail-mark-source-unavailable">标记原帖失效</button>
+          )}
+          {props.item.sourceUrlStatus === "unavailable" && <span className="quiet-copy">原帖可能已删除、不可见或链接已失效</span>}
         </div>
       </div>
 
@@ -3158,6 +3170,8 @@ function DetailView(props: {
   card: ActionCard;
   planCard?: PlanCard;
   openSource: (item: SavedItem, origin?: OpenSourceOrigin) => void;
+  repairSourceUrl: (itemId: string) => void;
+  markSourceUnavailable: (itemId: string) => void;
   updateSavedNote: (itemId: string, userNote: string) => void;
   updateCardField: (cardId: string, field: "title" | "goal" | "nextAction", value: string) => void;
   saveActionOutput: (cardId: string, output: string) => void;
@@ -3950,6 +3964,7 @@ function MobilePrototype(props: {
 }
 function SettingsView(props: {
   userName: string;
+  dataQuality: DataQualityDiagnostic;
   recommendationLimit: number;
   setRecommendationLimit: (value: number) => void;
   resetDemoData: () => void;
@@ -3989,6 +4004,31 @@ function SettingsView(props: {
       </div>
 
       <ThemePicker selectedThemeId={props.themeId} onThemeChange={props.setThemeId} />
+
+      <section className="tool-panel single" data-testid="data-quality-diagnostic">
+        <PanelHeader icon={<BarChart3 size={18} />} title="数据完整性诊断" meta="只读 · 不显示正文或完整链接" />
+        <div className="metric-grid insight-metrics">
+          <Metric label="总收藏数" value={props.dataQuality.totalCount.toString()} />
+          <Metric label="有 sourceId" value={props.dataQuality.withSourceIdCount.toString()} />
+          <Metric label="有效 sourceUrl" value={props.dataQuality.withValidSourceUrlCount.toString()} />
+          <Metric label="normalizedContent 非空" value={props.dataQuality.normalizedContentCount.toString()} />
+          <Metric label="空标题" value={props.dataQuality.emptyTitleCount.toString()} />
+          <Metric label="空正文" value={props.dataQuality.emptyRawTextCount.toString()} />
+          <Metric label="重复候选" value={props.dataQuality.duplicateCandidateCount.toString()} />
+          <Metric label="无法解析链接" value={props.dataQuality.unparseableLinkCount.toString()} />
+          <Metric label="用户修复链接" value={props.dataQuality.userCorrectedLinkCount.toString()} />
+          <Metric label="normalization warning" value={props.dataQuality.normalizationWarningCount.toString()} />
+        </div>
+        <div className="migration-change-list" data-testid="data-quality-errors">
+          {props.dataQuality.errors.slice(0, 20).map((error) => (
+            <article key={error.deidentifiedId} className="migration-change uncertain">
+              <span>脱敏 ID：{error.deidentifiedId}</span>
+              <strong>{error.types.join(" / ")}</strong>
+            </article>
+          ))}
+          {props.dataQuality.errors.length === 0 && <p className="quiet-copy">当前没有检测到数据完整性错误。</p>}
+        </div>
+      </section>
 
       <MigrationDataUpgradeEntry onOpen={props.openDataMigration} runtimeKind={props.runtimeKind} activatedAt={props.activatedAt} />
 
@@ -5122,8 +5162,8 @@ function formatAlbumMatchProfile(album: SmartAlbum): string {
   return parts.length > 0 ? parts.join(" / ") : album.keywords.slice(0, 4).join(" / ") || "按主题、用途和关键词匹配";
 }
 
-function hasSourceUrl(item: Pick<SavedItem, "sourceUrl">): boolean {
-  return Boolean(item.sourceUrl.trim());
+function hasSourceUrl(item: Pick<SavedItem, "sourceUrl"> & Partial<Pick<SavedItem, "canonicalSourceUrl" | "userCorrectedSourceUrl" | "sourceUrlStatus">>): boolean {
+  return item.sourceUrlStatus !== "unavailable" && Boolean(getPreferredSourceUrl(item));
 }
 
 function mapReviveIntentToActionIntent(reviveIntent: ReviveIntent | undefined): ActionIntentKey | undefined {
