@@ -1,6 +1,6 @@
 import { generateSmartAlbums } from "@revival/action-card-service";
 import { createMockAiProvider, isAiProviderPromise, type AiProvider } from "@revival/ai-service";
-import { createSavedItemRecord } from "@revival/database";
+import { analyzeSourceUrl, buildStableDedupeKey, createSavedItemRecord } from "@revival/database";
 import type {
   ActionCard,
   ExtensionScannedItem,
@@ -14,10 +14,16 @@ import type {
 
 export interface ImportInputItem {
   sourceUrl?: string;
+  canonicalSourceUrl?: string;
+  sourceId?: string;
+  sourceUrlStatus?: ShareInput["sourceUrlStatus"];
+  lastUrlCheckedAt?: string;
   title?: string;
   rawShareText?: string;
+  rawText?: string;
   visibleText?: string;
   coverUrl?: string;
+  author?: string;
   userNote?: string;
 }
 
@@ -31,6 +37,7 @@ export interface ProcessImportBatchInput {
   existingSmartAlbums?: SmartAlbum[];
   aiProvider?: AiProvider;
   now?: Date;
+  scanSummary?: ImportBatch["scanSummary"];
 }
 
 export interface ProcessImportBatchResult {
@@ -48,10 +55,10 @@ export function processImportBatch(input: ProcessImportBatchInput): ProcessImpor
   const createdAt = now.toISOString();
   const batchId = createId("batch");
   const aiProvider = input.aiProvider ?? createMockAiProvider({ generateSmartAlbums });
-  const existingKeys = new Map<string, SavedItem>();
+  const existingKeys = new Map<string, { item: SavedItem; origin: "existing_library" | "batch" }>();
   input.existingSavedItems.forEach((item) => {
     const key = getSavedItemDedupeKey(item);
-    if (key) existingKeys.set(key, item);
+    if (key) existingKeys.set(key, { item, origin: "existing_library" });
   });
 
   const batchItems: ImportBatchItem[] = [];
@@ -59,6 +66,9 @@ export function processImportBatch(input: ProcessImportBatchInput): ProcessImpor
   const actionCards: ActionCard[] = [];
   const duplicates: ImportBatchItem[] = [];
   const failedItems: ImportBatchItem[] = [];
+  let batchDuplicates = 0;
+  let existingLibraryDuplicates = 0;
+  let unresolvedDuplicates = 0;
 
   input.items.forEach((rawItem, index) => {
     const normalized = normalizeImportItem(rawItem);
@@ -67,6 +77,9 @@ export function processImportBatch(input: ProcessImportBatchInput): ProcessImpor
       id: itemId,
       batchId,
       sourceUrl: normalized.sourceUrl,
+      canonicalSourceUrl: normalized.canonicalSourceUrl,
+      sourceId: normalized.sourceId,
+      sourceUrlStatus: normalized.sourceUrlStatus,
       title: normalized.title,
       rawShareText: normalized.rawShareText,
       visibleText: normalized.visibleText,
@@ -89,11 +102,15 @@ export function processImportBatch(input: ProcessImportBatchInput): ProcessImpor
 
     const key = getShareInputDedupeKey(normalized);
     const duplicate = key ? existingKeys.get(key) : undefined;
+    if (!key) unresolvedDuplicates += 1;
     if (duplicate) {
+      if (duplicate.origin === "batch") batchDuplicates += 1;
+      else existingLibraryDuplicates += 1;
       const duplicateItem: ImportBatchItem = {
         ...baseItem,
         status: "duplicate",
-        duplicateOfSavedItemId: duplicate.id
+        duplicateOfSavedItemId: duplicate.item.id,
+        duplicateKind: duplicate.origin
       };
       batchItems.push(duplicateItem);
       duplicates.push(duplicateItem);
@@ -107,7 +124,7 @@ export function processImportBatch(input: ProcessImportBatchInput): ProcessImpor
         throw new Error("Async AI providers require an async import pipeline; mock fallback remains the default for the current Web MVP.");
       }
       const savedItem = createSavedItemRecord(input.userId, normalized, classification, itemDate);
-      existingKeys.set(key, savedItem);
+      if (key) existingKeys.set(key, { item: savedItem, origin: "batch" });
       importedSavedItems.push(savedItem);
       batchItems.push({
         ...baseItem,
@@ -146,6 +163,12 @@ export function processImportBatch(input: ProcessImportBatchInput): ProcessImpor
     createdActionCardCount: 0,
     createdAlbumCount,
     errorMessage: failedItems[0]?.errorMessage,
+    duplicateBreakdown: {
+      batchDuplicates,
+      existingLibraryDuplicates,
+      unresolvedDuplicates
+    },
+    scanSummary: input.scanSummary,
     createdAt,
     updatedAt: new Date(now.getTime() + Math.max(1, input.items.length)).toISOString()
   };
@@ -166,10 +189,10 @@ export async function processImportBatchAsync(input: ProcessImportBatchInput): P
   const createdAt = now.toISOString();
   const batchId = createId("batch");
   const aiProvider = input.aiProvider ?? createMockAiProvider({ generateSmartAlbums });
-  const existingKeys = new Map<string, SavedItem>();
+  const existingKeys = new Map<string, { item: SavedItem; origin: "existing_library" | "batch" }>();
   input.existingSavedItems.forEach((item) => {
     const key = getSavedItemDedupeKey(item);
-    if (key) existingKeys.set(key, item);
+    if (key) existingKeys.set(key, { item, origin: "existing_library" });
   });
 
   const batchItems: ImportBatchItem[] = [];
@@ -177,6 +200,9 @@ export async function processImportBatchAsync(input: ProcessImportBatchInput): P
   const actionCards: ActionCard[] = [];
   const duplicates: ImportBatchItem[] = [];
   const failedItems: ImportBatchItem[] = [];
+  let batchDuplicates = 0;
+  let existingLibraryDuplicates = 0;
+  let unresolvedDuplicates = 0;
 
   for (const [index, rawItem] of input.items.entries()) {
     const normalized = normalizeImportItem(rawItem);
@@ -185,6 +211,9 @@ export async function processImportBatchAsync(input: ProcessImportBatchInput): P
       id: itemId,
       batchId,
       sourceUrl: normalized.sourceUrl,
+      canonicalSourceUrl: normalized.canonicalSourceUrl,
+      sourceId: normalized.sourceId,
+      sourceUrlStatus: normalized.sourceUrlStatus,
       title: normalized.title,
       rawShareText: normalized.rawShareText,
       visibleText: normalized.visibleText,
@@ -207,11 +236,15 @@ export async function processImportBatchAsync(input: ProcessImportBatchInput): P
 
     const key = getShareInputDedupeKey(normalized);
     const duplicate = key ? existingKeys.get(key) : undefined;
+    if (!key) unresolvedDuplicates += 1;
     if (duplicate) {
+      if (duplicate.origin === "batch") batchDuplicates += 1;
+      else existingLibraryDuplicates += 1;
       const duplicateItem: ImportBatchItem = {
         ...baseItem,
         status: "duplicate",
-        duplicateOfSavedItemId: duplicate.id
+        duplicateOfSavedItemId: duplicate.item.id,
+        duplicateKind: duplicate.origin
       };
       batchItems.push(duplicateItem);
       duplicates.push(duplicateItem);
@@ -222,7 +255,7 @@ export async function processImportBatchAsync(input: ProcessImportBatchInput): P
       const itemDate = new Date(now.getTime() + index);
       const classification = await Promise.resolve(aiProvider.classifyAndGenerateActionCard(normalized));
       const savedItem = createSavedItemRecord(input.userId, normalized, classification, itemDate);
-      existingKeys.set(key, savedItem);
+      if (key) existingKeys.set(key, { item: savedItem, origin: "batch" });
       importedSavedItems.push(savedItem);
       batchItems.push({
         ...baseItem,
@@ -258,6 +291,12 @@ export async function processImportBatchAsync(input: ProcessImportBatchInput): P
     createdActionCardCount: 0,
     createdAlbumCount,
     errorMessage: failedItems[0]?.errorMessage,
+    duplicateBreakdown: {
+      batchDuplicates,
+      existingLibraryDuplicates,
+      unresolvedDuplicates
+    },
+    scanSummary: input.scanSummary,
     createdAt,
     updatedAt: new Date(now.getTime() + Math.max(1, input.items.length)).toISOString()
   };
@@ -275,10 +314,16 @@ export async function processImportBatchAsync(input: ProcessImportBatchInput): P
 export function extensionItemsToImportItems(items: ExtensionScannedItem[]): ImportInputItem[] {
   return items.map((item) => ({
     sourceUrl: item.sourceUrl,
+    canonicalSourceUrl: item.canonicalSourceUrl,
+    sourceId: item.sourceId,
+    sourceUrlStatus: item.sourceUrlStatus,
+    lastUrlCheckedAt: item.lastUrlCheckedAt,
     title: item.title,
     rawShareText: item.visibleText || item.title,
+    rawText: item.rawText || item.visibleText || item.title,
     visibleText: item.visibleText,
     coverUrl: item.coverUrl,
+    author: item.author,
     userNote: "来自浏览器扩展旧收藏夹扫描，用户确认后导入；先生成收藏索引，不自动生成行动卡。"
   }));
 }
@@ -292,7 +337,8 @@ export function parseShareInput(item: ImportInputItem): ShareInput & Pick<Import
   const sourceParse = splitUrlFromText(sourceField);
   const rawParse = splitUrlFromText(rawField);
   const visibleParse = splitUrlFromText(visibleText);
-  const sourceUrl = normalizeUrl(sourceParse.url || rawParse.url || visibleParse.url || "");
+  const sourceUrl = preserveRawHttpUrl(sourceParse.url || rawParse.url || visibleParse.url || "");
+  const source = analyzeSourceUrl(sourceUrl);
   const textParts = [sourceParse.text, rawParse.text, visibleParse.text]
     .map(cleanText)
     .filter(Boolean);
@@ -302,8 +348,14 @@ export function parseShareInput(item: ImportInputItem): ShareInput & Pick<Import
 
   return {
     sourceUrl,
+    canonicalSourceUrl: item.canonicalSourceUrl || source.canonicalSourceUrl,
+    sourceId: item.sourceId || source.sourceId,
+    sourceUrlStatus: item.sourceUrlStatus || source.status,
+    lastUrlCheckedAt: item.lastUrlCheckedAt || new Date().toISOString(),
     title,
     rawShareText,
+    rawText: cleanText(item.rawText ?? rawShareText),
+    author: cleanText(item.author ?? "") || undefined,
     visibleText: visibleText || undefined,
     coverUrl: normalizeUrl(item.coverUrl ?? "") || undefined,
     userNote
@@ -356,6 +408,17 @@ function normalizeUrl(value: string): string {
   }
 }
 
+function preserveRawHttpUrl(value: string): string {
+  const clean = value.trim();
+  if (!clean) return "";
+  try {
+    const url = new URL(clean);
+    return ["http:", "https:"].includes(url.protocol) ? clean : "";
+  } catch {
+    return "";
+  }
+}
+
 function splitUrlFromText(value: string): { url: string; text: string } {
   const urlMatch = value.match(/https?:\/\/[^\s，。；;）)】]+/i);
   if (!urlMatch) return { url: "", text: value };
@@ -398,11 +461,11 @@ function cleanText(value: string): string {
   return value.replace(/\s+/g, " ").trim();
 }
 function getSavedItemDedupeKey(item: SavedItem): string {
-  return item.sourceUrl.trim().toLowerCase() || item.title.trim().toLowerCase();
+  return buildStableDedupeKey(item);
 }
 
 function getShareInputDedupeKey(input: ShareInput): string {
-  return input.sourceUrl.trim().toLowerCase() || input.title.trim().toLowerCase();
+  return buildStableDedupeKey(input);
 }
 
 function createId(prefix: string): string {
