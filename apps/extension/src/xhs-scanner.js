@@ -85,6 +85,7 @@
           updatedAt: new Date().toISOString()
         };
         await persistState();
+        if (runtime.state.scrollPosition > window.scrollY) window.scrollTo({ top: runtime.state.scrollPosition, behavior: "auto" });
         runScanLoop(runtime.state.autoScroll !== false);
         sendResponse({ ok: true, scanState: runtime.state });
       })();
@@ -269,6 +270,7 @@
         await persistState();
 
         if (autoScroll && runtime.state.batch > 0) await scrollOneStep(620);
+        if (runtime.stopRequested || runtime.state.status !== "scanning") break;
         await scanOnce(false);
 
         if (runtime.state.limit && runtime.state.items.filter((item) => !item.isDuplicate && !item.isMissingLink).length >= runtime.state.limit) {
@@ -503,12 +505,14 @@
     if (noteAnchor) return extractCard(noteAnchor, container, rootInfo, pageStatus);
     const noteId = String(container.getAttribute("data-note-id") || container.getAttribute("data-id") || "").trim();
     const sourceUrl = /^[a-zA-Z0-9_-]{6,80}$/.test(noteId) ? `https://www.xiaohongshu.com/explore/${encodeURIComponent(noteId)}` : "";
+    const sourceFields = buildSourceFields(sourceUrl, noteId);
     const rawText = normalizeScannedText(container.innerText || container.textContent || "");
     const title = sanitizeTitle(pickTitle(container, container), rawText);
     if (!sourceUrl && !title && !rawText) return null;
     return {
       title: title || "标题待补充",
       sourceUrl,
+      ...sourceFields,
       coverUrl: findCoverUrl(container),
       visibleText: rawText.slice(0, 360),
       rawText,
@@ -635,6 +639,7 @@
     const container = findCardContainer(anchor, root);
     if (!container || !isElementVisible(container)) return null;
     const sourceUrl = normalizeXhsUrl(anchor.href);
+    const sourceFields = buildSourceFields(sourceUrl);
     const rawText = normalizeScannedText(container.innerText || anchor.innerText || "");
     const title = sanitizeTitle(pickTitle(container, anchor), rawText);
     const visibleText = normalizeScannedText(rawText).slice(0, 360);
@@ -647,6 +652,7 @@
     return {
       title: title || "标题待补充",
       sourceUrl,
+      ...sourceFields,
       coverUrl,
       visibleText,
       rawText,
@@ -839,6 +845,47 @@
     }
   }
 
+  function buildSourceFields(sourceUrl, explicitSourceId) {
+    const sourceId = explicitSourceId || extractSourceId(sourceUrl);
+    const canonicalSourceUrl = canonicalizeXhsUrl(sourceUrl, sourceId);
+    return {
+      canonicalSourceUrl,
+      sourceId: sourceId || undefined,
+      sourceUrlStatus: sourceId && canonicalSourceUrl ? "valid" : sourceUrl ? "partial" : "missing",
+      lastUrlCheckedAt: new Date().toISOString()
+    };
+  }
+
+  function extractSourceId(value) {
+    try {
+      const url = new URL(value, window.location.href);
+      if (!/(^|\.)xiaohongshu\.com$|(^|\.)xhslink\.com$/i.test(url.hostname)) return "";
+      const pathMatch = url.pathname.match(/\/(?:explore|discovery\/item|search_result)\/([a-zA-Z0-9_-]{6,80})(?:\/|$)/i);
+      const nestedProfileNote = url.pathname.match(/\/user\/profile\/[a-zA-Z0-9_-]{6,80}\/([a-zA-Z0-9_-]{6,80})(?:\/|$)/i);
+      const queryId = url.searchParams.get("note_id") || url.searchParams.get("noteId") || url.searchParams.get("item_id");
+      const candidate = pathMatch?.[1] || nestedProfileNote?.[1] || queryId || "";
+      return /^[a-zA-Z0-9_-]{6,80}$/.test(candidate) ? candidate : "";
+    } catch {
+      return "";
+    }
+  }
+
+  function canonicalizeXhsUrl(value, explicitSourceId) {
+    const sourceId = explicitSourceId || extractSourceId(value);
+    if (!sourceId) return "";
+    try {
+      const url = new URL(value, window.location.href);
+      const canonical = new URL(`https://www.xiaohongshu.com/explore/${encodeURIComponent(sourceId)}`);
+      ["xsec_token", "xsec_source"].forEach((key) => {
+        const token = url.searchParams.get(key);
+        if (token) canonical.searchParams.set(key, token);
+      });
+      return canonical.toString();
+    } catch {
+      return `https://www.xiaohongshu.com/explore/${encodeURIComponent(sourceId)}`;
+    }
+  }
+
   async function scrollOneStep(delayMs) {
     window.scrollBy({ top: Math.round(window.innerHeight * 0.78), behavior: "smooth" });
     await wait(delayMs);
@@ -885,12 +932,29 @@
   }
 
   function itemKey(item) {
-    return item.sourceUrl || `${item.title}|${item.author || ""}`;
+    if (item.sourceId) return `source:${item.sourceId}`;
+    if (item.canonicalSourceUrl) return `url:${item.canonicalSourceUrl}`;
+    const fallback = [item.title || "", item.author || "", normalizeScannedText(item.visibleText || item.rawText || "").slice(0, 160)].join("|");
+    return fallback.replace(/\|/g, "") ? `fallback:${stableHash(fallback)}` : "";
+  }
+
+  function stableHash(value) {
+    let hash = 2166136261;
+    for (let index = 0; index < value.length; index += 1) {
+      hash ^= value.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
+    }
+    return (hash >>> 0).toString(16).padStart(8, "0");
+  }
+
+  function normalizeScanTarget(value) {
+    const numeric = Number(value);
+    return SUPPORTED_TARGETS.includes(numeric) ? numeric : 20;
   }
 
   function updateMilestones(existing, count) {
     const milestones = new Set(existing || []);
-    [10, 20].forEach((value) => {
+    SUPPORTED_TARGETS.forEach((value) => {
       if (count >= value) milestones.add(`已找回 ${value} 条旧收藏`);
     });
     return [...milestones];
