@@ -524,6 +524,10 @@
     const top = Math.max(0, Number(container.scrollHeight) - Number(container.clientHeight));
     if (typeof container.scrollTo === "function") container.scrollTo({ top, behavior: "auto" });
     else container.scrollTop = top;
+    const EventConstructor = container.ownerDocument?.defaultView?.Event || globalThis.Event;
+    if (EventConstructor && typeof container.dispatchEvent === "function") {
+      container.dispatchEvent(new EventConstructor("scroll"));
+    }
   }
 
   function readGeometry(container) {
