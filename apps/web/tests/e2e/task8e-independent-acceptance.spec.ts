@@ -94,12 +94,11 @@ test.describe("Task 8E independent release acceptance", () => {
 
     await page.getByTestId("revive-imported-item").click();
     await expect.poll(async () => (await readTask8eRecords<Record<string, unknown>>(page, "actionCards")).some((card) => card.savedItemId === imported!.id)).toBe(true);
-    let dialogIndex = 0;
-    page.on("dialog", async (dialog) => {
-      dialogIndex += 1;
-      await dialog.accept(dialogIndex === 1 ? "今天" : dialogIndex === 2 ? "20" : dialog.defaultValue());
-    });
     await page.getByTestId("add-to-plan-card").click();
+    await expect(page.getByTestId("action-plan-dialog")).toBeVisible();
+    await page.getByRole("button", { name: "今天", exact: true }).click();
+    await page.getByLabel("20 分钟").check();
+    await page.getByTestId("save-action-plan").click();
     await expect.poll(async () => (await readTask8eRecords<Record<string, unknown>>(page, "planCards")).some((card) => card.savedItemId === imported!.id)).toBe(true);
 
     await page.goto("/albums/album-migration-001");
