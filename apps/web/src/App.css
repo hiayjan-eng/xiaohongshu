@@ -5851,3 +5851,82 @@ select,
 @media (max-width: 390px) {
   .storage-recovery-facts { grid-template-columns: 1fr; }
 }
+/* P0 action execution loop */
+.action-execution-panel {
+  display: grid;
+  gap: 16px;
+  margin: 12px 0 24px;
+  padding: 18px;
+  border: 1px solid color-mix(in srgb, var(--primary) 28%, var(--border));
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--surface) 88%, var(--primary) 12%);
+}
+.action-execution-head,
+.action-execution-actions,
+.completion-controls,
+.product-dialog-head,
+.product-dialog-actions,
+.plan-date-shortcuts,
+.plan-minute-options {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.action-execution-head { justify-content: space-between; }
+.action-execution-head div { display: grid; gap: 3px; }
+.action-execution-head span,
+.action-execution-head small,
+.completion-controls small { color: var(--muted); font-size: 0.82rem; }
+.action-execution-actions { flex-wrap: wrap; }
+.scheduled-action-summary,
+.in-progress-action,
+.completed-action-summary { display: grid; gap: 12px; }
+.completed-action-summary span { color: var(--muted); }
+.completion-controls { justify-content: space-between; flex-wrap: wrap; }
+.completion-controls label { display: flex; align-items: center; gap: 8px; }
+.completion-controls select { min-width: 120px; }
+.product-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgb(18 24 20 / 58%);
+  backdrop-filter: blur(6px);
+}
+.product-dialog {
+  width: min(560px, 100%);
+  max-height: min(760px, calc(100vh - 40px));
+  overflow: auto;
+  display: grid;
+  gap: 18px;
+  padding: 24px;
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  background: var(--surface);
+  box-shadow: 0 24px 70px rgb(0 0 0 / 26%);
+}
+.product-dialog.compact { width: min(460px, 100%); }
+.product-dialog-head { justify-content: space-between; align-items: flex-start; }
+.product-dialog-head h2 { margin: 3px 0 0; }
+.product-dialog-head > button { border: 0; background: transparent; font-size: 1.6rem; }
+.product-dialog > label { display: grid; gap: 7px; }
+.product-dialog input[type="date"],
+.product-dialog textarea,
+.product-dialog select { width: 100%; }
+.product-dialog fieldset { margin: 0; padding: 14px; border: 1px solid var(--border); border-radius: 14px; }
+.plan-minute-options { flex-wrap: wrap; margin-top: 10px; }
+.plan-minute-options label { display: flex; align-items: center; gap: 5px; }
+.product-dialog-actions { justify-content: flex-end; }
+
+@media (max-width: 640px) {
+  .action-execution-panel { padding: 14px; }
+  .action-execution-head,
+  .completion-controls { align-items: flex-start; flex-direction: column; }
+  .action-execution-actions > button,
+  .product-dialog-actions > button { flex: 1 1 100%; width: 100%; }
+  .product-dialog-backdrop { align-items: end; padding: 0; }
+  .product-dialog { width: 100%; max-height: 88vh; border-radius: 22px 22px 0 0; padding: 18px; }
+  .product-dialog-actions { flex-direction: column-reverse; }
+}
