@@ -52,7 +52,21 @@ if (isPreview) {
 }
 writeFileSync(resolve(outDir, "manifest.json"), `${JSON.stringify(outputManifest, null, 2)}\n`);
 
-for (const file of ["popup.html", "popup.js", "popup.css", "web-bridge.js", "xhs-scanner.js", "background.js", "build-profile.js"]) {
+for (const file of [
+  "popup.html",
+  "popup.js",
+  "popup.css",
+  "sidepanel.html",
+  "sidepanel.js",
+  "sidepanel.css",
+  "web-bridge.js",
+  "xhs-scanner.js",
+  "full-scan-core.js",
+  "full-scan-content.js",
+  "full-scan-idb.js",
+  "background.js",
+  "build-profile.js"
+]) {
   copyFileSync(resolve(root, "src", file), resolve(srcOut, file));
 }
 
