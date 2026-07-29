@@ -1,0 +1,6 @@
+diff --git a/apps/extension/tests/fixtures/full-scan-virtual-list.html b/apps/extension/tests/fixtures/full-scan-virtual-list.html
+--- a/apps/extension/tests/fixtures/full-scan-virtual-list.html
++++ b/apps/extension/tests/fixtures/full-scan-virtual-list.html
+@@ -58 +58,2 @@
+   <body>
++    <button data-revival-own-profile="true" type="button">Edit profile</button>
