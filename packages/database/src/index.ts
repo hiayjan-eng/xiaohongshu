@@ -1072,10 +1072,10 @@ export function isValidSourceId(value: string | undefined): value is string {
 export function getPreferredSourceUrl(item: Pick<SavedItem, "sourceUrl"> & Partial<Pick<SavedItem, "canonicalSourceUrl" | "userCorrectedSourceUrl">>): string {
   const corrected = analyzeSourceUrl(item.userCorrectedSourceUrl || "");
   if (corrected.status === "valid" || corrected.status === "partial") return item.userCorrectedSourceUrl!.trim();
-  const canonical = analyzeSourceUrl(item.canonicalSourceUrl || "");
-  if (canonical.status === "valid" || canonical.status === "partial") return item.canonicalSourceUrl!.trim();
   const raw = analyzeSourceUrl(item.sourceUrl);
-  return raw.status === "valid" || raw.status === "partial" ? item.sourceUrl.trim() : "";
+  if (raw.status === "valid" || raw.status === "partial") return item.sourceUrl.trim();
+  const canonical = analyzeSourceUrl(item.canonicalSourceUrl || "");
+  return canonical.status === "valid" || canonical.status === "partial" ? item.canonicalSourceUrl!.trim() : "";
 }
 
 export function normalizeSavedContent(rawTitle: string, rawText: string, author?: string): NormalizedSavedContent {
