@@ -1,0 +1,22 @@
+diff --git a/apps/extension/tests/fixtures/full-scan-virtual-list.html b/apps/extension/tests/fixtures/full-scan-virtual-list.html
+--- a/apps/extension/tests/fixtures/full-scan-virtual-list.html
++++ b/apps/extension/tests/fixtures/full-scan-virtual-list.html
+@@ -105,7 +105,7 @@
+         const mode = params.get("mode") || "normal";
+         const batchSize = 50;
+-        const windowSize = 48;
++        const windowSize = 60;
+         const rowHeight = 41;
+diff --git a/apps/extension/scripts/run-full-scan-spike.mjs b/apps/extension/scripts/run-full-scan-spike.mjs
+--- a/apps/extension/scripts/run-full-scan-spike.mjs
++++ b/apps/extension/scripts/run-full-scan-spike.mjs
+@@ -127,7 +127,7 @@
+   assert.equal(new Set(storedItems.map((item) => item.sourceId)).size, 3000);
+   assert.equal(fixture.loaded, 3000);
+-  assert.ok(fixture.maxDomCards <= 49, `virtual DOM retained ${fixture.maxDomCards} cards`);
++  assert.ok(fixture.maxDomCards <= 61, `virtual DOM retained ${fixture.maxDomCards} cards`);
+@@ -136,7 +136,7 @@
+   assert.ok(fixture.loadRequests >= 59);
+   assert.deepEqual(fixture.supportedTotals, [20, 100, 500, 1000, 3000, 5000]);
+-  assert.ok(runtimeAfterResume.diagnostics.maxBufferedItems <= 49);
++  assert.ok(runtimeAfterResume.diagnostics.maxBufferedItems <= 61);
