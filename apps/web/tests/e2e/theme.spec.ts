@@ -58,6 +58,9 @@ test.describe("MVP theme switching", () => {
       userNote: "主题回归测试"
     });
     await reviveImportedItem(page, imported.id);
+    await page.getByTestId("add-to-today").click();
+    await page.getByTestId("start-action").click();
+    await page.getByTestId("action-output-field").locator("textarea").fill("主题切换后的核心行动已验证");
     await page.getByTestId("status-completed").click();
     await expect(page.locator(".toast")).toBeVisible();
 
