@@ -50,7 +50,7 @@ function scoreRecommendation(
     score += 12;
   }
 
-  if (item.status === "today") {
+  if (item.status === "scheduled_today") {
     score += 42;
     reasons.push("已经加入今日行动");
   } else if (item.status === "not_started") {
