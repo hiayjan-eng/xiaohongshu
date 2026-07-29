@@ -1,9 +1,0 @@
-diff --git a/apps/extension/scripts/run-full-scan-spike.mjs b/apps/extension/scripts/run-full-scan-spike.mjs
---- a/apps/extension/scripts/run-full-scan-spike.mjs
-+++ b/apps/extension/scripts/run-full-scan-spike.mjs
-@@ -116,7 +116,7 @@
-   assert.equal(fixture.loaded, 3000);
-   assert.ok(fixture.maxDomCards <= 61, `virtual DOM retained ${fixture.maxDomCards} cards`);
-   assert.equal(fixture.ownPostCardCount, 50);
--  assert.ok(fixture.loadRequests >= 59);
-+  assert.ok(fixture.loadRequests >= 35);
