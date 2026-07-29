@@ -192,6 +192,8 @@ export function createActionCardRecord(
     followUp: draft.followUp,
     fields: draft.structuredFields ?? {},
     tasks,
+    generatedFromIntent: draft.generatedFromIntent,
+    templateVersion: draft.templateVersion,
     createdAt,
     updatedAt: createdAt
   };
@@ -373,23 +375,23 @@ const DEMO_SEED_INPUTS: ShareInput[] = [
 ];
 
 const DEMO_STATUSES: ItemStatus[] = [
-  "today",
+  "scheduled_today",
   "in_progress",
   "not_started",
   "not_started",
   "snoozed",
   "not_started",
-  "today",
+  "scheduled_today",
   "not_started",
   "not_started",
   "snoozed",
-  "today",
+  "scheduled_today",
   "not_started",
   "in_progress",
   "not_started",
   "not_started",
   "not_started",
-  "today",
+  "scheduled_today",
   "not_started",
   "in_progress",
   "not_started"
@@ -424,6 +426,11 @@ export function normalizeAppState(state: AppState): AppState {
   };
 }
 
+function normalizeItemStatus(status: unknown): SavedItem["status"] {
+  if (status === "today") return "scheduled_today";
+  if (status === "scheduled_today" || status === "scheduled" || status === "in_progress" || status === "completed" || status === "snoozed") return status;
+  return "not_started";
+}
 function normalizeSavedItem(item: SavedItem): SavedItem {
   const raw = item as SavedItem & {
     contentDomain?: unknown;
@@ -463,6 +470,7 @@ function normalizeSavedItem(item: SavedItem): SavedItem {
   return {
     ...item,
     sourcePlatform: detectPlatform(item.sourceUrl),
+    status: normalizeItemStatus(item.status),
     contentDomain,
     contentSubDomain,
     savedIntent,
@@ -501,7 +509,7 @@ function normalizePlanCard(card: PlanCard): PlanCard {
 }
 
 function normalizeActionCard(card: ActionCard, item?: SavedItem): ActionCard {
-  const raw = card as ActionCard & Partial<Pick<ActionCard, "whySaved" | "openOriginalFocus" | "output" | "doneCriteria" | "avoidDoing" | "ifInfoMissing" | "followUp" | "subCategory">>;
+  const raw = card as ActionCard & Partial<Pick<ActionCard, "whySaved" | "openOriginalFocus" | "output" | "doneCriteria" | "avoidDoing" | "ifInfoMissing" | "followUp" | "subCategory" | "generatedFromIntent" | "templateVersion">>;
   const category = normalizeCategoryValue(card.category);
   const subCategory = raw.subCategory && raw.subCategory !== "其他" ? raw.subCategory : item?.subCategory || (category === "暂存" ? "待补充备注" : "主题整理");
   return {
@@ -515,7 +523,9 @@ function normalizeActionCard(card: ActionCard, item?: SavedItem): ActionCard {
     doneCriteria: raw.doneCriteria || "完成卡片里的第一个具体动作。",
     avoidDoing: raw.avoidDoing || "不要一次整理太多收藏。",
     ifInfoMissing: raw.ifInfoMissing || "如果信息不足，先补一句你为什么收藏它。",
-    followUp: raw.followUp || "完成后再决定是否加入计划或专辑。"
+    followUp: raw.followUp || "完成后再决定是否加入计划或专辑。",
+    generatedFromIntent: raw.generatedFromIntent || "copy_once",
+    templateVersion: raw.templateVersion || "legacy-category-v1"
   };
 }
 
