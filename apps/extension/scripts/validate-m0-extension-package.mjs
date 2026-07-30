@@ -26,6 +26,10 @@ if (bridge?.matches?.length !== 1 || bridge.matches[0] !== `${previewOrigin}/*`)
 if (bridge.js[0] !== "src/build-profile.js") throw new Error("Build profile must load before the Web Bridge.");
 const scanner = manifest.content_scripts.find((entry) => (entry.js || []).includes("src/full-scan-content.js"));
 if (!scanner || !scanner.js.join("|").includes("full-scan-core.js|src/xhs-scanner.js|src/full-scan-content.js")) throw new Error("M0 scanner scripts are not registered in order.");
+const expectedScannerMatches = new Set(["https://xiaohongshu.com/*", "https://www.xiaohongshu.com/*"]);
+if (scanner.matches.length !== expectedScannerMatches.size || scanner.matches.some((value) => !expectedScannerMatches.has(value))) {
+  throw new Error("M0 packaged content script must match both apex and www Xiaohongshu hosts.");
+}
 
 const profile = read("src/build-profile.js");
 for (const marker of ['id": "m0-preview', 'versionName": "0.3.0-m0-preview', `${previewOrigin}/m0-preview/`, `"${previewOrigin}"`]) {
@@ -33,6 +37,10 @@ for (const marker of ['id": "m0-preview', 'versionName": "0.3.0-m0-preview', `${
 }
 if (profile.includes("xiaohongshu-green.vercel.app")) throw new Error("Production origin leaked into M0 build profile.");
 const sidepanel = read("src/sidepanel.html");
+const sidepanelScript = read("src/sidepanel.js");
+for (const marker of ["establishContentConnection", "chrome.scripting.executeScript", "内容脚本注入失败", "扩展未连接"]) {
+  if (!sidepanelScript.includes(marker)) throw new Error(`M0 Side Panel handshake recovery is missing: ${marker}`);
+}
 if (!sidepanel.includes("M0 全量扫描 Preview 0.3.0") || !sidepanel.includes("导入收藏复活")) throw new Error("M0 Side Panel identity/import action is missing.");
 for (const file of ["src/full-scan-core.js", "src/full-scan-content.js", "src/full-scan-idb.js", "src/background.js", "src/web-bridge.js", "src/sidepanel.js"]) {
   if (!existsSync(resolve(outDir, file))) throw new Error(`M0 package file missing: ${file}`);

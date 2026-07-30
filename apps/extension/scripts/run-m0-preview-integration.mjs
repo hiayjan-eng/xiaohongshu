@@ -28,17 +28,37 @@ try {
 async function testPageIdentity() {
   const fixtureHtml = await readFile(resolve(extensionRoot, "tests", "fixtures", "full-scan-virtual-list.html"), "utf8");
   const coreSource = await readFile(resolve(extensionRoot, "src", "full-scan-core.js"), "utf8");
+  const contentSource = await readFile(resolve(extensionRoot, "src", "full-scan-content.js"), "utf8");
   const context = await browser.newContext();
   const page = await context.newPage();
-  await page.route("https://www.xiaohongshu.com/**", async (route) => {
-    if (route.request().resourceType() === "document") await route.fulfill({ status: 200, contentType: "text/html; charset=utf-8", body: fixtureHtml });
-    else await route.abort();
-  });
+  for (const host of ["xiaohongshu.com", "www.xiaohongshu.com"]) {
+    await page.route(`https://${host}/**`, async (route) => {
+      if (route.request().resourceType() === "document") await route.fulfill({ status: 200, contentType: "text/html; charset=utf-8", body: fixtureHtml });
+      else await route.abort();
+    });
+  }
   const inspect = async () => page.evaluate(() => {
     const value = globalThis.CollectionRevivalFullScanCore.inspectFavoritesPage({ document, location });
     return { ok: value.ok, code: value.code, diagnostics: value.diagnostics };
   });
   try {
+    const apexUrl = "https://xiaohongshu.com/user/profile/m0fixtureprofile?tab=fav&subTab=note&total=20";
+    await page.goto(apexUrl, { waitUntil: "domcontentloaded" });
+    await installContentRuntimeMock(page);
+    await page.addScriptTag({ content: coreSource });
+    await page.addScriptTag({ content: contentSource });
+    const apexHandshake = await sendContentStatus(page);
+    assert.equal(apexHandshake.ok, true);
+    assert.equal(apexHandshake.inspection.ok, true);
+
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await installContentRuntimeMock(page);
+    await page.addScriptTag({ content: coreSource });
+    await page.addScriptTag({ content: contentSource });
+    const apexRefreshHandshake = await sendContentStatus(page);
+    assert.equal(apexRefreshHandshake.ok, true);
+    assert.equal(apexRefreshHandshake.inspection.ok, true);
+
     await page.goto("https://www.xiaohongshu.com/user/profile/m0fixtureprofile?tab=fav&subTab=note&total=20", { waitUntil: "domcontentloaded" });
     await page.addScriptTag({ content: coreSource });
     const confirmed = await inspect();
@@ -64,10 +84,30 @@ async function testPageIdentity() {
       await page.addScriptTag({ content: coreSource });
       assert.equal((await inspect()).code, code);
     }
-    return { strictFavoritesConfirmed: true, ownProfileBlocked: true, ownPostFalseImportCount: 0, blockersSafePaused: 3 };
+    return { strictFavoritesConfirmed: true, noWwwHandshake: true, noWwwRefreshHandshake: true, ownProfileBlocked: true, ownPostFalseImportCount: 0, blockersSafePaused: 3 };
   } finally {
     await context.close();
   }
+}
+
+async function installContentRuntimeMock(page) {
+  await page.evaluate(() => {
+    globalThis.__m0ContentListener = null;
+    globalThis.chrome = {
+      runtime: {
+        getManifest: () => ({ version: "0.3.0", version_name: "0.3.0-m0-preview" }),
+        onMessage: { addListener(listener) { globalThis.__m0ContentListener = listener; } },
+        sendMessage(_message, callback) { callback?.({ ok: true, session: null, recentItems: [] }); }
+      }
+    };
+  });
+}
+
+async function sendContentStatus(page) {
+  return page.evaluate(() => new Promise((resolve, reject) => {
+    if (typeof globalThis.__m0ContentListener !== "function") return reject(new Error("M0 content listener was not installed."));
+    globalThis.__m0ContentListener({ type: "M0_FULL_SCAN_GET_PAGE_STATUS" }, {}, resolve);
+  }));
 }
 
 async function testSidePanel() {
@@ -95,9 +135,22 @@ async function testSidePanel() {
     await page.waitForFunction(() => document.querySelectorAll("#resultItems li").length === 2);
     const messages = await page.evaluate(() => globalThis.__sidePanelMessages);
     assert.ok(messages.some((message) => message.type === "M0_FULL_SCAN_LIST_ITEMS" && message.options.random === true));
+    const injections = await page.evaluate(() => globalThis.__sidePanelInjections);
+    assert.deepEqual(injections, [{
+      tabId: 7,
+      files: ["src/full-scan-core.js", "src/xhs-scanner.js", "src/full-scan-content.js"]
+    }]);
     const manifestHasPopup = await page.evaluate(() => Boolean(chrome.runtime.getManifest().action?.default_popup));
     assert.equal(manifestHasPopup, false, "long task must not depend on a popup");
-    return { opened: true, randomReview: 2, popupIndependent: true };
+
+    const failurePage = await context.newPage();
+    await failurePage.goto("https://extension.test/sidepanel.html?injectionFailure=1", { waitUntil: "domcontentloaded" });
+    await failurePage.waitForFunction(() => document.getElementById("safetyMessage")?.textContent?.includes("内容脚本注入失败"));
+    assert.equal(await failurePage.locator("#pageIdentity").textContent(), "扩展未连接");
+    assert.equal((await failurePage.locator("#safetyMessage").textContent()).includes("请确认当前位于"), false);
+    await failurePage.close();
+
+    return { opened: true, apexHost: true, safeReinjection: true, explicitInjectionFailure: true, randomReview: 2, popupIndependent: true };
   } finally {
     await context.close();
   }
@@ -212,6 +265,8 @@ function installPreviewBridgeMock(items) {
 
 function installSidePanelChromeMock() {
   globalThis.__sidePanelMessages = [];
+  globalThis.__sidePanelInjections = [];
+  let contentConnected = false;
   const session = { sessionId: "scan_sidepanel", status: "completed", discoveredCount: 20, validCount: 20, existingCount: 0, invalidCount: 0, missingLinkCount: 0, reviewCount: 0, resumeCount: 1, lastScrollTop: 100, lastScrollHeight: 100, stableNoGrowthCycles: 6, startedAt: "2026-07-30T00:00:00.000Z", completedAt: "2026-07-30T00:01:00.000Z", selectorVersion: "m0-real-favorites-v3", extensionVersion: "0.3.0-m0-preview" };
   const inspection = { ok: true, identity: { profileIdHash: "abcd1234", favoritesPageIdentity: "fixture-page", selectorVersion: "m0-real-favorites-v3" }, diagnostics: { selectorVersion: "m0-real-favorites-v3", ownPostsPanelCount: 1, likesPanelCount: 1 } };
   const items = [0, 1].map((index) => ({ sourceId: `sidepanel${index}`, title: `抽查 ${index}`, author: "测试作者", canonicalSourceUrl: `https://www.xiaohongshu.com/explore/sidepanel${index}` }));
@@ -230,14 +285,28 @@ function installSidePanelChromeMock() {
       }
     },
     tabs: {
-      query: async () => [{ id: 7, url: "https://www.xiaohongshu.com/user/profile/test?tab=fav" }],
+      query: async () => [{ id: 7, url: "https://xiaohongshu.com/user/profile/test?tab=fav&subTab=note" }],
       sendMessage(_tabId, message, callback) {
         globalThis.__sidePanelMessages.push(message);
+        if (!contentConnected) {
+          chrome.runtime.lastError = { message: "Could not establish connection. Receiving end does not exist." };
+          callback(undefined);
+          chrome.runtime.lastError = null;
+          return;
+        }
         if (message.type === "M0_FULL_SCAN_GET_PAGE_STATUS") callback({ ok: true, inspection });
         else if (message.type === "M0_FULL_SCAN_GET_RUNTIME_DIAGNOSTICS") callback({ ok: true, diagnostics: { maxBufferedItems: 25, recentItemCount: 12, scrollMode: "element" } });
         else callback({ ok: true, session });
       },
       create: async () => ({ id: 8 })
+    },
+    scripting: {
+      async executeScript(details) {
+        globalThis.__sidePanelInjections.push({ tabId: details.target.tabId, files: [...details.files] });
+        if (location.search.includes("injectionFailure=1")) throw new Error("Cannot access contents of the page");
+        contentConnected = true;
+        return [];
+      }
     },
     downloads: { download: async () => 1 }
   };

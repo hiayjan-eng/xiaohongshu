@@ -31,6 +31,14 @@ const manifest = JSON.parse(read("apps/extension/manifest.json"));
 if (manifest.version !== "0.2.3") throw new Error("Production source manifest version changed.");
 if (!manifest.host_permissions.includes("https://xiaohongshu-green.vercel.app/*")) throw new Error("Production source origin changed.");
 if (JSON.stringify(manifest).includes("0.3.0-m0-preview")) throw new Error("M0 version leaked into the Production source manifest.");
+const expectedXhsMatches = new Set(["https://xiaohongshu.com/*", "https://www.xiaohongshu.com/*"]);
+const sourceScannerEntry = manifest.content_scripts.find((entry) => (entry.js || []).includes("src/full-scan-content.js"));
+if (!sourceScannerEntry || sourceScannerEntry.matches.length !== expectedXhsMatches.size || sourceScannerEntry.matches.some((value) => !expectedXhsMatches.has(value))) {
+  throw new Error("M0 content script must match both apex and www Xiaohongshu hosts.");
+}
+if (![...expectedXhsMatches].every((value) => manifest.host_permissions.includes(value))) {
+  throw new Error("M0 host permissions must cover both apex and www Xiaohongshu hosts.");
+}
 
 const build = read("apps/extension/scripts/build-extension.mjs");
 for (const marker of [
@@ -53,7 +61,11 @@ for (const marker of [
   "M0_PREVIEW_PREPARE_IMPORT",
   "userCorrectedSourceUrl",
   "canonicalSourceUrl",
-  "rawSourceUrl"
+  "rawSourceUrl",
+  "establishContentConnection",
+  "chrome.scripting.executeScript",
+  "内容脚本注入失败",
+  "扩展未连接"
 ]) assertIncludes(sidepanel, marker, "Side Panel");
 
 const core = read("apps/extension/src/full-scan-core.js");

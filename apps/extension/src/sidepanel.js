@@ -10,6 +10,12 @@
   ];
   const elements = Object.fromEntries(ids.map((id) => [id, document.getElementById(id)]));
   const BUILD_PROFILE = globalThis.__COLLECTION_REVIVAL_BUILD_PROFILE__ || {};
+  const XHS_HOSTS = new Set(["xiaohongshu.com", "www.xiaohongshu.com"]);
+  const FULL_SCAN_CONTENT_FILES = [
+    "src/full-scan-core.js",
+    "src/xhs-scanner.js",
+    "src/full-scan-content.js"
+  ];
 
   let activeTabId = null;
   let inspection = null;
@@ -46,9 +52,12 @@
 
   async function initialize() {
     const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    activeTabId = tabs[0]?.id || null;
-    if (!activeTabId) return showBoundaryFailure("未找到当前活动标签页。");
-    const pageResponse = await sendToTab({ type: "M0_FULL_SCAN_GET_PAGE_STATUS" });
+    const activeTab = tabs[0] || null;
+    activeTabId = activeTab?.id || null;
+    if (!activeTabId) return showConnectionFailure("未找到当前活动标签页，无法建立内容脚本握手。");
+    const connection = await establishContentConnection(activeTab);
+    if (!connection.ok) return showConnectionFailure(connection.error);
+    const pageResponse = connection.response;
     inspection = pageResponse?.inspection || null;
     if (!pageResponse?.ok || !inspection?.ok) {
       return showBoundaryFailure(inspection?.reason || pageResponse?.error || "无法确认收藏页。");
@@ -256,6 +265,63 @@
     render();
   }
 
+  function showConnectionFailure(message) {
+    inspection = { ok: false };
+    elements.pageIdentity.textContent = "扩展未连接";
+    elements.profileIdentity.textContent = "握手未建立";
+    elements.selectorVersion.textContent = "—";
+    elements.safetyMessage.textContent = message;
+    render();
+  }
+
+  async function establishContentConnection(tab) {
+    const boundary = inspectSupportedTab(tab?.url);
+    if (!boundary.ok) return boundary;
+    const initial = await sendToTab({ type: "M0_FULL_SCAN_GET_PAGE_STATUS" });
+    if (!initial?.error) return { ok: true, response: initial };
+    if (!isMissingContentReceiver(initial.error)) {
+      return { ok: false, error: `内容脚本握手失败：${initial.error}` };
+    }
+    if (!chrome.scripting?.executeScript) {
+      return { ok: false, error: "内容脚本尚未连接，且当前浏览器不支持安全补注入。请刷新小红书标签页后重新打开 Side Panel。" };
+    }
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        files: FULL_SCAN_CONTENT_FILES
+      });
+    } catch (error) {
+      return {
+        ok: false,
+        error: `内容脚本注入失败：${error instanceof Error ? error.message : String(error)}。请确认扩展已获准访问 xiaohongshu.com，然后刷新该标签页。`
+      };
+    }
+    const retried = await sendToTab({ type: "M0_FULL_SCAN_GET_PAGE_STATUS" });
+    if (retried?.error) {
+      return {
+        ok: false,
+        error: `内容脚本已补注入，但握手仍失败：${retried.error}。请刷新该标签页后重新打开 Side Panel。`
+      };
+    }
+    return { ok: true, response: retried };
+  }
+
+  function inspectSupportedTab(value) {
+    try {
+      const url = new URL(value);
+      if (url.protocol !== "https:" || !XHS_HOSTS.has(url.hostname.toLowerCase())) {
+        return { ok: false, error: "当前活动标签不是受支持的小红书 HTTPS 页面，未执行内容脚本注入。" };
+      }
+      return { ok: true };
+    } catch {
+      return { ok: false, error: "无法读取当前活动标签地址，未执行内容脚本注入。" };
+    }
+  }
+
+  function isMissingContentReceiver(message) {
+    return /receiving end does not exist|could not establish connection|message port closed/i.test(String(message || ""));
+  }
+
   function resolveOriginalUrl(item) {
     for (const value of [item?.userCorrectedSourceUrl, item?.canonicalSourceUrl, item?.rawSourceUrl]) {
       try {
@@ -296,7 +362,12 @@
   }
 
   function setControlsBusy(busy) { for (const button of [elements.startScan, elements.pauseScan, elements.resumeScan, elements.stopScan]) button.disabled = busy; }
-  function sendToTab(message) { return new Promise((resolve) => chrome.tabs.sendMessage(activeTabId, message, (response) => resolve(chrome.runtime.lastError ? { ok: false, error: chrome.runtime.lastError.message } : response))); }
+  function sendToTab(message) {
+    return new Promise((resolve) => chrome.tabs.sendMessage(activeTabId, message, (response) => {
+      if (chrome.runtime.lastError) return resolve({ ok: false, error: chrome.runtime.lastError.message });
+      resolve(response || { ok: false, error: "内容脚本没有返回响应。" });
+    }));
+  }
   function sendRuntimeMessage(message) { return new Promise((resolve) => chrome.runtime.sendMessage(message, (response) => resolve(chrome.runtime.lastError ? { ok: false, error: chrome.runtime.lastError.message } : response))); }
   function hashForDisplay(value) { let hash = 2166136261; for (const character of String(value || "")) { hash ^= character.charCodeAt(0); hash = Math.imul(hash, 16777619); } return (hash >>> 0).toString(16).padStart(8, "0"); }
   function formatNumber(value) { return new Intl.NumberFormat("zh-CN").format(Number(value) || 0); }
