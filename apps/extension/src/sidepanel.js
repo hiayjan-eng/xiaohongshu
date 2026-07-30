@@ -1,6 +1,6 @@
 (() => {
   const ids = [
-    "statusBadge", "pageIdentity", "profileIdentity", "selectorVersion", "safetyMessage",
+    "statusBadge", "pageIdentity", "profileIdentity", "currentUrlProfileId", "selfProfileLinkStatus", "profileIdMatch", "selectorVersion", "safetyMessage",
     "startScan", "pauseScan", "resumeScan", "stopScan", "restartScan", "progressMessage",
     "elapsedTime", "progressFill", "scrollProgress", "discoveredCount", "validCount",
     "existingCount", "missingLinkCount", "reviewCount", "resumeCount", "searchForm",
@@ -59,6 +59,7 @@
     if (!connection.ok) return showConnectionFailure(connection.error);
     const pageResponse = connection.response;
     inspection = pageResponse?.inspection || null;
+    renderProfileDiagnostics(inspection?.diagnostics);
     if (!pageResponse?.ok || !inspection?.ok) {
       return showBoundaryFailure(inspection?.reason || pageResponse?.error || "无法确认收藏页。");
     }
@@ -258,7 +259,8 @@
   }
 
   function showBoundaryFailure(message) {
-    inspection = { ok: false };
+    inspection = inspection?.diagnostics ? { ok: false, diagnostics: inspection.diagnostics } : { ok: false };
+    renderProfileDiagnostics(inspection.diagnostics);
     elements.pageIdentity.textContent = "未确认收藏页";
     elements.profileIdentity.textContent = "未读取";
     elements.safetyMessage.textContent = `${message} 为避免导入本人发布内容，本次未开始扫描。请确认当前位于“我 → 收藏 → 笔记”。`;
@@ -267,11 +269,19 @@
 
   function showConnectionFailure(message) {
     inspection = { ok: false };
+    renderProfileDiagnostics(null);
     elements.pageIdentity.textContent = "扩展未连接";
     elements.profileIdentity.textContent = "握手未建立";
     elements.selectorVersion.textContent = "—";
     elements.safetyMessage.textContent = message;
     render();
+  }
+
+  function renderProfileDiagnostics(value) {
+    const hash = String(value?.currentUrlProfileIdHash || "");
+    elements.currentUrlProfileId.textContent = hash ? `已脱敏 •${hash.slice(-4)}` : "未读取";
+    elements.selfProfileLinkStatus.textContent = value?.selfProfileLinkFound ? "找到" : "未找到";
+    elements.profileIdMatch.textContent = value?.profileIdMatch === true ? "是" : "否";
   }
 
   async function establishContentConnection(tab) {

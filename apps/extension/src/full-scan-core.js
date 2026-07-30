@@ -334,37 +334,44 @@
     const pathname = String(location?.pathname || "");
     const profileMatch = pathname.match(/^\/user\/profile\/([a-zA-Z0-9_-]{6,80})\/?$/i);
     if (!profileMatch) return rejected("NOT_PROFILE_PAGE", "当前页面不是本人 profile 页面。");
-    if (!confirmOwnProfile(document)) {
-      return rejected("OWN_PROFILE_UNCONFIRMED", "无法确认这是本人主页。为避免导入本人发布内容，本次未开始扫描。");
+    const profileId = profileMatch[1];
+    const ownProfile = confirmOwnProfile(document, profileId, location);
+    const profileDiagnostics = ownProfile.diagnostics;
+    const rejectProfilePage = (code, reason) => rejected(code, reason, profileDiagnostics);
+    if (!ownProfile.confirmed) {
+      const reason = profileDiagnostics.selfProfileLinkFound
+        ? "已找到 self-profile link，但链接中的 profileId 与当前 URL 不一致。为避免扫描其他用户主页，本次未开始扫描。"
+        : "未找到可可靠校验 profileId 的 self-profile link。为避免扫描其他用户主页，本次未开始扫描。";
+      return rejectProfilePage("OWN_PROFILE_UNCONFIRMED", reason);
     }
 
     const params = new URLSearchParams(String(location?.search || ""));
     const tab = String(params.get("tab") || "").toLowerCase();
     if (!["fav", "favorite", "favorites", "collect", "collection"].includes(tab)) {
-      return rejected("FAVORITES_ROUTE_UNCONFIRMED", "URL 未明确表示收藏页。为避免导入本人发布内容，本次未开始扫描。");
+      return rejectProfilePage("FAVORITES_ROUTE_UNCONFIRMED", "URL 未明确表示收藏页。为避免导入本人发布内容，本次未开始扫描。");
     }
 
     const activeFavoriteTab = findVisibleActiveTab(document, "收藏", "favorites");
-    if (!activeFavoriteTab) return rejected("FAVORITES_TAB_UNCONFIRMED", "未确认可见激活主 tab 为“收藏”。");
+    if (!activeFavoriteTab) return rejectProfilePage("FAVORITES_TAB_UNCONFIRMED", "未确认可见激活主 tab 为“收藏”。");
     const activeNotesTab = findVisibleActiveTab(document, "笔记", "notes");
-    if (!activeNotesTab) return rejected("NOTES_TAB_UNCONFIRMED", "未确认可见激活子 tab 为“笔记”。");
+    if (!activeNotesTab) return rejectProfilePage("NOTES_TAB_UNCONFIRMED", "未确认可见激活子 tab 为“笔记”。");
 
     const root = findFavoritesRoot(document, activeFavoriteTab, activeNotesTab);
     if (!root || root === document.body || !isVisible(root)) {
-      return rejected("FAVORITES_PANEL_NOT_FOUND", "未能严格定位可见收藏面板；禁止退回 document.body 扫描。");
+      return rejectProfilePage("FAVORITES_PANEL_NOT_FOUND", "未能严格定位可见收藏面板；禁止退回 document.body 扫描。");
     }
     const ownPostsPanels = findOwnPostsPanels(document);
     const likesPanels = findLikesPanels(document);
     if ([...ownPostsPanels, ...likesPanels].some((panel) => root === panel || root.contains(panel))) {
-      return rejected("EXCLUDED_PANEL_INSIDE_ROOT", "本人发布或点赞面板位于扫描 root 内，本次未开始扫描。");
+      return rejectProfilePage("EXCLUDED_PANEL_INSIDE_ROOT", "本人发布或点赞面板位于扫描 root 内，本次未开始扫描。");
     }
 
     const scrollContainer = findScrollContainer(document, root);
-    if (!scrollContainer) return rejected("SCROLL_CONTAINER_UNCONFIRMED", "未能动态确认收藏面板的真实滚动容器。");
+    if (!scrollContainer) return rejectProfilePage("SCROLL_CONTAINER_UNCONFIRMED", "未能动态确认收藏面板的真实滚动容器。");
     const blocker = findBlockingState(document);
-    if (blocker) return rejected(blocker.code, blocker.reason);
+    if (blocker) return rejectProfilePage(blocker.code, blocker.reason);
 
-    const profileIdHash = stableHash(profileMatch[1]);
+    const profileIdHash = stableHash(profileId);
     return {
       ok: true,
       root,
@@ -381,18 +388,96 @@
         scrollMode: scrollContainer === document.scrollingElement ? "window" : "element",
         ownPostsPanelCount: ownPostsPanels.length,
         likesPanelCount: likesPanels.length,
+        ...profileDiagnostics,
         selectorVersion: SELECTOR_VERSION
       }
     };
   }
 
-  function confirmOwnProfile(document) {
+  function confirmOwnProfile(document, currentProfileId, location) {
+    const currentUrlProfileIdHash = stableHash(currentProfileId);
+    const editProfileSignalFound = findEditProfileSignal(document);
+    const reliableLinks = Array.from(document.querySelectorAll("a[href]"))
+      .filter((element) => isVisible(element))
+      .map((element) => ({
+        element,
+        profileId: extractProfileIdFromLink(element, location),
+        signal: classifySelfProfileLink(element)
+      }))
+      .filter((candidate) => candidate.profileId && candidate.signal);
+    const matchedLink = reliableLinks.find((candidate) => candidate.profileId === currentProfileId) || null;
+    return {
+      confirmed: Boolean(matchedLink),
+      diagnostics: {
+        currentUrlProfileIdHash,
+        selfProfileLinkFound: reliableLinks.length > 0,
+        profileIdMatch: Boolean(matchedLink),
+        selfProfileSignal: matchedLink?.signal || reliableLinks[0]?.signal || "none",
+        editProfileSignalFound
+      }
+    };
+  }
+
+  function findEditProfileSignal(document) {
     const explicit = document.querySelector('[data-revival-own-profile="true"], [data-is-self="true"], [data-testid="profile-edit-button"]');
     if (explicit && isVisible(explicit)) return true;
     return Array.from(document.querySelectorAll("button, a, [role='button']")).some((element) => {
       const text = normalizeText(element.textContent);
       return isVisible(element) && /^(编辑资料|编辑个人资料|Edit profile)$/i.test(text);
     });
+  }
+
+  function extractProfileIdFromLink(element, location) {
+    try {
+      const href = element.getAttribute?.("href");
+      if (!href) return "";
+      const base = String(location?.href || `${location?.protocol || "https:"}//${location?.hostname || "www.xiaohongshu.com"}/`);
+      const url = new URL(href, base);
+      if (!["xiaohongshu.com", "www.xiaohongshu.com"].includes(url.hostname.toLowerCase())) return "";
+      return url.pathname.match(/^\/user\/profile\/([a-zA-Z0-9_-]{6,80})(?:\/|$)/i)?.[1] || "";
+    } catch {
+      return "";
+    }
+  }
+
+  function classifySelfProfileLink(element) {
+    if (element.matches?.([
+      "[data-revival-self-profile-link]",
+      "[data-self-profile-link]",
+      "[data-is-self-profile='true']",
+      "[data-testid='self-profile-link']"
+    ].join(","))) return "explicit-self-profile";
+
+    const navigation = element.closest?.([
+      "nav",
+      "[role='navigation']",
+      "aside",
+      "[class*='side-bar']",
+      "[class*='sidebar']",
+      "[class*='navigation']"
+    ].join(","));
+    if (!navigation || !isVisible(navigation)) return "";
+
+    const text = normalizeText(element.textContent);
+    const accessibleName = normalizeText([
+      element.getAttribute?.("aria-label"),
+      element.getAttribute?.("title")
+    ].filter(Boolean).join(" "));
+    if (/^(我|我的主页|个人主页|Me|My profile)$/i.test(text) || /^(我的主页|当前账号|个人主页|Me|My profile)$/i.test(accessibleName)) {
+      return "navigation-self-profile";
+    }
+
+    const avatar = element.querySelector?.("img, [data-avatar], [class*='avatar']");
+    const avatarName = normalizeText([
+      accessibleName,
+      avatar?.getAttribute?.("alt"),
+      avatar?.getAttribute?.("aria-label"),
+      avatar?.getAttribute?.("title"),
+      avatar?.className
+    ].filter(Boolean).join(" "));
+    return avatar && /(我的头像|当前账号|头像|avatar|my profile)/i.test(avatarName)
+      ? "navigation-account-avatar"
+      : "";
   }
 
   function findVisibleActiveTab(document, expectedText, marker) {
@@ -666,8 +751,8 @@
     return !rect || rect.width > 0 || rect.height > 0;
   }
 
-  function rejected(code, reason) {
-    return { ok: false, code, reason };
+  function rejected(code, reason, diagnostics) {
+    return { ok: false, code, reason, ...(diagnostics ? { diagnostics } : {}) };
   }
 
   function normalizeText(value) {

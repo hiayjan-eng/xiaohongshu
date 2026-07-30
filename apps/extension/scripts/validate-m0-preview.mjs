@@ -65,7 +65,10 @@ for (const marker of [
   "establishContentConnection",
   "chrome.scripting.executeScript",
   "内容脚本注入失败",
-  "扩展未连接"
+  "扩展未连接",
+  "currentUrlProfileId",
+  "selfProfileLinkStatus",
+  "profileIdMatch"
 ]) assertIncludes(sidepanel, marker, "Side Panel");
 
 const core = read("apps/extension/src/full-scan-core.js");
@@ -78,7 +81,14 @@ for (const marker of [
   "document.scrollingElement",
   "REQUIRED_STABLE_CYCLES = 5",
   "waitForActivityToSettle",
-  "M0_FULL_SCAN_VERIFY_SESSION"
+  "M0_FULL_SCAN_VERIFY_SESSION",
+  "confirmOwnProfile(document, profileId, location)",
+  "currentUrlProfileIdHash",
+  "selfProfileLinkFound",
+  "profileIdMatch",
+  "navigation-self-profile",
+  "navigation-account-avatar",
+  "editProfileSignalFound"
 ]) assertIncludes(core, marker, "strict page/full scan core");
 if (core.includes("root = document.body") || core.includes("element: document.body")) throw new Error("document.body fallback is forbidden.");
 

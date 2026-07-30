@@ -263,7 +263,7 @@ async function verifyFiveThousandFixtureCapability(parentContext, html, paths) {
     }
   });
   await targetPage.goto(
-    "https://www.xiaohongshu.com/user/profile/m0fixture5000?tab=fav&subTab=note&total=5000",
+    "https://www.xiaohongshu.com/user/profile/m0fixtureprofile?tab=fav&subTab=note&total=5000",
     { waitUntil: "domcontentloaded" }
   );
   for (const path of paths) await targetPage.addScriptTag({ path });

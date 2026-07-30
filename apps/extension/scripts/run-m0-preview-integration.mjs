@@ -65,26 +65,57 @@ async function testPageIdentity() {
     assert.equal(confirmed.ok, true);
     assert.equal(confirmed.diagnostics.selectorVersion, "m0-real-favorites-v3");
     assert.equal(confirmed.diagnostics.ownPostsPanelCount, 1);
+    assert.equal(confirmed.diagnostics.editProfileSignalFound, false, "matching self link must pass without an edit-profile button");
+    assert.equal(confirmed.diagnostics.selfProfileLinkFound, true);
+    assert.equal(confirmed.diagnostics.profileIdMatch, true);
+    assert.equal(confirmed.diagnostics.currentUrlProfileIdHash.length, 8);
 
     await page.evaluate(() => history.replaceState(null, "", "/user/profile/m0fixtureprofile?tab=note"));
     assert.equal((await inspect()).code, "FAVORITES_ROUTE_UNCONFIRMED");
-    await page.evaluate(() => history.replaceState(null, "", "/user/profile/m0fixtureprofile?tab=fav"));
-    await page.locator("[data-revival-own-profile]").evaluate((element) => element.remove());
-    assert.equal((await inspect()).code, "OWN_PROFILE_UNCONFIRMED");
+    await page.evaluate(() => {
+      history.replaceState(null, "", "/user/profile/m0fixtureprofile?tab=fav&subTab=note");
+      document.querySelector('nav[aria-label="侧边导航"] a').setAttribute("href", "/user/profile/differentprofile");
+    });
+    const mismatchedSelfLink = await inspect();
+    assert.equal(mismatchedSelfLink.code, "OWN_PROFILE_UNCONFIRMED");
+    assert.equal(mismatchedSelfLink.diagnostics.selfProfileLinkFound, true);
+    assert.equal(mismatchedSelfLink.diagnostics.profileIdMatch, false);
+
+    await page.evaluate(() => {
+      document.querySelector('nav[aria-label="侧边导航"]').remove();
+      const edit = document.createElement("button");
+      edit.dataset.testid = "profile-edit-button";
+      edit.textContent = "编辑资料";
+      document.body.prepend(edit);
+    });
+    const editOnly = await inspect();
+    assert.equal(editOnly.code, "OWN_PROFILE_UNCONFIRMED");
+    assert.equal(editOnly.diagnostics.selfProfileLinkFound, false);
+    assert.equal(editOnly.diagnostics.profileIdMatch, false);
+    assert.equal(editOnly.diagnostics.editProfileSignalFound, true);
+
+    await page.goto("https://www.xiaohongshu.com/user/profile/otherprofile?tab=fav&subTab=note&total=20", { waitUntil: "domcontentloaded" });
+    await page.addScriptTag({ content: coreSource });
+    const otherProfile = await inspect();
+    assert.equal(otherProfile.code, "OWN_PROFILE_UNCONFIRMED");
+    assert.equal(otherProfile.diagnostics.profileIdMatch, false);
+
+    await page.goto("https://www.xiaohongshu.com/user/profile/m0fixtureprofile?tab=fav&subTab=note&total=20", { waitUntil: "domcontentloaded" });
+    await page.addScriptTag({ content: coreSource });
+    await page.evaluate(() => document.querySelector('[data-revival-tab="favorites"]').setAttribute("aria-selected", "false"));
+    assert.equal((await inspect()).code, "FAVORITES_TAB_UNCONFIRMED");
 
     await page.reload({ waitUntil: "domcontentloaded" });
     await page.addScriptTag({ content: coreSource });
-    await page.evaluate(() => {
-      document.querySelector('[data-revival-tab="favorites"]').setAttribute("aria-selected", "false");
-    });
-    assert.equal((await inspect()).code, "FAVORITES_TAB_UNCONFIRMED");
+    await page.evaluate(() => document.querySelector('[data-revival-subtab="notes"]').setAttribute("aria-selected", "false"));
+    assert.equal((await inspect()).code, "NOTES_TAB_UNCONFIRMED");
 
     for (const [mode, code] of [["risk", "RISK_CONTROL"], ["login", "LOGIN_EXPIRED"], ["network", "NETWORK_ERROR"]]) {
       await page.goto(`https://www.xiaohongshu.com/user/profile/m0fixtureprofile?tab=fav&subTab=note&total=20&mode=${mode}`, { waitUntil: "domcontentloaded" });
       await page.addScriptTag({ content: coreSource });
       assert.equal((await inspect()).code, code);
     }
-    return { strictFavoritesConfirmed: true, noWwwHandshake: true, noWwwRefreshHandshake: true, ownProfileBlocked: true, ownPostFalseImportCount: 0, blockersSafePaused: 3 };
+    return { strictFavoritesConfirmed: true, selfLinkWithoutEditButton: true, mismatchedSelfLinkBlocked: true, editProfileOnlyBlocked: true, otherProfileBlocked: true, inactiveFavoritesBlocked: true, inactiveNotesBlocked: true, noWwwHandshake: true, noWwwRefreshHandshake: true, ownPostFalseImportCount: 0, blockersSafePaused: 3 };
   } finally {
     await context.close();
   }
@@ -130,6 +161,9 @@ async function testSidePanel() {
     await page.goto("https://extension.test/sidepanel.html", { waitUntil: "domcontentloaded" });
     await page.waitForFunction(() => document.getElementById("pageIdentity")?.textContent?.includes("收藏"));
     assert.equal(await page.locator(".eyebrow").textContent(), "M0 全量扫描 Preview 0.3.0");
+    assert.equal(await page.locator("#currentUrlProfileId").textContent(), "已脱敏 •1234");
+    assert.equal(await page.locator("#selfProfileLinkStatus").textContent(), "找到");
+    assert.equal(await page.locator("#profileIdMatch").textContent(), "是");
     assert.equal(await page.locator("#startScan").isEnabled(), true);
     await page.locator("#randomButton").click();
     await page.waitForFunction(() => document.querySelectorAll("#resultItems li").length === 2);
@@ -268,7 +302,7 @@ function installSidePanelChromeMock() {
   globalThis.__sidePanelInjections = [];
   let contentConnected = false;
   const session = { sessionId: "scan_sidepanel", status: "completed", discoveredCount: 20, validCount: 20, existingCount: 0, invalidCount: 0, missingLinkCount: 0, reviewCount: 0, resumeCount: 1, lastScrollTop: 100, lastScrollHeight: 100, stableNoGrowthCycles: 6, startedAt: "2026-07-30T00:00:00.000Z", completedAt: "2026-07-30T00:01:00.000Z", selectorVersion: "m0-real-favorites-v3", extensionVersion: "0.3.0-m0-preview" };
-  const inspection = { ok: true, identity: { profileIdHash: "abcd1234", favoritesPageIdentity: "fixture-page", selectorVersion: "m0-real-favorites-v3" }, diagnostics: { selectorVersion: "m0-real-favorites-v3", ownPostsPanelCount: 1, likesPanelCount: 1 } };
+  const inspection = { ok: true, identity: { profileIdHash: "abcd1234", favoritesPageIdentity: "fixture-page", selectorVersion: "m0-real-favorites-v3" }, diagnostics: { selectorVersion: "m0-real-favorites-v3", currentUrlProfileIdHash: "abcd1234", selfProfileLinkFound: true, profileIdMatch: true, editProfileSignalFound: false, ownPostsPanelCount: 1, likesPanelCount: 1 } };
   const items = [0, 1].map((index) => ({ sourceId: `sidepanel${index}`, title: `抽查 ${index}`, author: "测试作者", canonicalSourceUrl: `https://www.xiaohongshu.com/explore/sidepanel${index}` }));
   const runtimeListeners = [];
   globalThis.chrome = {
