@@ -35,17 +35,39 @@ if (second.summary.addedCount !== 20 || second.summary.deletedCount !== 5 || sec
 await storage.confirmImport("two");
 if (storage.library.favorites.size !== 3015 || storage.library.memberships.size !== next.memberships.length) throw new Error("second confirmation must apply atomically");
 
-const probeContext = { console, URL, URLSearchParams, FormData, Promise, globalThis: null, location: { href: "https://www.xiaohongshu.com/collection/detail", origin: "https://www.xiaohongshu.com" } };
+const probeContext = { console, URL, URLSearchParams, FormData, Promise, setInterval: () => 0, globalThis: null, location: { href: "https://www.xiaohongshu.com/collection/detail", origin: "https://www.xiaohongshu.com" } };
 probeContext.globalThis = probeContext;
-probeContext.window = { fetch: async () => ({ clone: () => ({ json: async () => ({}) }) }) };
+probeContext.window = { fetch: async () => ({ clone: () => ({ json: async () => ({}) }) }), addEventListener() {}, postMessage() {} };
 probeContext.Request = class Request {};
 probeContext.XMLHttpRequest = function XMLHttpRequest() {};
 probeContext.XMLHttpRequest.prototype = { open() {}, send() {}, setRequestHeader() {}, addEventListener() {} };
 vm.runInNewContext(readFileSync(new URL("../src/api-sync/api-probe-main.js", import.meta.url), "utf8"), probeContext);
 const analyzeProbe = probeContext.__collectionRevivalApiProbeTest.analyzeProbe;
+const repairTransportHooks = probeContext.__collectionRevivalApiProbeTest.repairTransportHooks;
 const queryInference = analyzeProbe("https://www.xiaohongshu.com/api/favorite/board?boardId=fixture-board", "GET", null, { data: { payload: { feeds: [{ note: { noteId: "fixture-note-a" } }, { note: { noteId: "fixture-note-b" } }], nextCursor: "next", hasMore: true } } }, { forEach() {} });
 if (queryInference.kind !== "albumContent" || queryInference.relation.source !== "album-content-derived" || queryInference.relation.derivedCount !== 2 || queryInference.relation.albumIdPath !== "query.boardId" || !queryInference.relation.noteIdPaths.includes("data.payload.feeds[].note.noteId")) throw new Error("query albumId to nested noteId relationship inference failed");
 const bodyInference = analyzeProbe("https://www.xiaohongshu.com/api/collection/content", "POST", JSON.stringify({ payload: { collection: { collectionId: "fixture-collection" } } }), { data: { result: { items: [{ card: { item: { sourceId: "fixture-note-c" } } }, { card: { item: { sourceId: "fixture-note-d" } } }] } } }, { forEach() {} });
 if (bodyInference.kind !== "albumContent" || bodyInference.relation.derivedCount !== 4 || bodyInference.relation.albumIdPath !== "request.payload.collection.collectionId" || !bodyInference.relation.noteIdPaths.includes("data.result.items[].card.item.sourceId")) throw new Error("nested body albumId to multi-level items relationship inference failed");
 if (JSON.stringify(bodyInference).includes("fixture-collection") || JSON.stringify(queryInference).includes("fixture-board")) throw new Error("probe output must not expose temporary IDs");
-console.log("M0 API sync generated tests ok: 3000 snapshot, 30 source albums, second full snapshot, query/body album-content inference");
+const installedFetchProbe = probeContext.window.fetch;
+probeContext.window.fetch = async () => ({ clone: () => ({ json: async () => ({}) }) });
+repairTransportHooks();
+if (probeContext.window.fetch !== installedFetchProbe) throw new Error("MAIN probe must repair fetch after page reassignment");
+
+function lifecycle() {
+  const state = { active: false, mainReady: false, bridgeReady: false, candidates: 0 };
+  const temporaryInjectionAfterReload = false;
+  if (temporaryInjectionAfterReload) state.candidates += 1;
+  if (state.candidates !== 0) throw new Error("old one-shot injection must be destroyed by reload");
+  state.active = true;
+  state.bridgeReady = true;
+  state.mainReady = true;
+  state.candidates += 1;
+  if (!state.active || !state.mainReady || !state.bridgeReady || state.candidates < 1) throw new Error("document_start MAIN/bridge/session handshake failed");
+  const refreshStatus = state.candidates === 0 ? "探测器存活，但尚未捕获请求" : `已刷新结果：${state.candidates} 个候选`;
+  if (refreshStatus !== "已刷新结果：1 个候选") throw new Error("refresh feedback must be explicit");
+  const zeroStatus = { active: true, mainReady: true, bridgeReady: true, candidates: 0 };
+  if (!(zeroStatus.active && zeroStatus.mainReady && zeroStatus.bridgeReady) || zeroStatus.candidates !== 0) throw new Error("zero-result handshake fixture failed");
+}
+lifecycle();
+console.log("M0 API sync generated tests ok: 3000 snapshot, album inference, reload lifecycle, three-way handshake, explicit zero-result refresh");

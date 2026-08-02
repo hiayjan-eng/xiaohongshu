@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="zh-CN"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>收藏复活 API 同步</title><link rel="stylesheet" href="./sidepanel.css" /></head>
 <body><main class="panel-shell">
-  <header class="panel-header"><div><p class="eyebrow">0.4.1-m0-api-spike</p><h1>收藏 API 同步验证</h1></div><span id="statusBadge" class="status-badge">待检测</span></header>
+  <header class="panel-header"><div><p class="eyebrow">0.4.2-m0-api-spike</p><h1>收藏 API 同步验证</h1></div><span id="statusBadge" class="status-badge">待检测</span></header>
   <section class="identity-card"><p id="statusMessage">打开已登录的小红书收藏页后，点击检测。探测仅保存脱敏接口结构，不保存 Cookie、token、认证头、账号或正文。</p><button id="detectApi" class="primary-button" type="button">检测收藏接口</button><button id="refreshProbe" class="text-button" type="button">刷新检测结果</button></section>
   <section class="progress-card"><div class="progress-heading"><span id="progressMessage">尚未开始读取</span><span id="elapsedTime">00:00</span></div><div class="progress-track"><span id="progressFill"></span></div><p id="probeSummary">等待页面自身 fetch / XHR；如无结果，请刷新小红书收藏页。</p></section>
   <section class="stats-grid"><div><span>收藏</span><strong id="favoriteCount">0</strong></div><div><span>原有专辑</span><strong id="albumCount">0</strong></div><div><span>归属关系</span><strong id="membershipCount">0</strong></div><div><span>页数</span><strong id="pageCount">0</strong></div><div><span>状态</span><strong id="runStatus">—</strong></div><div><span>接口</span><strong id="endpointCount">0</strong></div></section>

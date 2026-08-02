@@ -32,23 +32,41 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 const apiProbeRecords = [];
+const apiProbeBridgeTabs = new Set();
+const apiProbeMainTabs = new Set();
+let apiProbeSession = null;
 
 async function handleApiSyncMessage(message, sender) {
   if (message.type === "M0_API_PROBE_START") {
     if (!sender.tab?.id) throw new Error("Open the Xiaohongshu favorites page before detecting APIs.");
-    await chrome.scripting.executeScript({ target: { tabId: sender.tab.id }, world: "MAIN", files: ["src/api-sync/api-probe-main.js"] });
-    return { ok: true, probes: summarizeProbes() };
+    apiProbeRecords.length = 0;
+    apiProbeBridgeTabs.delete(sender.tab.id);
+    apiProbeMainTabs.delete(sender.tab.id);
+    apiProbeSession = createProbeSession(sender.tab.id);
+    return { ok: true, probes: [], session: summarizeProbeSession() };
+  }
+  if (message.type === "M0_API_PROBE_BRIDGE_READY") {
+    if (sender.tab?.id) apiProbeBridgeTabs.add(sender.tab.id);
+    updateProbeHandshake(sender.tab?.id, "bridgeReady");
+    return { ok: true, session: summarizeProbeSession() };
+  }
+  if (message.type === "M0_API_PROBE_MAIN_READY") {
+    if (sender.tab?.id) apiProbeMainTabs.add(sender.tab.id);
+    updateProbeHandshake(sender.tab?.id, "mainReady");
+    return { ok: true, session: summarizeProbeSession() };
   }
   if (message.type === "M0_API_PROBE_RECORD") {
+    if (!isActiveProbeSender(sender)) return { ok: true, ignored: true, session: summarizeProbeSession() };
     const probe = sanitizeProbe(message.probe);
     if (probe) {
       const existing = apiProbeRecords.findIndex((item) => item.path === probe.path && item.method === probe.method && item.kind === probe.kind);
       if (existing >= 0) apiProbeRecords[existing] = mergeProbe(apiProbeRecords[existing], probe); else apiProbeRecords.push(probe);
       chrome.runtime.sendMessage({ type: "M0_API_PROBE_UPDATED" }).catch(() => {});
     }
-    return { ok: true, probes: summarizeProbes() };
+    if (apiProbeSession) { apiProbeSession.capturedCount += 1; apiProbeSession.updatedAt = new Date().toISOString(); }
+    return { ok: true, probes: summarizeProbes(), session: summarizeProbeSession() };
   }
-  if (message.type === "M0_API_PROBE_GET") return { ok: true, probes: summarizeProbes() };
+  if (message.type === "M0_API_PROBE_GET") return { ok: true, probes: summarizeProbes(), session: summarizeProbeSession() };
   if (message.type === "M0_API_SYNC_CREATE_RUN") return { ok: true, run: await globalThis.CollectionRevivalApiSyncDb.createRun() };
   if (message.type === "M0_API_SYNC_GET_RUN") return { ok: true, run: await globalThis.CollectionRevivalApiSyncDb.getRun(message.runId) };
   if (message.type === "M0_API_SYNC_DISCARD") return { ok: true, run: await globalThis.CollectionRevivalApiSyncDb.discardRun(message.runId) };
@@ -64,8 +82,13 @@ async function handleApiSyncMessage(message, sender) {
 }
 
 function isApiSyncMessage(message) {
-  return ["M0_API_PROBE_START", "M0_API_PROBE_RECORD", "M0_API_PROBE_GET", "M0_API_SYNC_CREATE_RUN", "M0_API_SYNC_GET_RUN", "M0_API_SYNC_READ", "M0_API_SYNC_DISCARD", "M0_API_SYNC_CONFIRM"].includes(message?.type);
+  return ["M0_API_PROBE_START", "M0_API_PROBE_BRIDGE_READY", "M0_API_PROBE_MAIN_READY", "M0_API_PROBE_RECORD", "M0_API_PROBE_GET", "M0_API_SYNC_CREATE_RUN", "M0_API_SYNC_GET_RUN", "M0_API_SYNC_READ", "M0_API_SYNC_DISCARD", "M0_API_SYNC_CONFIRM"].includes(message?.type);
 }
+
+function createProbeSession(tabId) { const timestamp = new Date().toISOString(); return { status: "active", startedAt: timestamp, updatedAt: timestamp, mainReady: apiProbeMainTabs.has(tabId), bridgeReady: apiProbeBridgeTabs.has(tabId), capturedCount: 0, targetTabId: tabId }; }
+function isActiveProbeSender(sender) { return Boolean(apiProbeSession?.status === "active" && sender.tab?.id === apiProbeSession.targetTabId); }
+function updateProbeHandshake(tabId, key) { if (!isActiveProbeSender({ tab: { id: tabId } })) return; apiProbeSession[key] = true; apiProbeSession.updatedAt = new Date().toISOString(); chrome.runtime.sendMessage({ type: "M0_API_PROBE_UPDATED" }).catch(() => {}); }
+function summarizeProbeSession() { if (!apiProbeSession) return { status: "inactive", mainReady: false, bridgeReady: false, capturedCount: 0, updatedAt: "" }; const { targetTabId: _targetTabId, ...safe } = apiProbeSession; return { ...safe, active: safe.status === "active" }; }
 
 function sanitizeProbe(value) {
   if (!value || typeof value !== "object" || !/^\/[a-zA-Z0-9_./-]+$/.test(String(value.path || ""))) return null;

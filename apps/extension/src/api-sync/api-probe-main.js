@@ -10,6 +10,10 @@
   const CURSOR = /(?:cursor|page|nextcursor|lastcursor|游标|分页)/i;
   const MORE = /(?:hasmore|hasnext|more|下一页|更多)/i;
   const transientMemberships = new Map();
+  let nativeFetch = window.fetch;
+  let nativeOpen = XMLHttpRequest.prototype.open;
+  let nativeSend = XMLHttpRequest.prototype.send;
+  let nativeSetRequestHeader = XMLHttpRequest.prototype.setRequestHeader;
 
   function isSensitive(path) { return SENSITIVE.test(path); }
   function fieldPaths(value, root) {
@@ -115,8 +119,7 @@
       window.postMessage({ source: "collection-revival-api-probe", probe: analyzeProbe(parsed.href, method, requestBody, response, headers) }, location.origin);
     } catch { /* Probe must never disrupt page requests. */ }
   }
-  const nativeFetch = window.fetch;
-  window.fetch = async function (...args) {
+  const fetchProbe = async function (...args) {
     const request = args[0] instanceof Request ? args[0] : null;
     const init = args[1] || {};
     const body = await bodyForFetch(request, init);
@@ -124,14 +127,26 @@
     try { report(request?.url || args[0], init.method || request?.method || "GET", body, await response.clone().json(), init.headers || request?.headers); } catch { /* Non-JSON endpoints are irrelevant. */ }
     return response;
   };
-  const nativeOpen = XMLHttpRequest.prototype.open;
-  const nativeSend = XMLHttpRequest.prototype.send;
-  const nativeSetRequestHeader = XMLHttpRequest.prototype.setRequestHeader;
-  XMLHttpRequest.prototype.open = function (method, url, ...rest) { this.__crProbe = { method, url, headerNames: [] }; return nativeOpen.call(this, method, url, ...rest); };
-  XMLHttpRequest.prototype.setRequestHeader = function (name, value) { (this.__crProbe ||= { headerNames: [] }).headerNames.push(String(name)); return nativeSetRequestHeader.call(this, name, value); };
-  XMLHttpRequest.prototype.send = function (body) {
+  const xhrOpenProbe = function (method, url, ...rest) { this.__crProbe = { method, url, headerNames: [] }; return nativeOpen.call(this, method, url, ...rest); };
+  const xhrSetRequestHeaderProbe = function (name, value) { (this.__crProbe ||= { headerNames: [] }).headerNames.push(String(name)); return nativeSetRequestHeader.call(this, name, value); };
+  const xhrSendProbe = function (body) {
     this.addEventListener("loadend", () => { if (this.responseType && this.responseType !== "text") return; let response; try { response = JSON.parse(this.responseText); } catch { return; } report(this.__crProbe?.url, this.__crProbe?.method, body, response, { forEach: (callback) => (this.__crProbe?.headerNames || []).forEach((name) => callback("", name)) }); }, { once: true });
     return nativeSend.call(this, body);
   };
-  globalThis.__collectionRevivalApiProbeTest = { analyzeProbe };
+  function repairTransportHooks() {
+    if (window.fetch !== fetchProbe) nativeFetch = window.fetch;
+    window.fetch = fetchProbe;
+    if (XMLHttpRequest.prototype.open !== xhrOpenProbe) nativeOpen = XMLHttpRequest.prototype.open;
+    if (XMLHttpRequest.prototype.send !== xhrSendProbe) nativeSend = XMLHttpRequest.prototype.send;
+    if (XMLHttpRequest.prototype.setRequestHeader !== xhrSetRequestHeaderProbe) nativeSetRequestHeader = XMLHttpRequest.prototype.setRequestHeader;
+    XMLHttpRequest.prototype.open = xhrOpenProbe;
+    XMLHttpRequest.prototype.send = xhrSendProbe;
+    XMLHttpRequest.prototype.setRequestHeader = xhrSetRequestHeaderProbe;
+  }
+  function announceReady() { window.postMessage({ source: "collection-revival-api-probe-main", type: "MAIN_READY" }, location.origin); }
+  window.addEventListener("message", (event) => { if (event.source === window && event.origin === location.origin && event.data?.source === "collection-revival-api-probe-bridge" && event.data?.type === "BRIDGE_READY") announceReady(); });
+  repairTransportHooks();
+  announceReady();
+  setInterval(repairTransportHooks, 250);
+  globalThis.__collectionRevivalApiProbeTest = { analyzeProbe, repairTransportHooks };
 })();
