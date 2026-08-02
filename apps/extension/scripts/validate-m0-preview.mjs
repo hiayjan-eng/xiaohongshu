@@ -30,7 +30,7 @@ for (const path of [
 const manifest = JSON.parse(read("apps/extension/manifest.json"));
 if (manifest.version !== "0.2.3") throw new Error("Production source manifest version changed.");
 if (!manifest.host_permissions.includes("https://xiaohongshu-green.vercel.app/*")) throw new Error("Production source origin changed.");
-if (JSON.stringify(manifest).includes("0.3.3-m0-preview")) throw new Error("M0 version leaked into the Production source manifest.");
+if (JSON.stringify(manifest).includes("0.3.4-m0-preview")) throw new Error("M0 version leaked into the Production source manifest.");
 const expectedXhsMatches = new Set(["https://xiaohongshu.com/*", "https://www.xiaohongshu.com/*"]);
 const sourceScannerEntry = manifest.content_scripts.find((entry) => (entry.js || []).includes("src/full-scan-content.js"));
 if (!sourceScannerEntry || sourceScannerEntry.matches.length !== expectedXhsMatches.size || sourceScannerEntry.matches.some((value) => !expectedXhsMatches.has(value))) {
@@ -44,16 +44,16 @@ const build = read("apps/extension/scripts/build-extension.mjs");
 for (const marker of [
   "--m0-preview",
   "--preview-origin=",
-  "0.3.3-m0-preview",
+  "0.3.4-m0-preview",
   "extension-m0-full-scan-preview",
-  "collection-revival-extension-m0-full-scan-preview-v0.3.3.zip",
+  "collection-revival-extension-m0-full-scan-preview-v0.3.4.zip",
   "M0 Preview origin must be one exact HTTPS origin",
   "Production origin is forbidden"
 ]) assertIncludes(build, marker, "M0 build profile");
 
 const sidepanel = `${read("apps/extension/src/sidepanel.html")}\n${read("apps/extension/src/sidepanel.js")}`;
 for (const marker of [
-  "M0 全量扫描 Preview 0.3.3",
+  "M0 全量扫描 Preview 0.3.4",
   "扫描全部收藏",
   "随机 50 条",
   "导出脱敏统计",
@@ -93,7 +93,7 @@ for (const marker of [
 
 const core = read("apps/extension/src/full-scan-core.js");
 for (const marker of [
-  "m0-real-favorites-v5",
+  "m0-real-favorites-v6",
   "OWN_PROFILE_UNCONFIRMED",
   "FAVORITES_TAB_UNCONFIRMED",
   "NOTES_TAB_UNCONFIRMED",
@@ -106,6 +106,9 @@ for (const marker of [
   "END_NOT_PROVEN",
   "fallbackScrollAttempts",
   "rootRebindCount",
+  "active-transform-tab-content",
+  "validateCaptureBoundary",
+  "FIRST_BATCH_OWN_POSTS_DETECTED",
   "M0_FULL_SCAN_VERIFY_SESSION",
   "confirmOwnProfile(document, profileId, location)",
   "currentUrlProfileIdHash",
@@ -132,10 +135,15 @@ for (const path of [
   "apps/extension/scripts/run-premature-completion-regression.mjs",
   "apps/extension/tests/fixtures/full-scan-premature-completion.html"
 ]) if (!existsSync(resolve(repoRoot, path))) throw new Error(`Missing premature completion regression asset: ${path}`);
+for (const path of [
+  "apps/extension/scripts/run-root-boundary-regression.mjs",
+  "apps/extension/tests/fixtures/full-scan-root-boundary.html"
+]) if (!existsSync(resolve(repoRoot, path))) throw new Error(`Missing root boundary regression asset: ${path}`);
 if (core.includes("root = document.body") || core.includes("element: document.body")) throw new Error("document.body fallback is forbidden.");
 if (core.includes("activeIndicator.textContent")) throw new Error("Reds active indicator must not require strict empty textContent.");
 
 const idb = read("apps/extension/src/full-scan-idb.js");
+const background = read("apps/extension/src/background.js");
 for (const marker of [
   "collection-revival-m0-preview-v1",
   "scanSessions", "favoriteItems", "scanSessionItems", "importBatches",
@@ -143,8 +151,13 @@ for (const marker of [
   "M0_PREVIEW_IMPORT_META_REQUEST", "M0_PREVIEW_IMPORT_CHUNK_REQUEST", "M0_PREVIEW_IMPORT_RESULT",
   "source:", "url:", "fallback:"
 ]) assertIncludes(idb, marker, "Preview IndexedDB/import batching");
+for (const marker of [
+  "M0_FULL_SCAN_INVALIDATE_SESSION",
+  "M0_FULL_SCAN_DISCARD_CONTAMINATED_SESSION",
+  "discardContaminatedSession",
+  "UNSAFE_0_3_3_ROOT_BOUNDARY"
+]) assertIncludes(`${idb}\n${background}\n${sidepanel}`, marker, "contaminated session isolation");
 
-const background = read("apps/extension/src/background.js");
 for (const marker of ["exactPreviewOrigin", "assertTrustedPreviewSender", "WEB_APP_ORIGINS.length !== 1", "BUILD_PROFILE.id !== \"m0-preview\""]) assertIncludes(background, marker, "Preview origin guard");
 
 const preview = `${read("apps/web/public/m0-preview/index.html")}\n${read("apps/web/public/m0-preview/m0-preview.js")}`;

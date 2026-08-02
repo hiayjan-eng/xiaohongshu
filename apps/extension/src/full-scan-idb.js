@@ -101,15 +101,26 @@
       itemsCheckpoint: 0,
       lastErrorCode: "",
       lastErrorMessage: "",
+      contaminatedAt: "",
+      contaminationCode: "",
+      discardedAt: "",
+      discardedItemCount: 0,
+      preservedExistingItemCount: 0,
       ...overrides
     };
   }
 
   async function createSession(identity, options = {}) {
     assertIdentity(identity);
+    const latest = await findLatestSession(identity.favoritesPageIdentity);
+    if (isUnsafeBoundarySession(latest)) {
+      return invalidateSession(latest.sessionId, "UNSAFE_0_3_3_ROOT_BOUNDARY", "0.3.3 扫描会话使用了无法证明活动收藏面板归属的 root，已自动标记为 contaminated。必须丢弃后重新扫描。");
+    }
+    if (latest?.status === "contaminated") {
+      throw new Error("当前会话已 contaminated，必须先精确丢弃本轮错误记录，不能继续或新建扫描。");
+    }
     if (options.resume !== false) {
-      const existing = await findLatestSession(identity.favoritesPageIdentity);
-      if (existing && existing.status !== "completed") return existing;
+      if (latest && !["completed", "discarded"].includes(latest.status)) return latest;
     }
     const database = await openDatabase();
     const session = emptySession(identity);
@@ -147,6 +158,10 @@
       transaction.abort();
       throw new Error("找不到可更新的全量扫描会话。");
     }
+    if (["contaminated", "discarded"].includes(session.status) && patch.status && patch.status !== session.status) {
+      transaction.abort();
+      throw new Error("已隔离或已丢弃的扫描会话禁止恢复为其他状态。");
+    }
     const next = {
       ...session,
       ...pickSessionPatch(patch),
@@ -170,6 +185,10 @@
     if (!session) {
       transaction.abort();
       throw new Error("找不到接收流式收藏的扫描会话。");
+    }
+    if (session.status !== "scanning") {
+      transaction.abort();
+      throw new Error("当前扫描会话不是 scanning 状态，禁止继续写入收藏。");
     }
 
     const recentItems = [];
@@ -427,10 +446,98 @@
     };
   }
 
+  async function invalidateSession(sessionId, code = "FAVORITES_BOUNDARY_INVALID", reason = "收藏面板边界无法继续证明，本轮会话已标记为 contaminated。") {
+    const session = await getSession(sessionId);
+    if (!session) throw new Error("找不到待隔离的扫描会话。");
+    if (session.status === "discarded") throw new Error("该错误会话已经丢弃。");
+    if (session.status === "completed") throw new Error("已完成会话不能在此处改为 contaminated。");
+    if (session.status === "contaminated") return session;
+    return updateSession(sessionId, {
+      status: "contaminated",
+      lastErrorCode: code,
+      lastErrorMessage: reason,
+      contaminatedAt: nowIso(),
+      contaminationCode: code
+    });
+  }
+
+  async function discardContaminatedSession(sessionId, favoritesPageIdentity) {
+    const database = await openDatabase();
+    const transaction = database.transaction([SESSION_STORE, ITEM_STORE, SESSION_ITEM_STORE, IMPORT_STORE], "readwrite");
+    const sessionStore = transaction.objectStore(SESSION_STORE);
+    const itemStore = transaction.objectStore(ITEM_STORE);
+    const relationStore = transaction.objectStore(SESSION_ITEM_STORE);
+    const importStore = transaction.objectStore(IMPORT_STORE);
+    const session = await requestResult(sessionStore.get(sessionId));
+    if (!session || session.favoritesPageIdentity !== favoritesPageIdentity) {
+      transaction.abort();
+      throw new Error("错误会话与当前收藏页身份不一致，未执行丢弃。");
+    }
+    if (session.status !== "contaminated") {
+      transaction.abort();
+      throw new Error("只有已标记 contaminated 的会话可以精确丢弃。");
+    }
+    const importBatches = await requestResult(importStore.index("scanSessionId").getAll(IDBKeyRange.only(sessionId)));
+    if (importBatches.some((batch) => batch.status === "imported")) {
+      transaction.abort();
+      throw new Error("该会话已有已导入批次，禁止自动删除。");
+    }
+    for (const batch of importBatches) importStore.delete(batch.importBatchId);
+
+    const relations = await requestResult(relationStore.index("sessionId").getAll(IDBKeyRange.only(sessionId)));
+    const allRelations = await requestResult(relationStore.getAll());
+    const storageKeysUsedByOtherSessions = new Set(
+      allRelations
+        .filter((relation) => relation.sessionId !== sessionId && relation.valid && relation.storageKey)
+        .map((relation) => relation.storageKey)
+    );
+    let deletedItemCount = 0;
+    let preservedExistingItemCount = 0;
+    for (const relation of relations) {
+      if (relation.storageKey) {
+        const item = await requestResult(itemStore.get(relation.storageKey));
+        const createdOnlyByContaminatedSession = item?.firstScanSessionId === sessionId && !storageKeysUsedByOtherSessions.has(relation.storageKey);
+        if (createdOnlyByContaminatedSession) {
+          itemStore.delete(relation.storageKey);
+          deletedItemCount += 1;
+        } else if (item) {
+          preservedExistingItemCount += 1;
+        }
+      }
+      relationStore.delete(relation.sessionItemKey);
+    }
+    const discardedAt = nowIso();
+    const discarded = {
+      ...session,
+      status: "discarded",
+      discardedAt,
+      updatedAt: discardedAt,
+      discardedItemCount: deletedItemCount,
+      preservedExistingItemCount,
+      discoveredCount: 0,
+      validCount: 0,
+      invalidCount: 0,
+      missingLinkCount: 0,
+      reviewCount: 0,
+      newItemCount: 0,
+      existingCount: 0,
+      duplicateCount: 0,
+      duplicateInsertCount: 0,
+      itemsCheckpoint: 0,
+      lastSourceId: "",
+      lastErrorCode: "CONTAMINATED_SESSION_DISCARDED",
+      lastErrorMessage: `已精确丢弃本轮错误会话的 ${deletedItemCount} 条新记录；既有记录与 Preview 数据未处理。`
+    };
+    sessionStore.put(discarded);
+    await transactionDone(transaction);
+    return { session: discarded, deletedItemCount, preservedExistingItemCount };
+  }
+
   async function resetSession(identity) {
     assertIdentity(identity);
     const existing = await findLatestSession(identity.favoritesPageIdentity);
-    if (existing && !["completed", "stopped"].includes(existing.status)) {
+    if (existing?.status === "contaminated") throw new Error("当前会话已 contaminated，请先使用“丢弃本轮错误会话并重新扫描”。");
+    if (existing && !["completed", "stopped", "discarded"].includes(existing.status)) {
       await updateSession(existing.sessionId, { status: "stopped" });
     }
     return createSession(identity, { resume: false });
@@ -474,6 +581,10 @@
         return { ok: true, diagnostics: await getDiagnostics(message.sessionId) };
       case "M0_FULL_SCAN_LIST_ITEMS":
         return { ok: true, ...(await listSessionItems(message.sessionId, message.options)) };
+      case "M0_FULL_SCAN_INVALIDATE_SESSION":
+        return { ok: true, session: await invalidateSession(message.sessionId, message.code, message.reason) };
+      case "M0_FULL_SCAN_DISCARD_CONTAMINATED_SESSION":
+        return { ok: true, ...(await discardContaminatedSession(message.sessionId, message.favoritesPageIdentity)) };
       case "M0_FULL_SCAN_RESET_SESSION":
         return { ok: true, session: await resetSession(message.identity) };
       case "M0_PREVIEW_PREPARE_IMPORT":
@@ -533,7 +644,9 @@
       "completedAt",
       "itemsCheckpoint",
       "lastErrorCode",
-      "lastErrorMessage"
+      "lastErrorMessage",
+      "contaminatedAt",
+      "contaminationCode"
     ];
     return Object.fromEntries(allowed.filter((key) => patch[key] !== undefined).map((key) => [key, patch[key]]));
   }
@@ -542,6 +655,15 @@
     if (!identity?.profileIdHash || !identity?.favoritesPageIdentity) {
       throw new Error("缺少脱敏账号或收藏页身份，不能创建扫描会话。");
     }
+  }
+
+  function isUnsafeBoundarySession(session) {
+    return Boolean(
+      session &&
+      session.extensionVersion === "0.3.3-m0-preview" &&
+      Number(session.validCount) > 0 &&
+      !["completed", "contaminated", "discarded"].includes(session.status)
+    );
   }
 
   function clean(value) {
@@ -562,6 +684,8 @@
     getImportMeta,
     getSession,
     handleMessage,
+    invalidateSession,
+    discardContaminatedSession,
     listRecentItems,
     listSessionItems,
     openDatabase,

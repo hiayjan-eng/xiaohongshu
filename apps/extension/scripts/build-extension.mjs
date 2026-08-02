@@ -19,13 +19,13 @@ const m0PreviewOrigin = isM0Preview ? validatePreviewOrigin(originArg?.slice("--
 const profile = isM0Preview
   ? {
       id: "m0-preview",
-      label: "M0 全量扫描 Preview 0.3.3",
-      version: "0.3.3",
-      versionName: "0.3.3-m0-preview",
+      label: "M0 全量扫描 Preview 0.3.4",
+      version: "0.3.4",
+      versionName: "0.3.4-m0-preview",
       defaultWebAppUrl: `${m0PreviewOrigin}/m0-preview/`,
       webAppOrigins: [m0PreviewOrigin],
       outDirName: "extension-m0-full-scan-preview",
-      zipFileName: "collection-revival-extension-m0-full-scan-preview-v0.3.3.zip"
+      zipFileName: "collection-revival-extension-m0-full-scan-preview-v0.3.4.zip"
     }
   : isLegacyPreview
     ? {

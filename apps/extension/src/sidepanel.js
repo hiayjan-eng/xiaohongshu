@@ -1,7 +1,7 @@
 (() => {
   const ids = [
     "statusBadge", "pageIdentity", "profileIdentity", "currentUrlProfileId", "selfProfileLinkStatus", "profileIdMatch", "notesTabCandidateText", "notesTabActiveStateSource", "notesTabMatch", "selectorVersion", "safetyMessage",
-    "startScan", "pauseScan", "resumeScan", "stopScan", "restartScan", "redetectPage", "progressMessage",
+    "startScan", "discardContaminatedScan", "pauseScan", "resumeScan", "stopScan", "restartScan", "redetectPage", "progressMessage",
     "elapsedTime", "progressFill", "scrollProgress", "discoveredCount", "validCount",
     "existingCount", "missingLinkCount", "reviewCount", "resumeCount", "searchForm",
     "searchInput", "recentButton", "randomButton", "reviewSummary", "resultItems",
@@ -35,6 +35,7 @@
   let detectionScheduled = false;
 
   elements.startScan.addEventListener("click", () => void control("M0_FULL_SCAN_START"));
+  elements.discardContaminatedScan.addEventListener("click", () => void discardContaminatedAndRestart());
   elements.pauseScan.addEventListener("click", () => void control("M0_FULL_SCAN_PAUSE"));
   elements.resumeScan.addEventListener("click", () => void control("M0_FULL_SCAN_RESUME"));
   elements.stopScan.addEventListener("click", () => void control("M0_FULL_SCAN_STOP"));
@@ -110,8 +111,8 @@
         favoritesPageIdentity: inspection.identity.favoritesPageIdentity
       });
       if (generation !== detectionGeneration) return;
-      session = stored?.session || null;
-      displayedItems = (stored?.recentItems || []).slice().reverse();
+      session = await quarantineUnsafeSession(stored?.session || null);
+      displayedItems = session?.status === "contaminated" ? [] : (stored?.recentItems || []).slice().reverse();
       render();
     } catch (error) {
       if (generation === detectionGeneration) showConnectionFailure(`页面检测失败：${error instanceof Error ? error.message : String(error)}`);
@@ -166,7 +167,7 @@
   }
 
   async function restart() {
-    if (!inspection?.identity || !activeTabId) return;
+    if (!inspection?.identity || !activeTabId || session?.status === "contaminated") return;
     setControlsBusy(true);
     await sendToTab({ type: "M0_FULL_SCAN_STOP" });
     const reset = await sendRuntimeMessage({ type: "M0_FULL_SCAN_RESET_SESSION", identity: inspection.identity });
@@ -228,6 +229,51 @@
       saveAs: true
     });
     window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  }
+
+  async function quarantineUnsafeSession(candidate) {
+    if (
+      !candidate ||
+      candidate.extensionVersion !== "0.3.3-m0-preview" ||
+      Number(candidate.validCount) <= 0 ||
+      ["completed", "contaminated", "discarded"].includes(candidate.status)
+    ) return candidate;
+    const response = await sendRuntimeMessage({
+      type: "M0_FULL_SCAN_INVALIDATE_SESSION",
+      sessionId: candidate.sessionId,
+      code: "UNSAFE_0_3_3_ROOT_BOUNDARY",
+      reason: "0.3.3 扫描会话绑定到了无法证明归属的 feeds-container，已标记 contaminated；禁止继续或导入。"
+    });
+    return response?.session || candidate;
+  }
+
+  async function discardContaminatedAndRestart() {
+    if (!inspection?.identity || !activeTabId || session?.status !== "contaminated") return;
+    setControlsBusy(true);
+    elements.safetyMessage.textContent = "正在精确删除本轮 contaminated 会话记录；不会访问 Preview 数据。";
+    const discarded = await sendRuntimeMessage({
+      type: "M0_FULL_SCAN_DISCARD_CONTAMINATED_SESSION",
+      sessionId: session.sessionId,
+      favoritesPageIdentity: inspection.identity.favoritesPageIdentity
+    });
+    if (!discarded?.ok) {
+      elements.safetyMessage.textContent = discarded?.error || "丢弃错误会话失败，未开始新扫描。";
+      setControlsBusy(false);
+      return;
+    }
+    session = discarded.session;
+    displayedItems = [];
+    const started = await sendToTab({ type: "M0_FULL_SCAN_START" });
+    if (!started?.ok) {
+      elements.safetyMessage.textContent = started?.error || "错误会话已丢弃，但新扫描未能开始。";
+      setControlsBusy(false);
+      render();
+      return;
+    }
+    session = started.session;
+    elements.safetyMessage.textContent = `已只丢弃本轮 ${formatNumber(discarded.deletedItemCount)} 条错误新记录，并从干净 session 重新扫描；Preview 既有数据未处理。`;
+    setControlsBusy(false);
+    render();
   }
 
   async function refreshSubtabDomDiagnostics(tabId = activeTabId) {
@@ -297,7 +343,7 @@
 
   function render(runtime) {
     const status = session?.status || "ready";
-    const labels = { ready: "准备", scanning: "扫描中", paused: "已暂停", needs_user: "需处理", completed: "扫描完成", stopped: "已停止" };
+    const labels = { ready: "准备", scanning: "扫描中", paused: "已暂停", needs_user: "需处理", contaminated: "已污染", discarded: "已丢弃", completed: "扫描完成", stopped: "已停止" };
     elements.statusBadge.dataset.status = status;
     elements.statusBadge.textContent = labels[status] || status;
     elements.discoveredCount.textContent = formatNumber(session?.discoveredCount);
@@ -316,12 +362,15 @@
       ? `滚动位置：${formatNumber(scrollTop)} / ${formatNumber(scrollHeight)} · 稳定空轮 ${session?.stableNoGrowthCycles || 0}/5`
       : "滚动位置：—";
     renderItems();
-    elements.startScan.disabled = !inspection?.ok || status === "scanning";
+    elements.startScan.disabled = !inspection?.ok || ["scanning", "contaminated"].includes(status);
+    elements.discardContaminatedScan.hidden = status !== "contaminated";
+    elements.discardContaminatedScan.disabled = status !== "contaminated";
     elements.pauseScan.disabled = status !== "scanning";
     elements.resumeScan.disabled = !["paused", "needs_user", "stopped"].includes(status);
     elements.stopScan.disabled = !["scanning", "paused", "needs_user"].includes(status);
+    elements.restartScan.disabled = status === "contaminated";
     elements.importButton.disabled = status !== "completed" || BUILD_PROFILE.id !== "m0-preview";
-    if (runtime) elements.safetyMessage.textContent = `流式缓冲峰值 ${runtime.maxBufferedItems || 0} 条；Side Panel 最近项 ${runtime.recentItemCount || 0}/12；滚动模式 ${runtime.scrollMode || "unknown"}。`;
+    if (runtime && status !== "contaminated") elements.safetyMessage.textContent = `流式缓冲峰值 ${runtime.maxBufferedItems || 0} 条；Side Panel 最近项 ${runtime.recentItemCount || 0}/12；滚动模式 ${runtime.scrollMode || "unknown"}。`;
     updateElapsed();
   }
 
@@ -365,6 +414,8 @@
   function sessionMessage(value) {
     if (!value) return "等待开始";
     if (value.status === "completed") return `扫描完成：共发现 ${formatNumber(value.discoveredCount)} 条，有效 ${formatNumber(value.validCount)} 条。`;
+    if (value.status === "contaminated") return `本轮 ${formatNumber(value.validCount)} 条已标记 contaminated，禁止继续或导入；请丢弃后重扫。`;
+    if (value.status === "discarded") return `本轮错误记录已丢弃，可从干净 session 重新扫描。`;
     if (value.status === "needs_user") return value.lastErrorMessage || "已安全暂停，请处理当前页面后点击继续。";
     if (value.status === "paused") return `已暂停并保存 ${formatNumber(value.validCount)} 条。`;
     if (value.status === "stopped") return `已停止并保留 ${formatNumber(value.validCount)} 条进度。`;
@@ -484,11 +535,13 @@
       stableNoGrowthCycles: value.stableNoGrowthCycles,
       selectorVersion: value.selectorVersion,
       extensionVersion: value.extensionVersion,
-      lastErrorCode: value.lastErrorCode
+      lastErrorCode: value.lastErrorCode,
+      contaminationCode: value.contaminationCode,
+      discardedItemCount: value.discardedItemCount
     };
   }
 
-  function setControlsBusy(busy) { for (const button of [elements.startScan, elements.pauseScan, elements.resumeScan, elements.stopScan]) button.disabled = busy; }
+  function setControlsBusy(busy) { for (const button of [elements.startScan, elements.discardContaminatedScan, elements.pauseScan, elements.resumeScan, elements.stopScan, elements.restartScan]) button.disabled = busy; }
   function sendToTab(message, tabId = activeTabId) {
     return new Promise((resolve) => chrome.tabs.sendMessage(tabId, message, (response) => {
       if (chrome.runtime.lastError) return resolve({ ok: false, error: chrome.runtime.lastError.message });

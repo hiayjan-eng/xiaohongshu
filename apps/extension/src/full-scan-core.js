@@ -1,5 +1,5 @@
 (() => {
-  const SELECTOR_VERSION = "m0-real-favorites-v5";
+  const SELECTOR_VERSION = "m0-real-favorites-v6";
   const REQUIRED_STABLE_CYCLES = 5;
   const PERSIST_BATCH_SIZE = 25;
   const RECENT_LIMIT = 12;
@@ -40,6 +40,8 @@
       this.fallbackScrollAttempts = 0;
       this.endConfirmationAttempts = 0;
       this.lastEndProof = "";
+      this.hasPersistedBatch = false;
+      this.contaminationPromise = null;
     }
 
     inspectPage() {
@@ -68,6 +70,9 @@
         return { ok: false, error: sessionResponse?.error || "无法创建全量扫描会话。" };
       }
       this.session = sessionResponse.session;
+      if (["contaminated", "discarded", "invalid"].includes(this.session.status)) {
+        return { ok: false, error: "当前扫描会话已因边界污染被隔离，必须先丢弃本轮错误会话。", session: this.session };
+      }
       if (this.session.favoritesPageIdentity !== inspection.identity.favoritesPageIdentity) {
         return { ok: false, error: "收藏页身份已变化，未恢复旧扫描会话。" };
       }
@@ -83,6 +88,9 @@
       this.installObserver();
       this.restoreScrollCheckpoint();
       await this.captureFromNodes([this.root]);
+      if (this.session?.status === "contaminated") {
+        return { ok: false, error: this.session.lastErrorMessage || "扫描边界失效，本轮会话已隔离。", session: this.session };
+      }
       this.runPromise = this.runLoop()
         .catch((error) => this.fail(error));
       return { ok: true, session: this.session };
@@ -188,15 +196,28 @@
     }
 
     async captureFromNodes(nodes) {
+      if (!this.session || this.session.status !== "scanning") return;
+      const boundary = this.validateCaptureBoundary();
+      if (!boundary.ok) {
+        await this.contaminateSession(boundary.code, boundary.reason);
+        return;
+      }
       const cards = collectCardsFromNodes(nodes, this.root);
       if (!cards.length) return;
+      if (!this.hasPersistedBatch && isClearlyOwnPostsRoot(this.root, cards)) {
+        await this.contaminateSession(
+          "FIRST_BATCH_OWN_POSTS_DETECTED",
+          "首批卡片来自本人发布面板，本轮扫描已标记为 contaminated，且未写入任何记录。"
+        );
+        return;
+      }
       this.maxBufferedItems = Math.max(this.maxBufferedItems, cards.length);
       const extracted = cards.map((card) => extractFavoriteCard(card, this.location)).filter(Boolean);
       if (!extracted.length) return;
 
       this.captureQueue = this.captureQueue.then(async () => {
         for (let offset = 0; offset < extracted.length; offset += PERSIST_BATCH_SIZE) {
-          if (!this.session) return;
+          if (!this.session || this.session.status !== "scanning") return;
           const batch = extracted.slice(offset, offset + PERSIST_BATCH_SIZE);
           this.maxBufferedItems = Math.max(this.maxBufferedItems, batch.length);
           const response = await this.sendMessage({
@@ -207,11 +228,48 @@
           });
           if (!response?.ok) throw new Error(response?.error || "流式写入 IndexedDB 失败。");
           this.session = response.session;
+          this.hasPersistedBatch = this.hasPersistedBatch || Number(this.session.validCount) > 0;
           this.recentItems = [...this.recentItems, ...(response.recentItems || [])].slice(-RECENT_LIMIT);
           this.emitProgress();
         }
       });
       await this.captureQueue;
+    }
+
+    validateCaptureBoundary() {
+      const inspection = this.inspectPage();
+      if (!inspection.ok) {
+        return {
+          ok: false,
+          code: inspection.code || "FAVORITES_BOUNDARY_INVALID",
+          reason: inspection.reason || "收藏面板边界已失效。"
+        };
+      }
+      if (inspection.identity.favoritesPageIdentity !== this.session?.favoritesPageIdentity) {
+        return { ok: false, code: "PAGE_IDENTITY_CHANGED", reason: "收藏页身份已变化，本轮扫描已隔离。" };
+      }
+      if (inspection.root !== this.root) {
+        return { ok: false, code: "ACTIVE_FAVORITES_ROOT_CHANGED", reason: "当前 root 已不再属于活动收藏面板，本轮扫描已隔离。" };
+      }
+      return { ok: true };
+    }
+
+    async contaminateSession(code, reason) {
+      if (this.contaminationPromise) return this.contaminationPromise;
+      this.contaminationPromise = (async () => {
+        this.stopRequested = true;
+        this.running = false;
+        this.observer?.disconnect();
+        if (!this.session || this.session.status === "contaminated") return this.session;
+        this.session = await this.updateSession({
+          status: "contaminated",
+          lastErrorCode: code || "FAVORITES_BOUNDARY_INVALID",
+          lastErrorMessage: reason || "收藏扫描边界无法继续证明，本轮会话已隔离并禁止导入。"
+        });
+        this.emitProgress();
+        return this.session;
+      })();
+      return this.contaminationPromise;
     }
 
     async runLoop() {
@@ -507,7 +565,8 @@
     const activeNotesTab = notesTab.element;
     if (!activeNotesTab) return rejectProfilePage("NOTES_TAB_UNCONFIRMED", "未确认可见激活子 tab 为“笔记”。");
 
-    const root = findFavoritesRoot(document, activeFavoriteTab, activeNotesTab);
+    const favoritesBoundary = findFavoritesBoundary(document, activeFavoriteTab, activeNotesTab);
+    const root = favoritesBoundary?.root || null;
     if (!root || root === document.body || !isVisible(root)) {
       return rejectProfilePage("FAVORITES_PANEL_NOT_FOUND", "未能严格定位可见收藏面板；禁止退回 document.body 扫描。");
     }
@@ -535,6 +594,8 @@
       },
       diagnostics: {
         rootSelector: describeElement(root),
+        rootAssociation: favoritesBoundary.association,
+        activePanelSelector: describeElement(favoritesBoundary.panel),
         scrollSelector: scrollContainer === document.scrollingElement ? "window/document.scrollingElement" : describeElement(scrollContainer),
         scrollMode: scrollContainer === document.scrollingElement ? "window" : "element",
         ownPostsPanelCount: ownPostsPanels.length,
@@ -910,15 +971,17 @@
     return "none";
   }
 
-  function findFavoritesRoot(document, activeFavoriteTab, activeNotesTab) {
-    const fixture = document.querySelector('[data-revival-favorites-panel][data-active="true"]');
-    if (fixture && isVisible(fixture)) return fixture;
-    for (const tab of [activeNotesTab, activeFavoriteTab]) {
-      const controls = tab?.getAttribute?.("aria-controls");
-      if (!controls) continue;
-      const controlled = document.getElementById(controls);
-      if (controlled && controlled !== document.body && isVisible(controlled) && !isInsideExcludedPanel(controlled)) return controlled;
+  function findFavoritesBoundary(document, activeFavoriteTab, activeNotesTab) {
+    const controlledRoots = [activeNotesTab, activeFavoriteTab]
+      .map((tab) => tab?.getAttribute?.("aria-controls"))
+      .filter(Boolean)
+      .map((id) => document.getElementById(id))
+      .filter((root) => isEligibleFavoritesRoot(root));
+    const uniqueControlledRoots = [...new Set(controlledRoots)];
+    if (uniqueControlledRoots.length === 1) {
+      return { root: uniqueControlledRoots[0], panel: uniqueControlledRoots[0], association: "active-tabs:aria-controls" };
     }
+
     const candidates = Array.from(document.querySelectorAll([
       '[role="tabpanel"]',
       '[data-favorites-panel]',
@@ -928,32 +991,80 @@
       '[class*="note-list"]',
       '[class*="feeds-container"]',
       '#user-favorites'
-    ].join(","))).filter((element) => {
-      if (element === document.body || !isVisible(element) || isInsideExcludedPanel(element)) return false;
-      return countCandidateCards(element) > 0 || /暂无收藏|还没有收藏|没有收藏/.test(normalizeText(element.textContent));
+    ].join(","))).filter(isEligibleFavoritesRoot);
+
+    const explicit = candidates.filter((element) => {
+      if (!element.matches?.('[data-revival-favorites-panel][data-active="true"]')) return false;
+      return isWithinSameProfileBoundary(element, activeFavoriteTab, activeNotesTab);
     });
-    return candidates.find((element) => {
-      const label = `${element.className || ""} ${element.getAttribute?.("aria-label") || ""}`;
-      if (/favorite|collect|收藏/i.test(label)) return true;
-      let ancestor = activeNotesTab?.parentElement || null;
-      for (let depth = 0; ancestor && depth < 6; depth += 1, ancestor = ancestor.parentElement) {
-        if (ancestor.contains(element) && ancestor.contains(activeFavoriteTab)) return true;
-      }
-      return false;
-    }) || null;
+    if (explicit.length === 1) {
+      return { root: explicit[0], panel: explicit[0], association: "explicit-active-favorites-panel" };
+    }
+
+    const realPanelMatches = candidates.map((root) => {
+      const panel = root.closest?.(".tab-content-item");
+      const transform = panel?.parentElement;
+      if (!panel || !hasClassToken(transform, "transform-container")) return null;
+      if (!isActiveTransformPanel(document, panel)) return null;
+      if (!isWithinSameProfileBoundary(panel, activeFavoriteTab, activeNotesTab)) return null;
+      return { root, panel };
+    }).filter(Boolean);
+    const activePanels = [...new Set(realPanelMatches.map((match) => match.panel))];
+    if (activePanels.length !== 1) return null;
+    const panel = activePanels[0];
+    const rootsInActivePanel = realPanelMatches
+      .filter((match) => match.panel === panel)
+      .map((match) => match.root)
+      .filter((root, _index, roots) => !roots.some((other) => other !== root && other.contains?.(root)));
+    if (rootsInActivePanel.length !== 1) return null;
+    return { root: rootsInActivePanel[0], panel, association: "active-transform-tab-content" };
+  }
+
+  function isEligibleFavoritesRoot(element) {
+    if (!element || element === element.ownerDocument?.body || !isVisible(element) || isInsideExcludedPanel(element)) return false;
+    return countCandidateCards(element) > 0 || /暂无收藏|还没有收藏|没有收藏/.test(normalizeText(element.textContent));
+  }
+
+  function isActiveTransformPanel(document, panel) {
+    if (!isVisible(panel) || isInactiveCachedPanel(panel)) return false;
+    const style = globalThis.getComputedStyle?.(panel);
+    const rect = panel.getBoundingClientRect?.();
+    if (!rect || rect.width <= 0 || rect.height <= 4) return false;
+    const viewportWidth = Number(document.documentElement?.clientWidth) || Number(globalThis.innerWidth) || 0;
+    const horizontalOverlap = Math.max(0, Math.min(rect.right, viewportWidth) - Math.max(rect.left, 0));
+    if (viewportWidth && horizontalOverlap < Math.min(rect.width * 0.5, viewportWidth * 0.25)) return false;
+    const overflow = `${style?.overflow || ""} ${style?.overflowY || ""}`;
+    return /(auto|scroll)/i.test(overflow);
+  }
+
+  function isWithinSameProfileBoundary(element, activeFavoriteTab, activeNotesTab) {
+    const selector = "#userPageContainer, .user-page, [data-user-page], [class*='profile-page']";
+    const elementBoundary = element.closest?.(selector);
+    const favoritesBoundary = activeFavoriteTab?.closest?.(selector);
+    const notesBoundary = activeNotesTab?.closest?.(selector);
+    return Boolean(elementBoundary && elementBoundary === favoritesBoundary && elementBoundary === notesBoundary);
+  }
+
+  function isInactiveCachedPanel(element) {
+    return Boolean(element.closest?.("[hidden], [aria-hidden='true'], [inert], [data-active='false'], [data-state='inactive']"));
+  }
+
+  function hasClassToken(element, token) {
+    return readRawClassName(element?.className).split(/\s+/).includes(token);
   }
 
   function findOwnPostsPanels(document) {
     return Array.from(document.querySelectorAll([
       "[data-revival-own-posts-panel]",
       "[data-own-posts-panel]",
+      "#userPostedFeeds",
       "[class*='publish-note']",
       "[class*='user-note-list'][aria-hidden='true']"
     ].join(",")));
   }
 
   function findLikesPanels(document) {
-    const explicit = Array.from(document.querySelectorAll("[data-revival-likes-panel], [data-likes-panel], [class*='likes-panel']"));
+    const explicit = Array.from(document.querySelectorAll("[data-revival-likes-panel], [data-likes-panel], [class*='likes-panel'], #userLikedFeeds"));
     const labelled = Array.from(document.querySelectorAll('[role="tabpanel"], section')).filter((element) => {
       return normalizeText(element.getAttribute?.("aria-label") || "") === "点赞";
     });
@@ -1180,8 +1291,10 @@
     return Boolean(element.closest?.([
       "[data-revival-own-posts-panel]",
       "[data-own-posts-panel]",
+      "#userPostedFeeds",
       "[data-revival-likes-panel]",
       "[data-likes-panel]",
+      "#userLikedFeeds",
       "[class*='publish-note']",
       "[class*='likes-panel']"
     ].join(",")));
@@ -1193,7 +1306,31 @@
     const style = globalThis.getComputedStyle?.(element);
     if (style?.display === "none" || style?.visibility === "hidden" || style?.opacity === "0") return false;
     const rect = element.getBoundingClientRect?.();
-    return !rect || rect.width > 0 || rect.height > 0;
+    if (rect && rect.width <= 0 && rect.height <= 0) return false;
+    if (!rect) return true;
+    let visibleLeft = rect.left;
+    let visibleRight = rect.right;
+    let visibleTop = rect.top;
+    let visibleBottom = rect.bottom;
+    for (let ancestor = element.parentElement; ancestor && ancestor !== element.ownerDocument?.body; ancestor = ancestor.parentElement) {
+      const ancestorStyle = globalThis.getComputedStyle?.(ancestor);
+      const clips = /(hidden|clip|auto|scroll)/i.test(`${ancestorStyle?.overflow || ""} ${ancestorStyle?.overflowX || ""} ${ancestorStyle?.overflowY || ""}`);
+      if (!clips) continue;
+      const ancestorRect = ancestor.getBoundingClientRect?.();
+      if (!ancestorRect) continue;
+      visibleLeft = Math.max(visibleLeft, ancestorRect.left);
+      visibleRight = Math.min(visibleRight, ancestorRect.right);
+      visibleTop = Math.max(visibleTop, ancestorRect.top);
+      visibleBottom = Math.min(visibleBottom, ancestorRect.bottom);
+      if (visibleRight <= visibleLeft || visibleBottom <= visibleTop) return false;
+    }
+    return true;
+  }
+
+  function isClearlyOwnPostsRoot(root, cards) {
+    if (!root || !cards.length) return false;
+    if (root.matches?.("#userPostedFeeds, [data-revival-own-posts-panel], [data-own-posts-panel], [class*='publish-note']")) return true;
+    return cards.every((card) => Boolean(card.closest?.("#userPostedFeeds, [data-revival-own-posts-panel], [data-own-posts-panel], [class*='publish-note']")));
   }
 
   function rejected(code, reason, diagnostics) {

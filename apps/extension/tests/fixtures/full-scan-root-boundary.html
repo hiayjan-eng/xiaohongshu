@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>M0 活动收藏面板边界夹具</title>
+    <style>
+      * { box-sizing: border-box; }
+      body { margin: 0; font: 14px system-ui, sans-serif; }
+      #userPageContainer { width: 900px; overflow: hidden; }
+      nav, .reds-sticky { padding: 8px 16px; }
+      .main-tabs, .reds-tabs-list { display: flex; gap: 12px; }
+      .reds-tab-item { display: flex; min-width: 40px; height: 40px; }
+      .transform-container { display: flex; width: 2700px; transform: translateX(-900px); }
+      .tab-content-item { flex: 0 0 900px; width: 900px; }
+      .tab-content-item.cached { height: 1px; overflow: hidden; }
+      .tab-content-item.active-panel { height: 520px; overflow: scroll; }
+      .feeds-container { width: 860px; margin: 0 20px; }
+      #favoritesFeeds { height: 480px; overflow-y: auto; }
+      [data-revival-note-card] { height: 30px; border-bottom: 1px solid #ddd; }
+      [data-revival-note-card] a { color: #222; text-decoration: none; }
+      [data-revival-list-end] { padding: 12px; }
+    </style>
+  </head>
+  <body>
+    <div id="userPageContainer" class="user-page ai-mode">
+      <nav aria-label="侧边导航">
+        <a href="/user/profile/m0fixtureprofile" aria-label="我的主页"><img alt="我的头像" />我</a>
+      </nav>
+      <div class="reds-sticky-box user-page-sticky">
+        <div class="reds-sticky">
+          <div class="main-tabs">
+            <div role="tab" aria-selected="false">笔记</div>
+            <div role="tab" aria-selected="true">收藏</div>
+          </div>
+          <div class="tertiary center reds-tabs-list reds-tabs-list">
+            <div class="reds-tab-item sub-tab-list"><span>笔记 · 3000</span></div>
+            <div class="reds-tab-item active sub-tab-list"><span aria-hidden="true"></span></div>
+          </div>
+        </div>
+      </div>
+      <div class="transform-container">
+        <section id="postedPanel" class="tab-content-item cached">
+          <div id="userPostedFeeds" class="feeds-container"></div>
+        </section>
+        <section id="favoritesPanel" class="tab-content-item active-panel">
+          <div id="favoritesFeeds" class="feeds-container" data-revival-scroll-container></div>
+        </section>
+        <section id="likesPanel" class="tab-content-item cached">
+          <div id="userLikedFeeds" class="feeds-container"></div>
+        </section>
+      </div>
+    </div>
+    <script>
+      (() => {
+        const posted = document.getElementById("userPostedFeeds");
+        const favorites = document.getElementById("favoritesFeeds");
+        const likes = document.getElementById("userLikedFeeds");
+        appendCards(posted, "posted", 32);
+        appendCards(favorites, "favorite", 80);
+        appendCards(likes, "liked", 4);
+        appendEnd(favorites);
+        let rootReplacementCount = 0;
+
+        function appendCards(root, prefix, count) {
+          const fragment = document.createDocumentFragment();
+          for (let index = 0; index < count; index += 1) {
+            const sourceId = `${prefix}${String(index).padStart(8, "0")}`;
+            const card = document.createElement("article");
+            card.dataset.revivalNoteCard = "true";
+            card.dataset.sourceId = sourceId;
+            card.dataset.title = `${prefix} title ${index}`;
+            card.dataset.author = `${prefix} author`;
+            const link = document.createElement("a");
+            link.href = `https://www.xiaohongshu.com/explore/${sourceId}`;
+            const title = document.createElement("span");
+            title.dataset.title = "true";
+            title.textContent = card.dataset.title;
+            const author = document.createElement("span");
+            author.dataset.author = "true";
+            author.textContent = card.dataset.author;
+            link.append(title);
+            card.append(link, author);
+            fragment.append(card);
+          }
+          root.append(fragment);
+        }
+
+        function appendEnd(root) {
+          const end = document.createElement("div");
+          end.dataset.revivalListEnd = "true";
+          end.textContent = "没有更多收藏了";
+          root.append(end);
+        }
+
+        function replaceFavoritesRoot() {
+          const current = document.getElementById("favoritesFeeds");
+          const replacement = document.createElement("div");
+          replacement.id = "favoritesFeeds";
+          replacement.className = "feeds-container";
+          replacement.dataset.revivalScrollContainer = "true";
+          replacement.style.cssText = "height:480px;overflow-y:auto";
+          appendCards(replacement, "favorite", 80);
+          appendEnd(replacement);
+          current.replaceWith(replacement);
+          rootReplacementCount += 1;
+        }
+
+        function corruptBeforeFirstPersist() {
+          const transform = document.querySelector(".transform-container");
+          const postedPanel = document.getElementById("postedPanel");
+          const favoritesPanel = document.getElementById("favoritesPanel");
+          transform.style.transform = "translateX(0)";
+          postedPanel.className = "tab-content-item active-panel";
+          favoritesPanel.className = "tab-content-item cached";
+        }
+
+        globalThis.__M0_ROOT_BOUNDARY_FIXTURE__ = {
+          replaceFavoritesRoot,
+          corruptBeforeFirstPersist,
+          get rootReplacementCount() { return rootReplacementCount; }
+        };
+      })();
+    </script>
+  </body>
+</html>

@@ -10,7 +10,7 @@
     <main class="panel-shell">
       <header class="panel-header">
         <div>
-          <p class="eyebrow">M0 全量扫描 Preview 0.3.3</p>
+          <p class="eyebrow">M0 全量扫描 Preview 0.3.4</p>
           <h1>扫描全部收藏</h1>
         </div>
         <span id="statusBadge" class="status-badge" data-status="ready">准备</span>
@@ -32,6 +32,7 @@
 
       <section class="primary-actions" aria-label="扫描操作">
         <button id="startScan" class="primary-button" type="button">扫描全部收藏</button>
+        <button id="discardContaminatedScan" class="primary-button danger-button" type="button" hidden>丢弃本轮错误会话并重新扫描</button>
         <div class="secondary-actions">
           <button id="pauseScan" type="button">暂停</button>
           <button id="resumeScan" type="button">继续</button>
@@ -90,7 +91,7 @@
       <section class="import-card">
         <div>
           <h2>导入收藏复活 Preview</h2>
-          <p>扫描完成后才可进入精确绑定的 M0 Preview；目标页会先核对新增、已存在和待检查数量，再由你确认导入。</p>
+          <p>扫描完成且未被标记 contaminated 后才可进入精确绑定的 M0 Preview；目标页会先核对新增、已存在和待检查数量，再由你确认导入。</p>
         </div>
         <button id="importButton" class="primary-button" type="button" disabled>导入收藏复活</button>
         <p id="importMessage" class="muted">扫描结束前不会自动导入。</p>

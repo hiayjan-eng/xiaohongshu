@@ -63,7 +63,7 @@ async function testPageIdentity() {
     await page.addScriptTag({ content: coreSource });
     const confirmed = await inspect();
     assert.equal(confirmed.ok, true);
-    assert.equal(confirmed.diagnostics.selectorVersion, "m0-real-favorites-v5");
+    assert.equal(confirmed.diagnostics.selectorVersion, "m0-real-favorites-v6");
     assert.equal(confirmed.diagnostics.ownPostsPanelCount, 1);
     assert.equal(confirmed.diagnostics.editProfileSignalFound, false, "matching self link must pass without an edit-profile button");
     assert.equal(confirmed.diagnostics.selfProfileLinkFound, true);
@@ -313,7 +313,7 @@ async function installContentRuntimeMock(page) {
     globalThis.__m0ContentListener = null;
     globalThis.chrome = {
       runtime: {
-        getManifest: () => ({ version: "0.3.3", version_name: "0.3.3-m0-preview" }),
+        getManifest: () => ({ version: "0.3.4", version_name: "0.3.4-m0-preview" }),
         onMessage: { addListener(listener) { globalThis.__m0ContentListener = listener; } },
         sendMessage(_message, callback) { callback?.({ ok: true, session: null, recentItems: [] }); }
       }
@@ -335,7 +335,7 @@ async function sendContentMessage(page, message) {
 async function testSidePanel() {
   const html = await readFile(resolve(extensionRoot, "src", "sidepanel.html"), "utf8");
   const css = await readFile(resolve(extensionRoot, "src", "sidepanel.css"), "utf8");
-  const profile = 'globalThis.__COLLECTION_REVIVAL_BUILD_PROFILE__={id:"m0-preview",versionName:"0.3.3-m0-preview",defaultWebAppUrl:"https://preview.test/m0-preview/",webAppOrigins:["https://preview.test"]};';
+  const profile = 'globalThis.__COLLECTION_REVIVAL_BUILD_PROFILE__={id:"m0-preview",versionName:"0.3.4-m0-preview",defaultWebAppUrl:"https://preview.test/m0-preview/",webAppOrigins:["https://preview.test"]};';
   const sidepanel = await readFile(resolve(extensionRoot, "src", "sidepanel.js"), "utf8");
   const context = await browser.newContext();
   await context.addInitScript(installSidePanelChromeMock);
@@ -351,7 +351,7 @@ async function testSidePanel() {
   try {
     await page.goto("https://extension.test/sidepanel.html", { waitUntil: "domcontentloaded" });
     await page.waitForFunction(() => document.getElementById("pageIdentity")?.textContent?.includes("收藏"));
-    assert.equal(await page.locator(".eyebrow").textContent(), "M0 全量扫描 Preview 0.3.3");
+    assert.equal(await page.locator(".eyebrow").textContent(), "M0 全量扫描 Preview 0.3.4");
     assert.equal(await page.locator("#currentUrlProfileId").textContent(), "已脱敏 •1234");
     assert.equal(await page.locator("#selfProfileLinkStatus").textContent(), "找到");
     assert.equal(await page.locator("#profileIdMatch").textContent(), "是");
@@ -417,6 +417,20 @@ async function testSidePanel() {
     assert.equal(await routeTransitionPage.locator("#startScan").isDisabled(), true);
     await routeTransitionPage.close();
 
+    const contaminatedPage = await context.newPage();
+    await contaminatedPage.goto("https://extension.test/sidepanel.html?contaminated=1", { waitUntil: "domcontentloaded" });
+    await contaminatedPage.waitForFunction(() => document.getElementById("statusBadge")?.textContent === "已污染");
+    assert.equal(await contaminatedPage.locator("#startScan").isDisabled(), true);
+    assert.equal(await contaminatedPage.locator("#importButton").isDisabled(), true);
+    assert.equal(await contaminatedPage.locator("#discardContaminatedScan").isVisible(), true);
+    await contaminatedPage.locator("#discardContaminatedScan").click();
+    await contaminatedPage.waitForFunction(() => document.getElementById("statusBadge")?.textContent === "扫描中");
+    const contaminatedMessages = await contaminatedPage.evaluate(() => globalThis.__sidePanelMessages.map((message) => message.type));
+    assert.ok(contaminatedMessages.includes("M0_FULL_SCAN_INVALIDATE_SESSION"));
+    assert.ok(contaminatedMessages.includes("M0_FULL_SCAN_DISCARD_CONTAMINATED_SESSION"));
+    assert.ok(contaminatedMessages.includes("M0_FULL_SCAN_START"));
+    await contaminatedPage.close();
+
     const failurePage = await context.newPage();
     await failurePage.goto("https://extension.test/sidepanel.html?injectionFailure=1", { waitUntil: "domcontentloaded" });
     await failurePage.waitForFunction(() => document.getElementById("safetyMessage")?.textContent?.includes("内容脚本注入失败"));
@@ -424,7 +438,7 @@ async function testSidePanel() {
     assert.equal((await failurePage.locator("#safetyMessage").textContent()).includes("请确认当前位于"), false);
     await failurePage.close();
 
-    return { opened: true, delayedDomAutoPassed: true, permanentMissingTimedOut: true, manualRedetectPassed: true, routeToFavoritesAutoPassed: true, routeBackToNotesBlocked: true, activeTabChangeDetected: true, subtabDomDiagnosticsCopied: true, boundaryFailureDiagnosticsCopied: true, apexHost: true, safeReinjection: true, explicitInjectionFailure: true, randomReview: 2, popupIndependent: true };
+    return { opened: true, delayedDomAutoPassed: true, permanentMissingTimedOut: true, manualRedetectPassed: true, routeToFavoritesAutoPassed: true, routeBackToNotesBlocked: true, activeTabChangeDetected: true, contaminatedSessionDiscardedAndRestarted: true, subtabDomDiagnosticsCopied: true, boundaryFailureDiagnosticsCopied: true, apexHost: true, safeReinjection: true, explicitInjectionFailure: true, randomReview: 2, popupIndependent: true };
   } finally {
     await context.close();
   }
@@ -514,7 +528,7 @@ function createFixtureItems(total) {
     coverUrl: "",
     visibleExcerpt: `仅用于自动测试的脱敏夹具 ${index}`,
     capturedAt: "2026-07-30T00:00:00.000Z",
-    selectorVersion: "m0-real-favorites-v5"
+    selectorVersion: "m0-real-favorites-v6"
   }));
 }
 
@@ -525,12 +539,12 @@ function installPreviewBridgeMock(items) {
     if (event.source !== window || message.source !== "collection-revival-m0-preview-web") return;
     let response;
     if (message.type === "M0_PREVIEW_IMPORT_META_REQUEST") {
-      response = { ok: true, meta: { importBatchId: message.importBatchId, scanSessionId: "scan_fixture", extensionVersion: "0.3.3-m0-preview", totalCount: items.length, reviewCount: 0, selectorVersion: "m0-real-favorites-v5", status: "prepared" } };
+      response = { ok: true, meta: { importBatchId: message.importBatchId, scanSessionId: "scan_fixture", extensionVersion: "0.3.4-m0-preview", totalCount: items.length, reviewCount: 0, selectorVersion: "m0-real-favorites-v6", status: "prepared" } };
     } else if (message.type === "M0_PREVIEW_IMPORT_CHUNK_REQUEST") {
       const offset = Number(message.offset) || 0;
       const limit = Number(message.limit) || 200;
       const chunkItems = items.slice(offset, offset + limit);
-      response = { ok: true, chunk: { importBatchId: message.importBatchId, scanSessionId: "scan_fixture", extensionVersion: "0.3.3-m0-preview", items: chunkItems, offset, nextOffset: offset + chunkItems.length, hasMore: offset + chunkItems.length < items.length, totalCount: items.length } };
+      response = { ok: true, chunk: { importBatchId: message.importBatchId, scanSessionId: "scan_fixture", extensionVersion: "0.3.4-m0-preview", items: chunkItems, offset, nextOffset: offset + chunkItems.length, hasMore: offset + chunkItems.length < items.length, totalCount: items.length } };
     } else if (message.type === "M0_PREVIEW_IMPORT_RESULT") response = { ok: true };
     else return;
     window.setTimeout(() => window.postMessage({ source: "collection-revival-extension", type: "M0_PREVIEW_RESPONSE", requestId: message.requestId, requestType: message.type, response }, window.location.origin), 0);
@@ -560,8 +574,10 @@ function installSidePanelChromeMock() {
   const tabActivatedListeners = [];
   const tabUpdatedListeners = [];
   const delayedReadyCallbacks = [];
-  const session = { sessionId: "scan_sidepanel", status: "completed", discoveredCount: 20, validCount: 20, existingCount: 0, invalidCount: 0, missingLinkCount: 0, reviewCount: 0, resumeCount: 1, lastScrollTop: 100, lastScrollHeight: 100, stableNoGrowthCycles: 6, startedAt: "2026-07-30T00:00:00.000Z", completedAt: "2026-07-30T00:01:00.000Z", selectorVersion: "m0-real-favorites-v5", extensionVersion: "0.3.3-m0-preview" };
-  const inspection = { ok: true, identity: { profileIdHash: "abcd1234", favoritesPageIdentity: "fixture-page", selectorVersion: "m0-real-favorites-v5" }, diagnostics: { selectorVersion: "m0-real-favorites-v5", currentUrlProfileIdHash: "abcd1234", selfProfileLinkFound: true, profileIdMatch: true, editProfileSignalFound: false, notesTabCandidateText: "笔记 · 3464", notesTabActiveStateSource: "aria-selected", notesTabMatch: true, ownPostsPanelCount: 1, likesPanelCount: 1 } };
+  let session = location.search.includes("contaminated=1")
+    ? { sessionId: "scan_contaminated", status: "scanning", discoveredCount: 32, validCount: 32, existingCount: 0, invalidCount: 0, missingLinkCount: 0, reviewCount: 0, resumeCount: 0, lastScrollTop: 10138, lastScrollHeight: 29717, stableNoGrowthCycles: 0, startedAt: "2026-08-02T00:00:00.000Z", completedAt: "", selectorVersion: "m0-real-favorites-v5", extensionVersion: "0.3.3-m0-preview" }
+    : { sessionId: "scan_sidepanel", status: "completed", discoveredCount: 20, validCount: 20, existingCount: 0, invalidCount: 0, missingLinkCount: 0, reviewCount: 0, resumeCount: 1, lastScrollTop: 100, lastScrollHeight: 100, stableNoGrowthCycles: 6, startedAt: "2026-07-30T00:00:00.000Z", completedAt: "2026-07-30T00:01:00.000Z", selectorVersion: "m0-real-favorites-v6", extensionVersion: "0.3.4-m0-preview" };
+  const inspection = { ok: true, identity: { profileIdHash: "abcd1234", favoritesPageIdentity: "fixture-page", selectorVersion: "m0-real-favorites-v6" }, diagnostics: { selectorVersion: "m0-real-favorites-v6", currentUrlProfileIdHash: "abcd1234", selfProfileLinkFound: true, profileIdMatch: true, editProfileSignalFound: false, notesTabCandidateText: "笔记 · 3464", notesTabActiveStateSource: "aria-selected", notesTabMatch: true, ownPostsPanelCount: 1, likesPanelCount: 1 } };
   const subtabDomDiagnostics = {
     diagnosticVersion: "m0-subtab-dom-diagnostic-v1",
     candidates: {
@@ -600,13 +616,21 @@ function installSidePanelChromeMock() {
   globalThis.chrome = {
     runtime: {
       lastError: null,
-      getManifest: () => ({ version: "0.3.3", version_name: "0.3.3-m0-preview", action: {} }),
+      getManifest: () => ({ version: "0.3.4", version_name: "0.3.4-m0-preview", action: {} }),
       onMessage: { addListener(listener) { runtimeListeners.push(listener); } },
       sendMessage(message, callback) {
         globalThis.__sidePanelMessages.push(message);
         if (message.type === "M0_FULL_SCAN_GET_SESSION") callback({ ok: true, session, recentItems: items });
         else if (message.type === "M0_FULL_SCAN_LIST_ITEMS") callback({ ok: true, items, totalMatched: 2 });
         else if (message.type === "M0_FULL_SCAN_GET_DIAGNOSTICS") callback({ ok: true, diagnostics: { session, verification: { consistent: true, uniqueSourceIdCount: 20 } } });
+        else if (message.type === "M0_FULL_SCAN_INVALIDATE_SESSION") {
+          session = { ...session, status: "contaminated", lastErrorCode: message.code, lastErrorMessage: message.reason };
+          callback({ ok: true, session });
+        }
+        else if (message.type === "M0_FULL_SCAN_DISCARD_CONTAMINATED_SESSION") {
+          session = { ...session, status: "discarded", discoveredCount: 0, validCount: 0, itemsCheckpoint: 0 };
+          callback({ ok: true, session, deletedItemCount: 32, preservedExistingItemCount: 0 });
+        }
         else callback({ ok: true });
       }
     },
@@ -629,6 +653,10 @@ function installSidePanelChromeMock() {
         else if (message.type === "M0_FULL_SCAN_WAIT_PAGE_READY") callback({ ok: true, inspection: currentInspection(), timedOut: pageState === "missing" });
         else if (message.type === "M0_FULL_SCAN_GET_SUBTAB_DOM_DIAGNOSTICS") callback({ ok: true, diagnostics: subtabDomDiagnostics });
         else if (message.type === "M0_FULL_SCAN_GET_RUNTIME_DIAGNOSTICS") callback({ ok: true, diagnostics: { maxBufferedItems: 25, recentItemCount: 12, scrollMode: "element" } });
+        else if (message.type === "M0_FULL_SCAN_START") {
+          session = { ...session, sessionId: "scan_clean", status: "scanning", discoveredCount: 0, validCount: 0, itemsCheckpoint: 0, extensionVersion: "0.3.4-m0-preview", selectorVersion: "m0-real-favorites-v6" };
+          callback({ ok: true, session });
+        }
         else callback({ ok: true, session });
       },
       create: async () => ({ id: 8 })

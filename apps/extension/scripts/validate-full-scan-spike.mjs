@@ -51,7 +51,7 @@ const background = readFileSync(new URL("../src/background.js", import.meta.url)
 const build = readFileSync(new URL("./build-extension.mjs", import.meta.url), "utf8");
 
 for (const marker of [
-  "M0 全量扫描 Preview 0.3.3",
+  "M0 全量扫描 Preview 0.3.4",
   "扫描全部收藏",
   "暂停",
   "继续",
@@ -80,6 +80,9 @@ for (const marker of [
   "END_NOT_PROVEN",
   "fallbackScrollAttempts",
   "rootRebindCount",
+  "active-transform-tab-content",
+  "validateCaptureBoundary",
+  "FIRST_BATCH_OWN_POSTS_DETECTED",
   "M0_FULL_SCAN_VERIFY_SESSION"
 ]) {
   if (!core.includes(marker)) throw new Error(`Missing full scan engine marker: ${marker}`);
@@ -138,6 +141,9 @@ for (const marker of [
   if (!content.includes(marker) && !sidepanelJs.includes(marker)) {
     throw new Error(`Missing Side Panel/content communication marker: ${marker}`);
   }
+}
+for (const marker of ["M0_FULL_SCAN_INVALIDATE_SESSION", "M0_FULL_SCAN_DISCARD_CONTAMINATED_SESSION", "discardContaminatedSession"]) {
+  if (!idb.includes(marker) && !background.includes(marker)) throw new Error(`Missing contaminated session guard: ${marker}`);
 }
 
 for (const marker of [

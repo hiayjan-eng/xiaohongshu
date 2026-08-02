@@ -25,7 +25,7 @@
     </nav>
     <nav class="main-tabs" aria-label="主标签">
       <button role="tab" aria-selected="false">笔记</button>
-      <button role="tab" aria-selected="true" data-revival-tab="favorites">收藏</button>
+      <button role="tab" aria-selected="true" aria-controls="favorites-root" data-revival-tab="favorites">收藏</button>
     </nav>
     <div class="reds-sticky">
       <div class="tertiary center reds-tabs-list reds-tabs-list">
@@ -66,6 +66,7 @@
 
         function createRoot() {
           const element = document.createElement("div");
+          element.id = "favorites-root";
           element.className = "feeds-container";
           element.setAttribute("aria-label", "收藏笔记列表");
           profileContent.append(element);
@@ -121,6 +122,7 @@
           const previous = root;
           const replacement = document.createElement("div");
           replacement.className = previous.className;
+          replacement.id = previous.id;
           replacement.setAttribute("aria-label", "收藏笔记列表");
           appendCards(replacement, 0, loaded);
           previous.replaceWith(replacement);

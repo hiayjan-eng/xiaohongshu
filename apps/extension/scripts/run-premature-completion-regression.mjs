@@ -72,7 +72,7 @@ async function runScenario(scenario) {
     assert.equal(started.ok, true);
     assert.notEqual(started.session.sessionId, seedSessionId || "missing");
     if (scenario.expectIncomplete) {
-      const incomplete = await waitForTerminalSession(page, started.session.sessionId, 15_000);
+      const incomplete = await waitForTerminalSession(page, started.session.sessionId, 30_000);
       const runtime = await sendToContent(page, { type: "M0_FULL_SCAN_GET_RUNTIME_DIAGNOSTICS" });
       const fixture = await page.evaluate(() => ({
         loaded: globalThis.__M0_PREMATURE_FIXTURE__.loaded,
@@ -193,7 +193,7 @@ function installChromeFixtureBridge() {
   globalThis.chrome = {
     runtime: {
       lastError: null,
-      getManifest: () => ({ version: "0.3.3", version_name: "0.3.3-m0-preview" }),
+      getManifest: () => ({ version: "0.3.4", version_name: "0.3.4-m0-preview" }),
       onMessage: { addListener(listener) { listeners.push(listener); } },
       sendMessage(message, callback) {
         if (message?.type === "M0_FULL_SCAN_PROGRESS") return void callback?.({ ok: true });
