@@ -68,12 +68,15 @@ for (const marker of [
   "扩展未连接",
   "currentUrlProfileId",
   "selfProfileLinkStatus",
-  "profileIdMatch"
+  "profileIdMatch",
+  "notesTabCandidateText",
+  "notesTabActiveStateSource",
+  "notesTabMatch"
 ]) assertIncludes(sidepanel, marker, "Side Panel");
 
 const core = read("apps/extension/src/full-scan-core.js");
 for (const marker of [
-  "m0-real-favorites-v3",
+  "m0-real-favorites-v4",
   "OWN_PROFILE_UNCONFIRMED",
   "FAVORITES_TAB_UNCONFIRMED",
   "NOTES_TAB_UNCONFIRMED",
@@ -86,9 +89,14 @@ for (const marker of [
   "currentUrlProfileIdHash",
   "selfProfileLinkFound",
   "profileIdMatch",
+  "notesTabCandidateText",
+  "notesTabActiveStateSource",
+  "notesTabMatch",
   "navigation-self-profile",
   "navigation-account-avatar",
-  "editProfileSignalFound"
+  "editProfileSignalFound",
+  "findVisibleActiveNotesTab",
+  "findProfileSubtabGroup"
 ]) assertIncludes(core, marker, "strict page/full scan core");
 if (core.includes("root = document.body") || core.includes("element: document.body")) throw new Error("document.body fallback is forbidden.");
 

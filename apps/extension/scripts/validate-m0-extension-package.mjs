@@ -38,12 +38,12 @@ for (const marker of ['id": "m0-preview', 'versionName": "0.3.0-m0-preview', `${
 if (profile.includes("xiaohongshu-green.vercel.app")) throw new Error("Production origin leaked into M0 build profile.");
 const sidepanel = read("src/sidepanel.html");
 const sidepanelScript = read("src/sidepanel.js");
-for (const marker of ["establishContentConnection", "chrome.scripting.executeScript", "内容脚本注入失败", "扩展未连接", "currentUrlProfileId", "selfProfileLinkStatus", "profileIdMatch"]) {
+for (const marker of ["establishContentConnection", "chrome.scripting.executeScript", "内容脚本注入失败", "扩展未连接", "currentUrlProfileId", "selfProfileLinkStatus", "profileIdMatch", "notesTabCandidateText", "notesTabActiveStateSource", "notesTabMatch"]) {
   if (!sidepanelScript.includes(marker)) throw new Error(`M0 Side Panel handshake recovery is missing: ${marker}`);
 }
 if (!sidepanel.includes("M0 全量扫描 Preview 0.3.0") || !sidepanel.includes("导入收藏复活")) throw new Error("M0 Side Panel identity/import action is missing.");
 const packagedCore = read("src/full-scan-core.js");
-for (const marker of ["currentUrlProfileIdHash", "selfProfileLinkFound", "profileIdMatch", "navigation-self-profile", "editProfileSignalFound"]) {
+for (const marker of ["currentUrlProfileIdHash", "selfProfileLinkFound", "profileIdMatch", "navigation-self-profile", "editProfileSignalFound", "findVisibleActiveNotesTab", "findProfileSubtabGroup", "notesTabActiveStateSource", "notesTabMatch"]) {
   if (!packagedCore.includes(marker)) throw new Error(`M0 self-profile verification is missing: ${marker}`);
 }
 for (const file of ["src/full-scan-core.js", "src/full-scan-content.js", "src/full-scan-idb.js", "src/background.js", "src/web-bridge.js", "src/sidepanel.js"]) {

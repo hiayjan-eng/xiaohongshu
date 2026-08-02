@@ -1,6 +1,6 @@
 (() => {
   const ids = [
-    "statusBadge", "pageIdentity", "profileIdentity", "currentUrlProfileId", "selfProfileLinkStatus", "profileIdMatch", "selectorVersion", "safetyMessage",
+    "statusBadge", "pageIdentity", "profileIdentity", "currentUrlProfileId", "selfProfileLinkStatus", "profileIdMatch", "notesTabCandidateText", "notesTabActiveStateSource", "notesTabMatch", "selectorVersion", "safetyMessage",
     "startScan", "pauseScan", "resumeScan", "stopScan", "restartScan", "progressMessage",
     "elapsedTime", "progressFill", "scrollProgress", "discoveredCount", "validCount",
     "existingCount", "missingLinkCount", "reviewCount", "resumeCount", "searchForm",
@@ -282,6 +282,9 @@
     elements.currentUrlProfileId.textContent = hash ? `已脱敏 •${hash.slice(-4)}` : "未读取";
     elements.selfProfileLinkStatus.textContent = value?.selfProfileLinkFound ? "找到" : "未找到";
     elements.profileIdMatch.textContent = value?.profileIdMatch === true ? "是" : "否";
+    elements.notesTabCandidateText.textContent = value?.notesTabCandidateText || "未找到";
+    elements.notesTabActiveStateSource.textContent = value?.notesTabActiveStateSource && value.notesTabActiveStateSource !== "none" ? value.notesTabActiveStateSource : "未找到";
+    elements.notesTabMatch.textContent = value?.notesTabMatch === true ? "是" : "否";
   }
 
   async function establishContentConnection(tab) {

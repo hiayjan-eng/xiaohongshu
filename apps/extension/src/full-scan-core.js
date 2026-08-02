@@ -1,5 +1,5 @@
 (() => {
-  const SELECTOR_VERSION = "m0-real-favorites-v3";
+  const SELECTOR_VERSION = "m0-real-favorites-v4";
   const REQUIRED_STABLE_CYCLES = 5;
   const PERSIST_BATCH_SIZE = 25;
   const RECENT_LIMIT = 12;
@@ -337,7 +337,8 @@
     const profileId = profileMatch[1];
     const ownProfile = confirmOwnProfile(document, profileId, location);
     const profileDiagnostics = ownProfile.diagnostics;
-    const rejectProfilePage = (code, reason) => rejected(code, reason, profileDiagnostics);
+    let boundaryDiagnostics = profileDiagnostics;
+    const rejectProfilePage = (code, reason) => rejected(code, reason, boundaryDiagnostics);
     if (!ownProfile.confirmed) {
       const reason = profileDiagnostics.selfProfileLinkFound
         ? "已找到 self-profile link，但链接中的 profileId 与当前 URL 不一致。为避免扫描其他用户主页，本次未开始扫描。"
@@ -353,7 +354,9 @@
 
     const activeFavoriteTab = findVisibleActiveTab(document, "收藏", "favorites");
     if (!activeFavoriteTab) return rejectProfilePage("FAVORITES_TAB_UNCONFIRMED", "未确认可见激活主 tab 为“收藏”。");
-    const activeNotesTab = findVisibleActiveTab(document, "笔记", "notes");
+    const notesTab = findVisibleActiveNotesTab(document);
+    boundaryDiagnostics = { ...profileDiagnostics, ...notesTab.diagnostics };
+    const activeNotesTab = notesTab.element;
     if (!activeNotesTab) return rejectProfilePage("NOTES_TAB_UNCONFIRMED", "未确认可见激活子 tab 为“笔记”。");
 
     const root = findFavoritesRoot(document, activeFavoriteTab, activeNotesTab);
@@ -388,7 +391,7 @@
         scrollMode: scrollContainer === document.scrollingElement ? "window" : "element",
         ownPostsPanelCount: ownPostsPanels.length,
         likesPanelCount: likesPanels.length,
-        ...profileDiagnostics,
+        ...boundaryDiagnostics,
         selectorVersion: SELECTOR_VERSION
       }
     };
@@ -498,6 +501,67 @@
     return Array.from(document.querySelectorAll(selectors.join(","))).find((element) => {
       return isVisible(element) && normalizeText(element.textContent) === expectedText;
     }) || null;
+  }
+
+  const PROFILE_SUBTAB_SELECTOR = [
+    "[data-revival-subtab]",
+    "[role='tab']",
+    "[class*='tab']",
+    "[class*='channel']"
+  ].join(",");
+  const NOTES_TAB_TEXT = /^笔记(?:\s*[·•:：-]?\s*\d+)?$/;
+  const ALBUMS_TAB_TEXT = /^专辑(?:\s*[·•:：-]?\s*\d+)?$/;
+  const FILES_TAB_TEXT = /^文件(?:\s*[·•:：-]?\s*\d+)?$/;
+
+  function findVisibleActiveNotesTab(document) {
+    const evaluated = Array.from(document.querySelectorAll(PROFILE_SUBTAB_SELECTOR))
+      .filter((element) => isVisible(element) && NOTES_TAB_TEXT.test(normalizeText(element.textContent)))
+      .map((element) => {
+        const group = findProfileSubtabGroup(element);
+        return {
+          element,
+          text: normalizeText(element.textContent),
+          group,
+          activeStateSource: group ? findActiveStateSource(element, group) : "none"
+        };
+      });
+    const matched = evaluated.find((candidate) => candidate.group && candidate.activeStateSource !== "none") || null;
+    const diagnosticCandidate = matched || evaluated.find((candidate) => candidate.group) || null;
+    return {
+      element: matched?.element || null,
+      diagnostics: {
+        notesTabCandidateText: diagnosticCandidate?.text || "",
+        notesTabActiveStateSource: diagnosticCandidate?.activeStateSource || "none",
+        notesTabMatch: Boolean(matched)
+      }
+    };
+  }
+
+  function findProfileSubtabGroup(element) {
+    let container = element?.parentElement || null;
+    for (let depth = 0; container && depth < 5; depth += 1, container = container.parentElement) {
+      if (container === element.ownerDocument?.body) break;
+      const itemTexts = Array.from(container.children || []).map((child) => normalizeText(child.textContent));
+      const hasNotes = itemTexts.some((text) => NOTES_TAB_TEXT.test(text));
+      const hasAlbums = itemTexts.some((text) => ALBUMS_TAB_TEXT.test(text));
+      const hasFiles = itemTexts.some((text) => FILES_TAB_TEXT.test(text));
+      if (hasNotes && hasAlbums && hasFiles) return container;
+    }
+    return null;
+  }
+
+  function findActiveStateSource(element, group) {
+    let current = element;
+    while (current && current !== group) {
+      if (current.getAttribute?.("aria-selected") === "true") return "aria-selected";
+      if (["page", "true"].includes(current.getAttribute?.("aria-current"))) return "aria-current";
+      if (["active", "selected", "current"].includes(String(current.getAttribute?.("data-state") || "").toLowerCase())) return "data-state";
+      const className = String(current.className || "");
+      const classSignal = className.match(/(?:^|\s)(active|selected|current)(?:\s|$)/i)?.[1]?.toLowerCase();
+      if (classSignal) return `class:${classSignal}`;
+      current = current.parentElement;
+    }
+    return "none";
   }
 
   function findFavoritesRoot(document, activeFavoriteTab, activeNotesTab) {

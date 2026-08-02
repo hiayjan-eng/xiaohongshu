@@ -63,12 +63,22 @@ async function testPageIdentity() {
     await page.addScriptTag({ content: coreSource });
     const confirmed = await inspect();
     assert.equal(confirmed.ok, true);
-    assert.equal(confirmed.diagnostics.selectorVersion, "m0-real-favorites-v3");
+    assert.equal(confirmed.diagnostics.selectorVersion, "m0-real-favorites-v4");
     assert.equal(confirmed.diagnostics.ownPostsPanelCount, 1);
     assert.equal(confirmed.diagnostics.editProfileSignalFound, false, "matching self link must pass without an edit-profile button");
     assert.equal(confirmed.diagnostics.selfProfileLinkFound, true);
     assert.equal(confirmed.diagnostics.profileIdMatch, true);
     assert.equal(confirmed.diagnostics.currentUrlProfileIdHash.length, 8);
+    assert.equal(confirmed.diagnostics.notesTabCandidateText, "笔记 · 3464");
+    assert.equal(confirmed.diagnostics.notesTabActiveStateSource, "aria-selected");
+    assert.equal(confirmed.diagnostics.notesTabMatch, true);
+    for (const notesText of ["笔记", "笔记 · 3464", "笔记 3464", "笔记·3464"]) {
+      await page.evaluate((text) => { document.querySelector('[data-revival-subtab="notes"]').textContent = text; }, notesText);
+      const supportedFormat = await inspect();
+      assert.equal(supportedFormat.ok, true, `supported notes tab text must pass: ${notesText}`);
+      assert.equal(supportedFormat.diagnostics.notesTabCandidateText, notesText);
+      assert.equal(supportedFormat.diagnostics.notesTabMatch, true);
+    }
 
     await page.evaluate(() => history.replaceState(null, "", "/user/profile/m0fixtureprofile?tab=note"));
     assert.equal((await inspect()).code, "FAVORITES_ROUTE_UNCONFIRMED");
@@ -107,15 +117,53 @@ async function testPageIdentity() {
 
     await page.reload({ waitUntil: "domcontentloaded" });
     await page.addScriptTag({ content: coreSource });
-    await page.evaluate(() => document.querySelector('[data-revival-subtab="notes"]').setAttribute("aria-selected", "false"));
-    assert.equal((await inspect()).code, "NOTES_TAB_UNCONFIRMED");
+    await page.evaluate(() => {
+      const notes = document.querySelector('[data-revival-subtab="notes"]');
+      notes.setAttribute("aria-selected", "false");
+      notes.classList.remove("active");
+    });
+    const inactiveCountedNotes = await inspect();
+    assert.equal(inactiveCountedNotes.code, "NOTES_TAB_UNCONFIRMED");
+    assert.equal(inactiveCountedNotes.diagnostics.notesTabCandidateText, "笔记 · 3464");
+    assert.equal(inactiveCountedNotes.diagnostics.notesTabActiveStateSource, "none");
+    assert.equal(inactiveCountedNotes.diagnostics.notesTabMatch, false);
+
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.addScriptTag({ content: coreSource });
+    await page.evaluate(() => {
+      const notes = document.querySelector('[data-revival-subtab="notes"]');
+      const albums = document.querySelector('[data-revival-subtab="albums"]');
+      notes.setAttribute("aria-selected", "false");
+      notes.classList.remove("active");
+      albums.setAttribute("aria-selected", "true");
+      albums.classList.add("active");
+    });
+    const activeAlbums = await inspect();
+    assert.equal(activeAlbums.code, "NOTES_TAB_UNCONFIRMED");
+    assert.equal(activeAlbums.diagnostics.notesTabMatch, false);
+
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.addScriptTag({ content: coreSource });
+    await page.evaluate(() => {
+      const notes = document.querySelector('[data-revival-subtab="notes"]');
+      notes.textContent = "动态";
+      notes.setAttribute("aria-selected", "false");
+      notes.classList.remove("active");
+      const bodyText = document.createElement("p");
+      bodyText.textContent = "笔记";
+      document.body.append(bodyText);
+    });
+    const bodyNotesText = await inspect();
+    assert.equal(bodyNotesText.code, "NOTES_TAB_UNCONFIRMED");
+    assert.equal(bodyNotesText.diagnostics.notesTabCandidateText, "");
+    assert.equal(bodyNotesText.diagnostics.notesTabMatch, false);
 
     for (const [mode, code] of [["risk", "RISK_CONTROL"], ["login", "LOGIN_EXPIRED"], ["network", "NETWORK_ERROR"]]) {
       await page.goto(`https://www.xiaohongshu.com/user/profile/m0fixtureprofile?tab=fav&subTab=note&total=20&mode=${mode}`, { waitUntil: "domcontentloaded" });
       await page.addScriptTag({ content: coreSource });
       assert.equal((await inspect()).code, code);
     }
-    return { strictFavoritesConfirmed: true, selfLinkWithoutEditButton: true, mismatchedSelfLinkBlocked: true, editProfileOnlyBlocked: true, otherProfileBlocked: true, inactiveFavoritesBlocked: true, inactiveNotesBlocked: true, noWwwHandshake: true, noWwwRefreshHandshake: true, ownPostFalseImportCount: 0, blockersSafePaused: 3 };
+    return { strictFavoritesConfirmed: true, countedActiveNotesPassed: true, inactiveCountedNotesBlocked: true, activeAlbumsBlocked: true, bodyNotesTextBlocked: true, selfLinkWithoutEditButton: true, mismatchedSelfLinkBlocked: true, editProfileOnlyBlocked: true, otherProfileBlocked: true, inactiveFavoritesBlocked: true, inactiveNotesBlocked: true, noWwwHandshake: true, noWwwRefreshHandshake: true, ownPostFalseImportCount: 0, blockersSafePaused: 3 };
   } finally {
     await context.close();
   }
@@ -164,6 +212,9 @@ async function testSidePanel() {
     assert.equal(await page.locator("#currentUrlProfileId").textContent(), "已脱敏 •1234");
     assert.equal(await page.locator("#selfProfileLinkStatus").textContent(), "找到");
     assert.equal(await page.locator("#profileIdMatch").textContent(), "是");
+    assert.equal(await page.locator("#notesTabCandidateText").textContent(), "笔记 · 3464");
+    assert.equal(await page.locator("#notesTabActiveStateSource").textContent(), "aria-selected");
+    assert.equal(await page.locator("#notesTabMatch").textContent(), "是");
     assert.equal(await page.locator("#startScan").isEnabled(), true);
     await page.locator("#randomButton").click();
     await page.waitForFunction(() => document.querySelectorAll("#resultItems li").length === 2);
@@ -274,7 +325,7 @@ function createFixtureItems(total) {
     coverUrl: "",
     visibleExcerpt: `仅用于自动测试的脱敏夹具 ${index}`,
     capturedAt: "2026-07-30T00:00:00.000Z",
-    selectorVersion: "m0-real-favorites-v3"
+    selectorVersion: "m0-real-favorites-v4"
   }));
 }
 
@@ -285,7 +336,7 @@ function installPreviewBridgeMock(items) {
     if (event.source !== window || message.source !== "collection-revival-m0-preview-web") return;
     let response;
     if (message.type === "M0_PREVIEW_IMPORT_META_REQUEST") {
-      response = { ok: true, meta: { importBatchId: message.importBatchId, scanSessionId: "scan_fixture", extensionVersion: "0.3.0-m0-preview", totalCount: items.length, reviewCount: 0, selectorVersion: "m0-real-favorites-v3", status: "prepared" } };
+      response = { ok: true, meta: { importBatchId: message.importBatchId, scanSessionId: "scan_fixture", extensionVersion: "0.3.0-m0-preview", totalCount: items.length, reviewCount: 0, selectorVersion: "m0-real-favorites-v4", status: "prepared" } };
     } else if (message.type === "M0_PREVIEW_IMPORT_CHUNK_REQUEST") {
       const offset = Number(message.offset) || 0;
       const limit = Number(message.limit) || 200;
@@ -301,8 +352,8 @@ function installSidePanelChromeMock() {
   globalThis.__sidePanelMessages = [];
   globalThis.__sidePanelInjections = [];
   let contentConnected = false;
-  const session = { sessionId: "scan_sidepanel", status: "completed", discoveredCount: 20, validCount: 20, existingCount: 0, invalidCount: 0, missingLinkCount: 0, reviewCount: 0, resumeCount: 1, lastScrollTop: 100, lastScrollHeight: 100, stableNoGrowthCycles: 6, startedAt: "2026-07-30T00:00:00.000Z", completedAt: "2026-07-30T00:01:00.000Z", selectorVersion: "m0-real-favorites-v3", extensionVersion: "0.3.0-m0-preview" };
-  const inspection = { ok: true, identity: { profileIdHash: "abcd1234", favoritesPageIdentity: "fixture-page", selectorVersion: "m0-real-favorites-v3" }, diagnostics: { selectorVersion: "m0-real-favorites-v3", currentUrlProfileIdHash: "abcd1234", selfProfileLinkFound: true, profileIdMatch: true, editProfileSignalFound: false, ownPostsPanelCount: 1, likesPanelCount: 1 } };
+  const session = { sessionId: "scan_sidepanel", status: "completed", discoveredCount: 20, validCount: 20, existingCount: 0, invalidCount: 0, missingLinkCount: 0, reviewCount: 0, resumeCount: 1, lastScrollTop: 100, lastScrollHeight: 100, stableNoGrowthCycles: 6, startedAt: "2026-07-30T00:00:00.000Z", completedAt: "2026-07-30T00:01:00.000Z", selectorVersion: "m0-real-favorites-v4", extensionVersion: "0.3.0-m0-preview" };
+  const inspection = { ok: true, identity: { profileIdHash: "abcd1234", favoritesPageIdentity: "fixture-page", selectorVersion: "m0-real-favorites-v4" }, diagnostics: { selectorVersion: "m0-real-favorites-v4", currentUrlProfileIdHash: "abcd1234", selfProfileLinkFound: true, profileIdMatch: true, editProfileSignalFound: false, notesTabCandidateText: "笔记 · 3464", notesTabActiveStateSource: "aria-selected", notesTabMatch: true, ownPostsPanelCount: 1, likesPanelCount: 1 } };
   const items = [0, 1].map((index) => ({ sourceId: `sidepanel${index}`, title: `抽查 ${index}`, author: "测试作者", canonicalSourceUrl: `https://www.xiaohongshu.com/explore/sidepanel${index}` }));
   const runtimeListeners = [];
   globalThis.chrome = {
