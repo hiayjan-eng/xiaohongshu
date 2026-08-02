@@ -38,11 +38,15 @@ let apiProbeSession = null;
 
 async function handleApiSyncMessage(message, sender) {
   if (message.type === "M0_API_PROBE_START") {
-    if (!sender.tab?.id) throw new Error("Open the Xiaohongshu favorites page before detecting APIs.");
+    const targetTabId = Number(message.targetTabId);
+    if (!Number.isInteger(targetTabId) || targetTabId <= 0) throw new Error("Target Xiaohongshu tab is required.");
+    const tab = await chrome.tabs.get(targetTabId);
+    const url = new URL(tab.url || "");
+    if (url.protocol !== "https:" || !["xiaohongshu.com", "www.xiaohongshu.com"].includes(url.hostname)) throw new Error("当前标签页不是小红书页面，无法开始检测。");
     apiProbeRecords.length = 0;
-    apiProbeBridgeTabs.delete(sender.tab.id);
-    apiProbeMainTabs.delete(sender.tab.id);
-    apiProbeSession = createProbeSession(sender.tab.id);
+    apiProbeBridgeTabs.delete(targetTabId);
+    apiProbeMainTabs.delete(targetTabId);
+    apiProbeSession = createProbeSession(targetTabId);
     return { ok: true, probes: [], session: summarizeProbeSession() };
   }
   if (message.type === "M0_API_PROBE_BRIDGE_READY") {
@@ -63,7 +67,7 @@ async function handleApiSyncMessage(message, sender) {
       if (existing >= 0) apiProbeRecords[existing] = mergeProbe(apiProbeRecords[existing], probe); else apiProbeRecords.push(probe);
       chrome.runtime.sendMessage({ type: "M0_API_PROBE_UPDATED" }).catch(() => {});
     }
-    if (apiProbeSession) { apiProbeSession.capturedCount += 1; apiProbeSession.updatedAt = new Date().toISOString(); }
+    if (apiProbeSession) { apiProbeSession.capturedCount += 1; apiProbeSession.phase = "capturing"; apiProbeSession.updatedAt = new Date().toISOString(); }
     return { ok: true, probes: summarizeProbes(), session: summarizeProbeSession() };
   }
   if (message.type === "M0_API_PROBE_GET") return { ok: true, probes: summarizeProbes(), session: summarizeProbeSession() };
@@ -85,10 +89,10 @@ function isApiSyncMessage(message) {
   return ["M0_API_PROBE_START", "M0_API_PROBE_BRIDGE_READY", "M0_API_PROBE_MAIN_READY", "M0_API_PROBE_RECORD", "M0_API_PROBE_GET", "M0_API_SYNC_CREATE_RUN", "M0_API_SYNC_GET_RUN", "M0_API_SYNC_READ", "M0_API_SYNC_DISCARD", "M0_API_SYNC_CONFIRM"].includes(message?.type);
 }
 
-function createProbeSession(tabId) { const timestamp = new Date().toISOString(); return { status: "active", startedAt: timestamp, updatedAt: timestamp, mainReady: apiProbeMainTabs.has(tabId), bridgeReady: apiProbeBridgeTabs.has(tabId), capturedCount: 0, targetTabId: tabId }; }
+function createProbeSession(tabId) { const timestamp = new Date().toISOString(); return { status: "active", phase: "waiting-handshake", startedAt: timestamp, updatedAt: timestamp, mainReady: apiProbeMainTabs.has(tabId), bridgeReady: apiProbeBridgeTabs.has(tabId), capturedCount: 0, targetTabId: tabId }; }
 function isActiveProbeSender(sender) { return Boolean(apiProbeSession?.status === "active" && sender.tab?.id === apiProbeSession.targetTabId); }
-function updateProbeHandshake(tabId, key) { if (!isActiveProbeSender({ tab: { id: tabId } })) return; apiProbeSession[key] = true; apiProbeSession.updatedAt = new Date().toISOString(); chrome.runtime.sendMessage({ type: "M0_API_PROBE_UPDATED" }).catch(() => {}); }
-function summarizeProbeSession() { if (!apiProbeSession) return { status: "inactive", mainReady: false, bridgeReady: false, capturedCount: 0, updatedAt: "" }; const { targetTabId: _targetTabId, ...safe } = apiProbeSession; return { ...safe, active: safe.status === "active" }; }
+function updateProbeHandshake(tabId, key) { if (!isActiveProbeSender({ tab: { id: tabId } })) return; apiProbeSession[key] = true; apiProbeSession.phase = apiProbeSession.mainReady && apiProbeSession.bridgeReady ? "capturing" : "waiting-handshake"; apiProbeSession.updatedAt = new Date().toISOString(); chrome.runtime.sendMessage({ type: "M0_API_PROBE_UPDATED" }).catch(() => {}); }
+function summarizeProbeSession() { if (!apiProbeSession) return { status: "inactive", phase: "inactive", mainReady: false, bridgeReady: false, capturedCount: 0, updatedAt: "" }; const { targetTabId: _targetTabId, ...safe } = apiProbeSession; return { ...safe, active: safe.status === "active" }; }
 
 function sanitizeProbe(value) {
   if (!value || typeof value !== "object" || !/^\/[a-zA-Z0-9_./-]+$/.test(String(value.path || ""))) return null;

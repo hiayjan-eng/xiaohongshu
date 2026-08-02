@@ -13,12 +13,13 @@
   async function detect() {
     els.detectApi.disabled = true;
     els.statusBadge.textContent = "正在检测";
-    els.statusMessage.textContent = "正在创建探测会话。";
+    els.statusMessage.textContent = "正在创建检测会话。";
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    const response = tab?.id ? await chrome.tabs.sendMessage(tab.id, { type: "M0_API_PROBE_START" }).catch(() => null) : null;
-    if (!response?.ok) { els.statusMessage.textContent = "请在已登录的小红书收藏或专辑详情页打开侧边栏。"; els.detectApi.disabled = false; return; }
-    els.statusMessage.textContent = "正在检测；MAIN 探测器会在刷新后的 document_start 自动加载。";
+    const response = tab?.id ? await message({ type: "M0_API_PROBE_START", targetTabId: tab.id }).catch(() => null) : null;
+    if (!response?.ok) { els.statusMessage.textContent = response?.error || "请在已登录的小红书收藏或专辑详情页打开侧边栏。"; els.detectApi.disabled = false; return; }
+    els.statusMessage.textContent = "正在重新加载目标页面。";
     try { await chrome.tabs.reload(tab.id); } catch (error) { els.statusMessage.textContent = error instanceof Error ? error.message : "自动刷新失败"; }
+    els.statusMessage.textContent = "等待 MAIN / bridge。";
     els.detectApi.disabled = false;
   }
   async function refresh({ passive = false } = {}) {
@@ -47,7 +48,7 @@
     const handshake = `MAIN：${session.mainReady ? "已就绪" : "未存活"}；bridge：${session.bridgeReady ? "已连接" : "未连接"}；session：${session.active ? "active" : "inactive"}`;
     els.probeSummary.textContent = `收藏分页候选：${favorites.length}；专辑列表候选：${albums.length}；专辑内容候选：${content.length}；关系来源：${relations.length ? "专辑内容推导" : "未识别"}；已推导关系：${derivedCount}；albumId 字段：${albumPaths.join("、") || "—"}；noteId 字段：${notePaths.join("、") || "—"}；动态签名：${signed ? "需要" : "未发现"}。${handshake}。`;
     const updated = session.updatedAt ? new Date(session.updatedAt).toLocaleTimeString() : "—";
-    if (!session.active) els.statusMessage.textContent = `探测会话未激活；更新时间：${updated}。`;
+    if (!session.active) els.statusMessage.textContent = "尚未开始检测。";
     else if (!session.bridgeReady) els.statusMessage.textContent = `bridge 未连接；更新时间：${updated}。`;
     else if (!session.mainReady) els.statusMessage.textContent = `探测器未存活；更新时间：${updated}。`;
     else if (!probes.length) els.statusMessage.textContent = `探测器存活，但尚未捕获请求；更新时间：${updated}。`;

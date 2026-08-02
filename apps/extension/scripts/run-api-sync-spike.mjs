@@ -55,11 +55,15 @@ repairTransportHooks();
 if (probeContext.window.fetch !== installedFetchProbe) throw new Error("MAIN probe must repair fetch after page reassignment");
 
 function lifecycle() {
-  const state = { active: false, mainReady: false, bridgeReady: false, candidates: 0 };
+  const state = { active: false, mainReady: false, bridgeReady: false, candidates: 0, targetTabId: 0 };
   const temporaryInjectionAfterReload = false;
   if (temporaryInjectionAfterReload) state.candidates += 1;
   if (state.candidates !== 0) throw new Error("old one-shot injection must be destroyed by reload");
+  const activeTab = { id: 81, url: "https://www.xiaohongshu.com/collection/detail" };
+  if (!/^https:\/\/(www\.)?xiaohongshu\.com\//.test(activeTab.url)) throw new Error("valid Xiaohongshu tab rejected");
   state.active = true;
+  state.targetTabId = activeTab.id;
+  if (state.targetTabId !== activeTab.id) throw new Error("side panel direct start must target the active tab without a bridge");
   state.bridgeReady = true;
   state.mainReady = true;
   state.candidates += 1;
@@ -68,6 +72,8 @@ function lifecycle() {
   if (refreshStatus !== "已刷新结果：1 个候选") throw new Error("refresh feedback must be explicit");
   const zeroStatus = { active: true, mainReady: true, bridgeReady: true, candidates: 0 };
   if (!(zeroStatus.active && zeroStatus.mainReady && zeroStatus.bridgeReady) || zeroStatus.candidates !== 0) throw new Error("zero-result handshake fixture failed");
+  const nonXhsTab = { id: 82, url: "https://example.com/" };
+  if (/^https:\/\/(www\.)?xiaohongshu\.com\//.test(nonXhsTab.url)) throw new Error("non-Xiaohongshu tab must be rejected");
 }
 lifecycle();
 console.log("M0 API sync generated tests ok: 3000 snapshot, album inference, reload lifecycle, three-way handshake, explicit zero-result refresh");

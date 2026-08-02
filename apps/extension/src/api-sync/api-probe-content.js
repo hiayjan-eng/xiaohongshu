@@ -9,11 +9,4 @@
   });
   send("M0_API_PROBE_BRIDGE_READY");
   for (const delay of [0, 50, 250]) setTimeout(() => window.postMessage({ source: "collection-revival-api-probe-bridge", type: "BRIDGE_READY" }, location.origin), delay);
-  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-    if (message?.type !== "M0_API_PROBE_START") return false;
-    chrome.runtime.sendMessage({ type: "M0_API_PROBE_START" })
-      .then(sendResponse)
-      .catch((error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }));
-    return true;
-  });
 })();

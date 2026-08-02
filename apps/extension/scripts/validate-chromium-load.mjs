@@ -7,7 +7,7 @@ const output = resolve(root, "release-artifacts", "extension-beta");
 const manifestPath = resolve(output, "manifest.json");
 if (!existsSync(manifestPath)) throw new Error("Build output is missing");
 const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-if (manifest.manifest_version !== 3 || manifest.version_name !== "0.4.2-m0-api-spike") throw new Error("Chrome/Edge output must be MV3 API spike package");
+if (manifest.manifest_version !== 3 || manifest.version_name !== "0.4.3-m0-api-spike") throw new Error("Chrome/Edge output must be MV3 API spike package");
 for (const required of ["activeTab", "scripting", "storage", "sidePanel"]) if (!manifest.permissions.includes(required)) throw new Error(`Missing Chromium permission: ${required}`);
 if (!manifest.background?.service_worker || !manifest.side_panel?.default_path) throw new Error("Missing service worker or Side Panel");
 for (const file of ["src/background.js", "src/sidepanel.js", "src/api-sync/api-probe-main.js", "src/api-sync/api-probe-content.js", "src/api-sync/api-sync-idb.js"]) if (!existsSync(resolve(output, file))) throw new Error(`Missing shared Chromium file: ${file}`);
