@@ -1,7 +1,7 @@
 (() => {
   const ids = [
     "statusBadge", "pageIdentity", "profileIdentity", "currentUrlProfileId", "selfProfileLinkStatus", "profileIdMatch", "notesTabCandidateText", "notesTabActiveStateSource", "notesTabMatch", "selectorVersion", "safetyMessage",
-    "startScan", "pauseScan", "resumeScan", "stopScan", "restartScan", "progressMessage",
+    "startScan", "pauseScan", "resumeScan", "stopScan", "restartScan", "redetectPage", "progressMessage",
     "elapsedTime", "progressFill", "scrollProgress", "discoveredCount", "validCount",
     "existingCount", "missingLinkCount", "reviewCount", "resumeCount", "searchForm",
     "searchInput", "recentButton", "randomButton", "reviewSummary", "resultItems",
@@ -17,6 +17,12 @@
     "src/xhs-scanner.js",
     "src/full-scan-content.js"
   ];
+  const RECOVERABLE_PAGE_CODES = new Set([
+    "NOTES_TAB_UNCONFIRMED",
+    "FAVORITES_TAB_UNCONFIRMED",
+    "FAVORITES_PANEL_NOT_FOUND"
+  ]);
+  const PAGE_READY_WAIT_MS = 10_000;
 
   let activeTabId = null;
   let inspection = null;
@@ -25,12 +31,15 @@
   let elapsedTimer = null;
   let lastDiagnostics = null;
   let subtabDomDiagnostics = null;
+  let detectionGeneration = 0;
+  let detectionScheduled = false;
 
   elements.startScan.addEventListener("click", () => void control("M0_FULL_SCAN_START"));
   elements.pauseScan.addEventListener("click", () => void control("M0_FULL_SCAN_PAUSE"));
   elements.resumeScan.addEventListener("click", () => void control("M0_FULL_SCAN_RESUME"));
   elements.stopScan.addEventListener("click", () => void control("M0_FULL_SCAN_STOP"));
   elements.restartScan.addEventListener("click", () => void restart());
+  elements.redetectPage.addEventListener("click", () => void initialize({ manual: true }));
   elements.recentButton.addEventListener("click", () => void loadItems({ limit: 12 }));
   elements.randomButton.addEventListener("click", () => void loadItems({ limit: 50, random: true }));
   elements.searchForm.addEventListener("submit", (event) => {
@@ -50,33 +59,96 @@
     if (progress.recentItems?.length) displayedItems = progress.recentItems.slice(-12).reverse();
     render(progress.runtime);
   });
+  chrome.tabs.onActivated?.addListener(() => schedulePageDetection());
+  chrome.tabs.onUpdated?.addListener((tabId, changeInfo) => {
+    if (tabId !== activeTabId || (!changeInfo?.url && changeInfo?.status !== "complete")) return;
+    schedulePageDetection();
+  });
 
   void initialize();
 
-  async function initialize() {
-    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    const activeTab = tabs[0] || null;
-    activeTabId = activeTab?.id || null;
-    if (!activeTabId) return showConnectionFailure("未找到当前活动标签页，无法建立内容脚本握手。");
-    const connection = await establishContentConnection(activeTab);
-    if (!connection.ok) return showConnectionFailure(connection.error);
-    const pageResponse = connection.response;
-    inspection = pageResponse?.inspection || null;
-    renderProfileDiagnostics(inspection?.diagnostics);
-    await refreshSubtabDomDiagnostics();
-    if (!pageResponse?.ok || !inspection?.ok) {
-      return showBoundaryFailure(inspection?.reason || pageResponse?.error || "无法确认收藏页。");
+  async function initialize({ manual = false } = {}) {
+    const generation = ++detectionGeneration;
+    elements.redetectPage.disabled = true;
+    showCheckingState(manual ? "正在重新检测当前页面…" : "正在检测当前页面…");
+    try {
+      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (generation !== detectionGeneration) return;
+      const activeTab = tabs[0] || null;
+      const targetTabId = activeTab?.id || null;
+      activeTabId = targetTabId;
+      if (!targetTabId) return showConnectionFailure("未找到当前活动标签页，无法建立内容脚本握手。");
+
+      const connection = await establishContentConnection(activeTab);
+      if (generation !== detectionGeneration) return;
+      if (!connection.ok) return showConnectionFailure(connection.error);
+
+      let pageResponse = connection.response;
+      inspection = pageResponse?.inspection || null;
+      renderProfileDiagnostics(inspection?.diagnostics);
+      if (isRecoverableInspection(inspection)) {
+        showWaitingForPage(inspection.reason);
+        pageResponse = await sendToTab({ type: "M0_FULL_SCAN_WAIT_PAGE_READY", timeoutMs: PAGE_READY_WAIT_MS }, targetTabId);
+        if (generation !== detectionGeneration) return;
+        if (pageResponse?.error) return showConnectionFailure(`页面就绪检测失败：${pageResponse.error}`);
+        inspection = pageResponse?.inspection || null;
+        renderProfileDiagnostics(inspection?.diagnostics);
+      }
+
+      await refreshSubtabDomDiagnostics(targetTabId);
+      if (generation !== detectionGeneration) return;
+      if (!pageResponse?.ok || !inspection?.ok) {
+        return showBoundaryFailure(inspection?.reason || pageResponse?.error || "无法确认收藏页。");
+      }
+
+      elements.pageIdentity.textContent = "已确认：收藏 → 笔记";
+      elements.profileIdentity.textContent = `账号 •${inspection.identity.profileIdHash.slice(-4)}`;
+      elements.selectorVersion.textContent = inspection.identity.selectorVersion;
+      elements.safetyMessage.textContent = "已锁定可见收藏面板及真实滚动容器；本人发布与点赞面板不在扫描 root 内。";
+      const stored = await sendRuntimeMessage({
+        type: "M0_FULL_SCAN_GET_SESSION",
+        favoritesPageIdentity: inspection.identity.favoritesPageIdentity
+      });
+      if (generation !== detectionGeneration) return;
+      session = stored?.session || null;
+      displayedItems = (stored?.recentItems || []).slice().reverse();
+      render();
+    } catch (error) {
+      if (generation === detectionGeneration) showConnectionFailure(`页面检测失败：${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      if (generation === detectionGeneration) elements.redetectPage.disabled = false;
     }
-    elements.pageIdentity.textContent = "已确认：收藏 → 笔记";
-    elements.profileIdentity.textContent = `账号 •${inspection.identity.profileIdHash.slice(-4)}`;
-    elements.selectorVersion.textContent = inspection.identity.selectorVersion;
-    elements.safetyMessage.textContent = "已锁定可见收藏面板及真实滚动容器；本人发布与点赞面板不在扫描 root 内。";
-    const stored = await sendRuntimeMessage({
-      type: "M0_FULL_SCAN_GET_SESSION",
-      favoritesPageIdentity: inspection.identity.favoritesPageIdentity
+  }
+
+  function schedulePageDetection() {
+    if (detectionScheduled) return;
+    detectionScheduled = true;
+    queueMicrotask(() => {
+      detectionScheduled = false;
+      void initialize();
     });
-    session = stored?.session || null;
-    displayedItems = (stored?.recentItems || []).slice().reverse();
+  }
+
+  function isRecoverableInspection(value) {
+    return value?.ok === false && RECOVERABLE_PAGE_CODES.has(value.code);
+  }
+
+  function showCheckingState(message) {
+    inspection = { ok: false };
+    session = null;
+    displayedItems = [];
+    renderProfileDiagnostics(null);
+    elements.pageIdentity.textContent = "正在确认…";
+    elements.profileIdentity.textContent = "正在读取";
+    elements.selectorVersion.textContent = "—";
+    elements.safetyMessage.textContent = message;
+    render();
+  }
+
+  function showWaitingForPage(reason) {
+    elements.pageIdentity.textContent = "等待页面渲染…";
+    elements.profileIdentity.textContent = inspection?.diagnostics?.profileIdMatch ? "身份已匹配" : "正在读取";
+    elements.safetyMessage.textContent = `${reason || "收藏页相关 DOM 尚未就绪。"} 正在监听页面渲染，最多等待 10 秒。`;
     render();
   }
 
@@ -158,9 +230,9 @@
     window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
   }
 
-  async function refreshSubtabDomDiagnostics() {
-    const response = activeTabId
-      ? await sendToTab({ type: "M0_FULL_SCAN_GET_SUBTAB_DOM_DIAGNOSTICS" })
+  async function refreshSubtabDomDiagnostics(tabId = activeTabId) {
+    const response = tabId
+      ? await sendToTab({ type: "M0_FULL_SCAN_GET_SUBTAB_DOM_DIAGNOSTICS" }, tabId)
       : null;
     subtabDomDiagnostics = response?.ok && response.diagnostics
       ? response.diagnostics
@@ -332,7 +404,7 @@
   async function establishContentConnection(tab) {
     const boundary = inspectSupportedTab(tab?.url);
     if (!boundary.ok) return boundary;
-    const initial = await sendToTab({ type: "M0_FULL_SCAN_GET_PAGE_STATUS" });
+    const initial = await sendToTab({ type: "M0_FULL_SCAN_GET_PAGE_STATUS" }, tab.id);
     if (!initial?.error) return { ok: true, response: initial };
     if (!isMissingContentReceiver(initial.error)) {
       return { ok: false, error: `内容脚本握手失败：${initial.error}` };
@@ -351,7 +423,7 @@
         error: `内容脚本注入失败：${error instanceof Error ? error.message : String(error)}。请确认扩展已获准访问 xiaohongshu.com，然后刷新该标签页。`
       };
     }
-    const retried = await sendToTab({ type: "M0_FULL_SCAN_GET_PAGE_STATUS" });
+    const retried = await sendToTab({ type: "M0_FULL_SCAN_GET_PAGE_STATUS" }, tab.id);
     if (retried?.error) {
       return {
         ok: false,
@@ -417,8 +489,8 @@
   }
 
   function setControlsBusy(busy) { for (const button of [elements.startScan, elements.pauseScan, elements.resumeScan, elements.stopScan]) button.disabled = busy; }
-  function sendToTab(message) {
-    return new Promise((resolve) => chrome.tabs.sendMessage(activeTabId, message, (response) => {
+  function sendToTab(message, tabId = activeTabId) {
+    return new Promise((resolve) => chrome.tabs.sendMessage(tabId, message, (response) => {
       if (chrome.runtime.lastError) return resolve({ ok: false, error: chrome.runtime.lastError.message });
       resolve(response || { ok: false, error: "内容脚本没有返回响应。" });
     }));

@@ -7,6 +7,13 @@
 
   let controller = createController();
   let autoResumeStarted = false;
+  let pageReadyWait = null;
+  const RECOVERABLE_PAGE_CODES = new Set([
+    "NOTES_TAB_UNCONFIRMED",
+    "FAVORITES_TAB_UNCONFIRMED",
+    "FAVORITES_PANEL_NOT_FOUND"
+  ]);
+  const MAX_PAGE_READY_WAIT_MS = 10_000;
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (!String(message?.type || "").startsWith("M0_FULL_SCAN_")) return false;
@@ -52,7 +59,9 @@
   async function handleControlMessage(message) {
     switch (message.type) {
       case "M0_FULL_SCAN_GET_PAGE_STATUS":
-        return { ok: true, inspection: publicInspection(controller.inspectPage()) };
+        return readPageStatus();
+      case "M0_FULL_SCAN_WAIT_PAGE_READY":
+        return waitForPageReady(message.timeoutMs);
       case "M0_FULL_SCAN_GET_SUBTAB_DOM_DIAGNOSTICS":
         return { ok: true, diagnostics: Core.collectSubtabDomDiagnostics(document) };
       case "M0_FULL_SCAN_START":
@@ -70,6 +79,54 @@
         return { ok: true, diagnostics: controller.diagnostics(), session: controller.session };
       default:
         return { ok: false, error: `未知全量扫描指令：${message.type}` };
+    }
+  }
+
+  function readPageStatus() {
+    return { ok: true, inspection: publicInspection(controller.inspectPage()) };
+  }
+
+  async function waitForPageReady(requestedTimeoutMs) {
+    const initial = controller.inspectPage();
+    if (initial.ok || !RECOVERABLE_PAGE_CODES.has(initial.code)) {
+      return { ok: true, inspection: publicInspection(initial), timedOut: false };
+    }
+    if (pageReadyWait) return pageReadyWait;
+
+    const parsedTimeout = Number(requestedTimeoutMs);
+    const timeoutMs = Number.isFinite(parsedTimeout)
+      ? Math.min(MAX_PAGE_READY_WAIT_MS, Math.max(50, Math.round(parsedTimeout)))
+      : MAX_PAGE_READY_WAIT_MS;
+    const wait = new Promise((resolve) => {
+      let settled = false;
+      let timeoutId = null;
+      const observer = new MutationObserver(() => inspectAfterMutation());
+      const finishWait = (inspection, timedOut) => {
+        if (settled) return;
+        settled = true;
+        observer.disconnect();
+        if (timeoutId !== null) window.clearTimeout(timeoutId);
+        resolve({ ok: true, inspection: publicInspection(inspection), timedOut });
+      };
+      const inspectAfterMutation = () => {
+        const inspection = controller.inspectPage();
+        if (inspection.ok || !RECOVERABLE_PAGE_CODES.has(inspection.code)) finishWait(inspection, false);
+      };
+      observer.observe(document.documentElement || document, {
+        subtree: true,
+        childList: true,
+        characterData: true,
+        attributes: true,
+        attributeFilter: ["class", "aria-selected", "aria-current", "data-state", "data-active", "hidden"]
+      });
+      timeoutId = window.setTimeout(() => finishWait(controller.inspectPage(), true), timeoutMs);
+      inspectAfterMutation();
+    });
+    pageReadyWait = wait;
+    try {
+      return await wait;
+    } finally {
+      if (pageReadyWait === wait) pageReadyWait = null;
     }
   }
 

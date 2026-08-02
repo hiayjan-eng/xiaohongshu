@@ -30,7 +30,7 @@ for (const path of [
 const manifest = JSON.parse(read("apps/extension/manifest.json"));
 if (manifest.version !== "0.2.3") throw new Error("Production source manifest version changed.");
 if (!manifest.host_permissions.includes("https://xiaohongshu-green.vercel.app/*")) throw new Error("Production source origin changed.");
-if (JSON.stringify(manifest).includes("0.3.0-m0-preview")) throw new Error("M0 version leaked into the Production source manifest.");
+if (JSON.stringify(manifest).includes("0.3.1-m0-preview")) throw new Error("M0 version leaked into the Production source manifest.");
 const expectedXhsMatches = new Set(["https://xiaohongshu.com/*", "https://www.xiaohongshu.com/*"]);
 const sourceScannerEntry = manifest.content_scripts.find((entry) => (entry.js || []).includes("src/full-scan-content.js"));
 if (!sourceScannerEntry || sourceScannerEntry.matches.length !== expectedXhsMatches.size || sourceScannerEntry.matches.some((value) => !expectedXhsMatches.has(value))) {
@@ -44,16 +44,16 @@ const build = read("apps/extension/scripts/build-extension.mjs");
 for (const marker of [
   "--m0-preview",
   "--preview-origin=",
-  "0.3.0-m0-preview",
+  "0.3.1-m0-preview",
   "extension-m0-full-scan-preview",
-  "collection-revival-extension-m0-full-scan-preview-v0.3.0.zip",
+  "collection-revival-extension-m0-full-scan-preview-v0.3.1.zip",
   "M0 Preview origin must be one exact HTTPS origin",
   "Production origin is forbidden"
 ]) assertIncludes(build, marker, "M0 build profile");
 
 const sidepanel = `${read("apps/extension/src/sidepanel.html")}\n${read("apps/extension/src/sidepanel.js")}`;
 for (const marker of [
-  "M0 全量扫描 Preview 0.3.0",
+  "M0 全量扫描 Preview 0.3.1",
   "扫描全部收藏",
   "随机 50 条",
   "导出脱敏统计",
@@ -72,10 +72,24 @@ for (const marker of [
   "notesTabCandidateText",
   "notesTabActiveStateSource",
   "notesTabMatch",
+  "重新检测当前页面",
+  "M0_FULL_SCAN_WAIT_PAGE_READY",
+  "PAGE_READY_WAIT_MS = 10_000",
+  "chrome.tabs.onActivated",
+  "chrome.tabs.onUpdated",
   "子标签 DOM 诊断",
   "copySubtabDomDiagnostics",
   "M0_FULL_SCAN_GET_SUBTAB_DOM_DIAGNOSTICS"
 ]) assertIncludes(sidepanel, marker, "Side Panel");
+
+const content = read("apps/extension/src/full-scan-content.js");
+for (const marker of [
+  "M0_FULL_SCAN_WAIT_PAGE_READY",
+  "RECOVERABLE_PAGE_CODES",
+  "MAX_PAGE_READY_WAIT_MS = 10_000",
+  "new MutationObserver",
+  "observer.disconnect()"
+]) assertIncludes(content, marker, "bounded page readiness observer");
 
 const core = read("apps/extension/src/full-scan-core.js");
 for (const marker of [

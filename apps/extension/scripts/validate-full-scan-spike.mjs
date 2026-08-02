@@ -51,7 +51,7 @@ const background = readFileSync(new URL("../src/background.js", import.meta.url)
 const build = readFileSync(new URL("./build-extension.mjs", import.meta.url), "utf8");
 
 for (const marker of [
-  "M0 全量扫描 Preview 0.3.0",
+  "M0 全量扫描 Preview 0.3.1",
   "扫描全部收藏",
   "暂停",
   "继续",
@@ -59,7 +59,8 @@ for (const marker of [
   "重新开始一次扫描",
   "随机 50 条",
   "导出脱敏统计",
-  "导入收藏复活"
+  "导入收藏复活",
+  "重新检测当前页面"
 ]) {
   if (!sidepanelHtml.includes(marker) && !sidepanelJs.includes(marker)) {
     throw new Error(`Missing Side Panel capability marker: ${marker}`);
@@ -122,6 +123,7 @@ for (const marker of [
 
 for (const marker of [
   "M0_FULL_SCAN_GET_PAGE_STATUS",
+  "M0_FULL_SCAN_WAIT_PAGE_READY",
   "M0_FULL_SCAN_START",
   "M0_FULL_SCAN_PAUSE",
   "M0_FULL_SCAN_RESUME",

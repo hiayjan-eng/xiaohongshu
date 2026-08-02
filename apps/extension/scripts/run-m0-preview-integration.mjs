@@ -213,12 +213,38 @@ async function testPageIdentity() {
     assert.equal(unrelatedActiveSibling.code, "NOTES_TAB_UNCONFIRMED");
     assert.equal(unrelatedActiveSibling.diagnostics.notesTabMatch, false);
 
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.evaluate(() => document.querySelector('nav[aria-label="收藏子标签"]').remove());
+    await installContentRuntimeMock(page);
+    await page.addScriptTag({ content: coreSource });
+    await page.addScriptTag({ content: contentSource });
+    const initiallyMissingNotes = await sendContentStatus(page);
+    assert.equal(initiallyMissingNotes.inspection.code, "NOTES_TAB_UNCONFIRMED");
+    const delayedReadyPromise = sendContentMessage(page, { type: "M0_FULL_SCAN_WAIT_PAGE_READY", timeoutMs: 1_000 });
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => resolve())));
+    await installRealRedsNotesSubtab(page);
+    const delayedReady = await delayedReadyPromise;
+    assert.equal(delayedReady.ok, true);
+    assert.equal(delayedReady.timedOut, false);
+    assert.equal(delayedReady.inspection.ok, true);
+    assert.equal(delayedReady.inspection.diagnostics.notesTabActiveStateSource, "adjacent-sibling-class:active");
+
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.evaluate(() => document.querySelector('nav[aria-label="收藏子标签"]').remove());
+    await installContentRuntimeMock(page);
+    await page.addScriptTag({ content: coreSource });
+    await page.addScriptTag({ content: contentSource });
+    const missingNotesTimeout = await sendContentMessage(page, { type: "M0_FULL_SCAN_WAIT_PAGE_READY", timeoutMs: 80 });
+    assert.equal(missingNotesTimeout.ok, true);
+    assert.equal(missingNotesTimeout.timedOut, true);
+    assert.equal(missingNotesTimeout.inspection.code, "NOTES_TAB_UNCONFIRMED");
+
     for (const [mode, code] of [["risk", "RISK_CONTROL"], ["login", "LOGIN_EXPIRED"], ["network", "NETWORK_ERROR"]]) {
       await page.goto(`https://www.xiaohongshu.com/user/profile/m0fixtureprofile?tab=fav&subTab=note&total=20&mode=${mode}`, { waitUntil: "domcontentloaded" });
       await page.addScriptTag({ content: coreSource });
       assert.equal((await inspect()).code, code);
     }
-    return { strictFavoritesConfirmed: true, subtabDomDiagnosticsSanitized: true, countedActiveNotesPassed: true, realRedsNotesPassed: true, activeAlbumBesideNotesBlocked: true, inactiveRealRedsNotesBlocked: true, unrelatedActiveSiblingBlocked: true, inactiveCountedNotesBlocked: true, activeAlbumsBlocked: true, bodyNotesTextBlocked: true, selfLinkWithoutEditButton: true, mismatchedSelfLinkBlocked: true, editProfileOnlyBlocked: true, otherProfileBlocked: true, inactiveFavoritesBlocked: true, inactiveNotesBlocked: true, noWwwHandshake: true, noWwwRefreshHandshake: true, ownPostFalseImportCount: 0, blockersSafePaused: 3 };
+    return { strictFavoritesConfirmed: true, subtabDomDiagnosticsSanitized: true, countedActiveNotesPassed: true, realRedsNotesPassed: true, delayedSubtabMutationPassed: true, permanentMissingSubtabTimedOut: true, activeAlbumBesideNotesBlocked: true, inactiveRealRedsNotesBlocked: true, unrelatedActiveSiblingBlocked: true, inactiveCountedNotesBlocked: true, activeAlbumsBlocked: true, bodyNotesTextBlocked: true, selfLinkWithoutEditButton: true, mismatchedSelfLinkBlocked: true, editProfileOnlyBlocked: true, otherProfileBlocked: true, inactiveFavoritesBlocked: true, inactiveNotesBlocked: true, noWwwHandshake: true, noWwwRefreshHandshake: true, ownPostFalseImportCount: 0, blockersSafePaused: 3 };
   } finally {
     await context.close();
   }
@@ -241,7 +267,8 @@ async function installRealRedsNotesSubtab(page, options = {}) {
     indicator.textContent = indicatorText;
     group.append(notes, indicator);
     wrapper.append(group);
-    current.replaceWith(wrapper);
+    if (current) current.replaceWith(wrapper);
+    else document.querySelector('[data-revival-favorites-panel]')?.before(wrapper);
   }, options);
 }
 
@@ -250,7 +277,7 @@ async function installContentRuntimeMock(page) {
     globalThis.__m0ContentListener = null;
     globalThis.chrome = {
       runtime: {
-        getManifest: () => ({ version: "0.3.0", version_name: "0.3.0-m0-preview" }),
+        getManifest: () => ({ version: "0.3.1", version_name: "0.3.1-m0-preview" }),
         onMessage: { addListener(listener) { globalThis.__m0ContentListener = listener; } },
         sendMessage(_message, callback) { callback?.({ ok: true, session: null, recentItems: [] }); }
       }
@@ -259,16 +286,20 @@ async function installContentRuntimeMock(page) {
 }
 
 async function sendContentStatus(page) {
-  return page.evaluate(() => new Promise((resolve, reject) => {
+  return sendContentMessage(page, { type: "M0_FULL_SCAN_GET_PAGE_STATUS" });
+}
+
+async function sendContentMessage(page, message) {
+  return page.evaluate((contentMessage) => new Promise((resolve, reject) => {
     if (typeof globalThis.__m0ContentListener !== "function") return reject(new Error("M0 content listener was not installed."));
-    globalThis.__m0ContentListener({ type: "M0_FULL_SCAN_GET_PAGE_STATUS" }, {}, resolve);
-  }));
+    globalThis.__m0ContentListener(contentMessage, {}, resolve);
+  }), message);
 }
 
 async function testSidePanel() {
   const html = await readFile(resolve(extensionRoot, "src", "sidepanel.html"), "utf8");
   const css = await readFile(resolve(extensionRoot, "src", "sidepanel.css"), "utf8");
-  const profile = 'globalThis.__COLLECTION_REVIVAL_BUILD_PROFILE__={id:"m0-preview",versionName:"0.3.0-m0-preview",defaultWebAppUrl:"https://preview.test/m0-preview/",webAppOrigins:["https://preview.test"]};';
+  const profile = 'globalThis.__COLLECTION_REVIVAL_BUILD_PROFILE__={id:"m0-preview",versionName:"0.3.1-m0-preview",defaultWebAppUrl:"https://preview.test/m0-preview/",webAppOrigins:["https://preview.test"]};';
   const sidepanel = await readFile(resolve(extensionRoot, "src", "sidepanel.js"), "utf8");
   const context = await browser.newContext();
   await context.addInitScript(installSidePanelChromeMock);
@@ -284,7 +315,7 @@ async function testSidePanel() {
   try {
     await page.goto("https://extension.test/sidepanel.html", { waitUntil: "domcontentloaded" });
     await page.waitForFunction(() => document.getElementById("pageIdentity")?.textContent?.includes("收藏"));
-    assert.equal(await page.locator(".eyebrow").textContent(), "M0 全量扫描 Preview 0.3.0");
+    assert.equal(await page.locator(".eyebrow").textContent(), "M0 全量扫描 Preview 0.3.1");
     assert.equal(await page.locator("#currentUrlProfileId").textContent(), "已脱敏 •1234");
     assert.equal(await page.locator("#selfProfileLinkStatus").textContent(), "找到");
     assert.equal(await page.locator("#profileIdMatch").textContent(), "是");
@@ -310,6 +341,21 @@ async function testSidePanel() {
     }]);
     const manifestHasPopup = await page.evaluate(() => Boolean(chrome.runtime.getManifest().action?.default_popup));
     assert.equal(manifestHasPopup, false, "long task must not depend on a popup");
+    await page.evaluate(() => globalThis.__activateSidePanelTab(9, "notesRoute", "https://xiaohongshu.com/user/profile/test?tab=note"));
+    await page.waitForFunction(() => document.getElementById("pageIdentity")?.textContent === "未确认收藏页");
+    assert.equal(await page.locator("#startScan").isDisabled(), true);
+    await page.evaluate(() => globalThis.__activateSidePanelTab(7, "ready", "https://xiaohongshu.com/user/profile/test?tab=fav&subTab=note"));
+    await page.waitForFunction(() => document.getElementById("pageIdentity")?.textContent?.includes("收藏"));
+    assert.equal(await page.locator("#startScan").isEnabled(), true);
+
+    const delayedReadyPage = await context.newPage();
+    await delayedReadyPage.goto("https://extension.test/sidepanel.html?delayedReady=1", { waitUntil: "domcontentloaded" });
+    await delayedReadyPage.waitForFunction(() => document.getElementById("pageIdentity")?.textContent === "等待页面渲染…");
+    assert.equal(await delayedReadyPage.locator("#startScan").isDisabled(), true);
+    await delayedReadyPage.evaluate(() => globalThis.__resolveDelayedPageReady());
+    await delayedReadyPage.waitForFunction(() => document.getElementById("pageIdentity")?.textContent?.includes("收藏"));
+    assert.equal(await delayedReadyPage.locator("#startScan").isEnabled(), true);
+    await delayedReadyPage.close();
 
     const boundaryFailurePage = await context.newPage();
     await boundaryFailurePage.goto("https://extension.test/sidepanel.html?boundaryFailure=1", { waitUntil: "domcontentloaded" });
@@ -318,7 +364,22 @@ async function testSidePanel() {
     await boundaryFailurePage.locator("#copySubtabDomDiagnostics").click();
     await boundaryFailurePage.waitForFunction(() => document.getElementById("copySubtabDomDiagnosticsStatus")?.textContent?.includes("已复制"));
     assert.ok((await boundaryFailurePage.evaluate(() => globalThis.__copiedSubtabDomDiagnostics)).includes("m0-subtab-dom-diagnostic-v1"));
+    await boundaryFailurePage.evaluate(() => globalThis.__setSidePanelPageState("ready", undefined, false));
+    await boundaryFailurePage.locator("#redetectPage").click();
+    await boundaryFailurePage.waitForFunction(() => document.getElementById("pageIdentity")?.textContent?.includes("收藏"));
+    assert.equal(await boundaryFailurePage.locator("#startScan").isEnabled(), true);
     await boundaryFailurePage.close();
+
+    const routeTransitionPage = await context.newPage();
+    await routeTransitionPage.goto("https://extension.test/sidepanel.html?routeTransition=1", { waitUntil: "domcontentloaded" });
+    await routeTransitionPage.waitForFunction(() => document.getElementById("pageIdentity")?.textContent === "未确认收藏页");
+    await routeTransitionPage.evaluate(() => globalThis.__setSidePanelPageState("ready", "https://xiaohongshu.com/user/profile/test?tab=fav&subTab=note"));
+    await routeTransitionPage.waitForFunction(() => document.getElementById("pageIdentity")?.textContent?.includes("收藏"));
+    assert.equal(await routeTransitionPage.locator("#startScan").isEnabled(), true);
+    await routeTransitionPage.evaluate(() => globalThis.__setSidePanelPageState("notesRoute", "https://xiaohongshu.com/user/profile/test?tab=note"));
+    await routeTransitionPage.waitForFunction(() => document.getElementById("pageIdentity")?.textContent === "未确认收藏页");
+    assert.equal(await routeTransitionPage.locator("#startScan").isDisabled(), true);
+    await routeTransitionPage.close();
 
     const failurePage = await context.newPage();
     await failurePage.goto("https://extension.test/sidepanel.html?injectionFailure=1", { waitUntil: "domcontentloaded" });
@@ -327,7 +388,7 @@ async function testSidePanel() {
     assert.equal((await failurePage.locator("#safetyMessage").textContent()).includes("请确认当前位于"), false);
     await failurePage.close();
 
-    return { opened: true, subtabDomDiagnosticsCopied: true, boundaryFailureDiagnosticsCopied: true, apexHost: true, safeReinjection: true, explicitInjectionFailure: true, randomReview: 2, popupIndependent: true };
+    return { opened: true, delayedDomAutoPassed: true, permanentMissingTimedOut: true, manualRedetectPassed: true, routeToFavoritesAutoPassed: true, routeBackToNotesBlocked: true, activeTabChangeDetected: true, subtabDomDiagnosticsCopied: true, boundaryFailureDiagnosticsCopied: true, apexHost: true, safeReinjection: true, explicitInjectionFailure: true, randomReview: 2, popupIndependent: true };
   } finally {
     await context.close();
   }
@@ -428,12 +489,12 @@ function installPreviewBridgeMock(items) {
     if (event.source !== window || message.source !== "collection-revival-m0-preview-web") return;
     let response;
     if (message.type === "M0_PREVIEW_IMPORT_META_REQUEST") {
-      response = { ok: true, meta: { importBatchId: message.importBatchId, scanSessionId: "scan_fixture", extensionVersion: "0.3.0-m0-preview", totalCount: items.length, reviewCount: 0, selectorVersion: "m0-real-favorites-v5", status: "prepared" } };
+      response = { ok: true, meta: { importBatchId: message.importBatchId, scanSessionId: "scan_fixture", extensionVersion: "0.3.1-m0-preview", totalCount: items.length, reviewCount: 0, selectorVersion: "m0-real-favorites-v5", status: "prepared" } };
     } else if (message.type === "M0_PREVIEW_IMPORT_CHUNK_REQUEST") {
       const offset = Number(message.offset) || 0;
       const limit = Number(message.limit) || 200;
       const chunkItems = items.slice(offset, offset + limit);
-      response = { ok: true, chunk: { importBatchId: message.importBatchId, scanSessionId: "scan_fixture", extensionVersion: "0.3.0-m0-preview", items: chunkItems, offset, nextOffset: offset + chunkItems.length, hasMore: offset + chunkItems.length < items.length, totalCount: items.length } };
+      response = { ok: true, chunk: { importBatchId: message.importBatchId, scanSessionId: "scan_fixture", extensionVersion: "0.3.1-m0-preview", items: chunkItems, offset, nextOffset: offset + chunkItems.length, hasMore: offset + chunkItems.length < items.length, totalCount: items.length } };
     } else if (message.type === "M0_PREVIEW_IMPORT_RESULT") response = { ok: true };
     else return;
     window.setTimeout(() => window.postMessage({ source: "collection-revival-extension", type: "M0_PREVIEW_RESPONSE", requestId: message.requestId, requestType: message.type, response }, window.location.origin), 0);
@@ -449,7 +510,21 @@ function installSidePanelChromeMock() {
     value: { async writeText(value) { globalThis.__copiedSubtabDomDiagnostics = String(value); } }
   });
   let contentConnected = false;
-  const session = { sessionId: "scan_sidepanel", status: "completed", discoveredCount: 20, validCount: 20, existingCount: 0, invalidCount: 0, missingLinkCount: 0, reviewCount: 0, resumeCount: 1, lastScrollTop: 100, lastScrollHeight: 100, stableNoGrowthCycles: 6, startedAt: "2026-07-30T00:00:00.000Z", completedAt: "2026-07-30T00:01:00.000Z", selectorVersion: "m0-real-favorites-v5", extensionVersion: "0.3.0-m0-preview" };
+  let pageState = location.search.includes("delayedReady=1")
+    ? "delayed"
+    : location.search.includes("boundaryFailure=1")
+      ? "missing"
+      : location.search.includes("routeTransition=1")
+        ? "notesRoute"
+        : "ready";
+  let activeTabId = 7;
+  let activeTabUrl = pageState === "notesRoute"
+    ? "https://xiaohongshu.com/user/profile/test?tab=note"
+    : "https://xiaohongshu.com/user/profile/test?tab=fav&subTab=note";
+  const tabActivatedListeners = [];
+  const tabUpdatedListeners = [];
+  const delayedReadyCallbacks = [];
+  const session = { sessionId: "scan_sidepanel", status: "completed", discoveredCount: 20, validCount: 20, existingCount: 0, invalidCount: 0, missingLinkCount: 0, reviewCount: 0, resumeCount: 1, lastScrollTop: 100, lastScrollHeight: 100, stableNoGrowthCycles: 6, startedAt: "2026-07-30T00:00:00.000Z", completedAt: "2026-07-30T00:01:00.000Z", selectorVersion: "m0-real-favorites-v5", extensionVersion: "0.3.1-m0-preview" };
   const inspection = { ok: true, identity: { profileIdHash: "abcd1234", favoritesPageIdentity: "fixture-page", selectorVersion: "m0-real-favorites-v5" }, diagnostics: { selectorVersion: "m0-real-favorites-v5", currentUrlProfileIdHash: "abcd1234", selfProfileLinkFound: true, profileIdMatch: true, editProfileSignalFound: false, notesTabCandidateText: "笔记 · 3464", notesTabActiveStateSource: "aria-selected", notesTabMatch: true, ownPostsPanelCount: 1, likesPanelCount: 1 } };
   const subtabDomDiagnostics = {
     diagnosticVersion: "m0-subtab-dom-diagnostic-v1",
@@ -461,10 +536,35 @@ function installSidePanelChromeMock() {
   };
   const items = [0, 1].map((index) => ({ sourceId: `sidepanel${index}`, title: `抽查 ${index}`, author: "测试作者", canonicalSourceUrl: `https://www.xiaohongshu.com/explore/sidepanel${index}` }));
   const runtimeListeners = [];
+  const currentInspection = () => {
+    if (pageState === "ready") return inspection;
+    if (pageState === "notesRoute") {
+      return { ok: false, code: "FAVORITES_ROUTE_UNCONFIRMED", reason: "当前 URL 未确认处于收藏笔记路由。", diagnostics: inspection.diagnostics };
+    }
+    return { ok: false, code: "NOTES_TAB_UNCONFIRMED", reason: "未确认可见激活子 tab 为“笔记”。", diagnostics: inspection.diagnostics };
+  };
+  globalThis.__resolveDelayedPageReady = () => {
+    pageState = "ready";
+    for (const callback of delayedReadyCallbacks.splice(0)) callback({ ok: true, inspection, timedOut: false });
+  };
+  globalThis.__setSidePanelPageState = (nextState, nextUrl, notify = true) => {
+    pageState = nextState;
+    if (nextUrl) activeTabUrl = nextUrl;
+    if (notify) {
+      const tab = { id: activeTabId, active: true, url: activeTabUrl };
+      for (const listener of tabUpdatedListeners) listener(activeTabId, { url: activeTabUrl }, tab);
+    }
+  };
+  globalThis.__activateSidePanelTab = (nextTabId, nextState, nextUrl) => {
+    activeTabId = nextTabId;
+    pageState = nextState;
+    activeTabUrl = nextUrl;
+    for (const listener of tabActivatedListeners) listener({ tabId: activeTabId, windowId: 1 });
+  };
   globalThis.chrome = {
     runtime: {
       lastError: null,
-      getManifest: () => ({ version: "0.3.0", version_name: "0.3.0-m0-preview", action: {} }),
+      getManifest: () => ({ version: "0.3.1", version_name: "0.3.1-m0-preview", action: {} }),
       onMessage: { addListener(listener) { runtimeListeners.push(listener); } },
       sendMessage(message, callback) {
         globalThis.__sidePanelMessages.push(message);
@@ -475,7 +575,9 @@ function installSidePanelChromeMock() {
       }
     },
     tabs: {
-      query: async () => [{ id: 7, url: "https://xiaohongshu.com/user/profile/test?tab=fav&subTab=note" }],
+      query: async () => [{ id: activeTabId, active: true, url: activeTabUrl }],
+      onActivated: { addListener(listener) { tabActivatedListeners.push(listener); } },
+      onUpdated: { addListener(listener) { tabUpdatedListeners.push(listener); } },
       sendMessage(_tabId, message, callback) {
         globalThis.__sidePanelMessages.push(message);
         if (!contentConnected) {
@@ -485,13 +587,10 @@ function installSidePanelChromeMock() {
           return;
         }
         if (message.type === "M0_FULL_SCAN_GET_PAGE_STATUS") {
-          callback({
-            ok: true,
-            inspection: location.search.includes("boundaryFailure=1")
-              ? { ok: false, code: "NOTES_TAB_UNCONFIRMED", reason: "未确认可见激活子 tab 为“笔记”。", diagnostics: inspection.diagnostics }
-              : inspection
-          });
+          callback({ ok: true, inspection: currentInspection() });
         }
+        else if (message.type === "M0_FULL_SCAN_WAIT_PAGE_READY" && pageState === "delayed") delayedReadyCallbacks.push(callback);
+        else if (message.type === "M0_FULL_SCAN_WAIT_PAGE_READY") callback({ ok: true, inspection: currentInspection(), timedOut: pageState === "missing" });
         else if (message.type === "M0_FULL_SCAN_GET_SUBTAB_DOM_DIAGNOSTICS") callback({ ok: true, diagnostics: subtabDomDiagnostics });
         else if (message.type === "M0_FULL_SCAN_GET_RUNTIME_DIAGNOSTICS") callback({ ok: true, diagnostics: { maxBufferedItems: 25, recentItemCount: 12, scrollMode: "element" } });
         else callback({ ok: true, session });
