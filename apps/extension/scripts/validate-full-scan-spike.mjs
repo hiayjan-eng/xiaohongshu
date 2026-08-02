@@ -51,7 +51,7 @@ const background = readFileSync(new URL("../src/background.js", import.meta.url)
 const build = readFileSync(new URL("./build-extension.mjs", import.meta.url), "utf8");
 
 for (const marker of [
-  "M0 全量扫描 Preview 0.3.1",
+  "M0 全量扫描 Preview 0.3.2",
   "扫描全部收藏",
   "暂停",
   "继续",

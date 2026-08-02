@@ -593,12 +593,38 @@
 
     const activeIndicator = element.nextElementSibling;
     if (!hasDomShape(activeIndicator, "div", ["reds-tab-item", "active", "sub-tab-list"])) return null;
-    if (normalizeText(activeIndicator.textContent) !== "") return null;
-    if (activeIndicator.hidden || activeIndicator.getAttribute?.("aria-hidden") === "true") return null;
-    const indicatorStyle = globalThis.getComputedStyle?.(activeIndicator);
-    if (indicatorStyle?.display === "none" || indicatorStyle?.visibility === "hidden") return null;
+    if (!isVisible(activeIndicator) || activeIndicator.getAttribute?.("aria-hidden") === "true") return null;
+    const visibleIndicatorText = readVisibleElementText(activeIndicator);
+    if ([NOTES_TAB_TEXT, ALBUMS_TAB_TEXT, FILES_TAB_TEXT].some((pattern) => pattern.test(visibleIndicatorText))) return null;
 
     return { group, activeStateSource: "adjacent-sibling-class:active" };
+  }
+
+  function readVisibleElementText(element) {
+    const document = element?.ownerDocument;
+    if (!document?.createTreeWalker) return "";
+    const walker = document.createTreeWalker(element, globalThis.NodeFilter?.SHOW_TEXT || 4);
+    const parts = [];
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const text = normalizeText(node.nodeValue);
+      const parent = node.parentElement;
+      if (!text || !parent || !isVisibleTextContainer(parent)) continue;
+      parts.push(text);
+    }
+    return normalizeText(parts.join(" "));
+  }
+
+  function isVisibleTextContainer(element) {
+    if (element.closest?.("[hidden], [aria-hidden='true'], [inert]")) return false;
+    const style = globalThis.getComputedStyle?.(element);
+    if (style?.display === "none" || style?.visibility === "hidden" || style?.opacity === "0") return false;
+    const rect = element.getBoundingClientRect?.();
+    if (!rect || rect.width <= 0 || rect.height <= 0) return false;
+    const viewportWidth = Number(globalThis.innerWidth) || Number(element.ownerDocument?.documentElement?.clientWidth) || 0;
+    const viewportHeight = Number(globalThis.innerHeight) || Number(element.ownerDocument?.documentElement?.clientHeight) || 0;
+    if (rect.bottom <= 0 || rect.right <= 0 || (viewportWidth && rect.left >= viewportWidth) || (viewportHeight && rect.top >= viewportHeight)) return false;
+    const clipped = (style?.clip && style.clip !== "auto") || (style?.clipPath && style.clipPath !== "none") || style?.overflow === "hidden";
+    return !(rect.width <= 1 && rect.height <= 1 && clipped);
   }
 
   function hasDomShape(element, tagName, classTokens) {
