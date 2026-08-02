@@ -1,7 +1,8 @@
 {
   "manifest_version": 3,
   "name": "收藏复活旧收藏扫描 Beta",
-  "version": "0.2.3",
+  "version": "0.4.0",
+  "version_name": "0.4.0-m0-api-spike",
   "description": "在用户主动点击后，扫描本人小红书网页版当前已加载收藏卡片，支持进度反馈、暂停继续、断点恢复和导入前确认。",
   "permissions": [
     "activeTab",
@@ -48,7 +49,8 @@
       "js": [
         "src/full-scan-core.js",
         "src/xhs-scanner.js",
-        "src/full-scan-content.js"
+        "src/full-scan-content.js",
+        "src/api-sync/api-probe-content.js"
       ],
       "run_at": "document_idle"
     }

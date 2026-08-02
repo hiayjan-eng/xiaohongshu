@@ -1,4 +1,4 @@
-importScripts("build-profile.js", "full-scan-idb.js");
+importScripts("build-profile.js", "full-scan-idb.js", "api-sync/api-sync-core.js", "api-sync/api-sync-idb.js", "api-sync/api-sync-provider.js");
 
 const BUILD_PROFILE = globalThis.__COLLECTION_REVIVAL_BUILD_PROFILE__ || {};
 const WEB_APP_ORIGINS = Array.isArray(BUILD_PROFILE.webAppOrigins) ? BUILD_PROFILE.webAppOrigins : [];
@@ -18,12 +18,61 @@ chrome.runtime.onStartup?.addListener(() => {
 void configureSidePanel();
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (isApiSyncMessage(message)) {
+    void handleApiSyncMessage(message, sender)
+      .then((response) => sendResponse(response))
+      .catch((error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }));
+    return true;
+  }
   if (!isDatabaseMessage(message)) return false;
   void handleDatabaseMessage(message, sender)
     .then((response) => sendResponse(response))
     .catch((error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }));
   return true;
 });
+
+const apiProbeRecords = [];
+
+async function handleApiSyncMessage(message, sender) {
+  if (message.type === "M0_API_PROBE_START") {
+    if (!sender.tab?.id) throw new Error("Open the Xiaohongshu favorites page before detecting APIs.");
+    await chrome.scripting.executeScript({ target: { tabId: sender.tab.id }, world: "MAIN", files: ["src/api-sync/api-probe-main.js"] });
+    return { ok: true, probes: summarizeProbes() };
+  }
+  if (message.type === "M0_API_PROBE_RECORD") {
+    const probe = sanitizeProbe(message.probe);
+    if (probe) {
+      const existing = apiProbeRecords.findIndex((item) => item.path === probe.path && item.method === probe.method);
+      if (existing >= 0) apiProbeRecords[existing] = probe; else apiProbeRecords.push(probe);
+    }
+    return { ok: true, probes: summarizeProbes() };
+  }
+  if (message.type === "M0_API_PROBE_GET") return { ok: true, probes: summarizeProbes() };
+  if (message.type === "M0_API_SYNC_CREATE_RUN") return { ok: true, run: await globalThis.CollectionRevivalApiSyncDb.createRun() };
+  if (message.type === "M0_API_SYNC_GET_RUN") return { ok: true, run: await globalThis.CollectionRevivalApiSyncDb.getRun(message.runId) };
+  if (message.type === "M0_API_SYNC_DISCARD") return { ok: true, run: await globalThis.CollectionRevivalApiSyncDb.discardRun(message.runId) };
+  if (message.type === "M0_API_SYNC_CONFIRM") return { ok: true, run: await globalThis.CollectionRevivalApiSyncDb.confirmImport(message.runId) };
+  if (message.type === "M0_API_SYNC_READ") {
+    const probes = summarizeProbes();
+    const kinds = new Set(probes.map((probe) => probe.kind));
+    if (!kinds.has("favorites") || !kinds.has("albums") || !kinds.has("memberships")) return { ok: false, error: "API_MAPPING_NOT_CONFIRMED: detect all three read endpoints first." };
+    if (probes.some((probe) => probe.needsDynamicSignature)) return { ok: false, error: "DYNAMIC_SIGNATURE_REQUIRED: no safe page-native replay mapping has been confirmed." };
+    return { ok: false, error: "PAGE_NATIVE_TRANSPORT_NOT_CONFIRMED: captured metadata is intentionally not used as an authenticated request template." };
+  }
+  return { ok: false, error: "Unsupported API sync request" };
+}
+
+function isApiSyncMessage(message) {
+  return ["M0_API_PROBE_START", "M0_API_PROBE_RECORD", "M0_API_PROBE_GET", "M0_API_SYNC_CREATE_RUN", "M0_API_SYNC_GET_RUN", "M0_API_SYNC_READ", "M0_API_SYNC_DISCARD", "M0_API_SYNC_CONFIRM"].includes(message?.type);
+}
+
+function sanitizeProbe(value) {
+  if (!value || typeof value !== "object" || !/^\/[a-zA-Z0-9_./-]+$/.test(String(value.path || ""))) return null;
+  const fields = (items) => Array.isArray(items) ? items.filter((item) => /^[a-zA-Z][a-zA-Z0-9_]{0,63}$/.test(String(item)) && !/cookie|token|auth|sign|user.?id|account/i.test(item)).slice(0, 30) : [];
+  return { path: value.path, method: value.method === "POST" ? "POST" : "GET", requestFields: fields(value.requestFields), responseFields: fields(value.responseFields), cursorType: ["cursor", "page", "pageNum", "lastCursor", "nextCursor", "none"].includes(value.cursorType) ? value.cursorType : "none", hasMoreField: Boolean(value.hasMoreField), count: Math.max(0, Math.min(9999, Number(value.count) || 0)), kind: ["favorites", "albums", "memberships", "unknown"].includes(value.kind) ? value.kind : "unknown", needsDynamicSignature: Boolean(value.needsDynamicSignature), example: { request: fields(value.example?.request), response: fields(value.example?.response) } };
+}
+
+function summarizeProbes() { return apiProbeRecords.map((probe) => ({ ...probe, requestFields: [...probe.requestFields], responseFields: [...probe.responseFields], example: { ...probe.example } })); }
 
 async function handleDatabaseMessage(message, sender) {
   if (message.type === "M0_PREVIEW_PREPARE_IMPORT") {

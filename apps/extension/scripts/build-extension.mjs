@@ -66,6 +66,10 @@ for (const file of [
   "web-bridge.js", "xhs-scanner.js", "full-scan-core.js", "full-scan-content.js",
   "full-scan-idb.js", "background.js", "build-profile.js"
 ]) copyFileSync(resolve(root, "src", file), resolve(srcOut, file));
+mkdirSync(resolve(srcOut, "api-sync"), { recursive: true });
+for (const file of ["api-sync-core.js", "api-sync-idb.js", "api-sync-provider.js", "api-probe-main.js", "api-probe-content.js"]) {
+  copyFileSync(resolve(root, "src", "api-sync", file), resolve(srcOut, "api-sync", file));
+}
 
 writeFileSync(buildProfilePath, `globalThis.__COLLECTION_REVIVAL_BUILD_PROFILE__ = ${JSON.stringify({
   id: profile.id,
@@ -75,7 +79,7 @@ writeFileSync(buildProfilePath, `globalThis.__COLLECTION_REVIVAL_BUILD_PROFILE__
   webAppOrigins: profile.webAppOrigins
 }, null, 2)};\n`);
 
-if (!existsSync(resolve(outDir, "manifest.json")) || !existsSync(resolve(srcOut, "sidepanel.js")) || !existsSync(buildProfilePath)) {
+if (!existsSync(resolve(outDir, "manifest.json")) || !existsSync(resolve(srcOut, "sidepanel.js")) || !existsSync(resolve(srcOut, "api-sync", "api-sync-provider.js")) || !existsSync(buildProfilePath)) {
   throw new Error("Extension build failed: missing output files");
 }
 
