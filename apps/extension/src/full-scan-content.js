@@ -53,6 +53,8 @@
     switch (message.type) {
       case "M0_FULL_SCAN_GET_PAGE_STATUS":
         return { ok: true, inspection: publicInspection(controller.inspectPage()) };
+      case "M0_FULL_SCAN_GET_SUBTAB_DOM_DIAGNOSTICS":
+        return { ok: true, diagnostics: Core.collectSubtabDomDiagnostics(document) };
       case "M0_FULL_SCAN_START":
         if (controller.running) return { ok: true, session: controller.session, alreadyRunning: true };
         return controller.start({ resume: false, debugPauseAfter: message.debugPauseAfter });

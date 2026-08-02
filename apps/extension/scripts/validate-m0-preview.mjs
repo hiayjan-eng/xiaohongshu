@@ -71,7 +71,10 @@ for (const marker of [
   "profileIdMatch",
   "notesTabCandidateText",
   "notesTabActiveStateSource",
-  "notesTabMatch"
+  "notesTabMatch",
+  "子标签 DOM 诊断",
+  "copySubtabDomDiagnostics",
+  "M0_FULL_SCAN_GET_SUBTAB_DOM_DIAGNOSTICS"
 ]) assertIncludes(sidepanel, marker, "Side Panel");
 
 const core = read("apps/extension/src/full-scan-core.js");
@@ -96,7 +99,11 @@ for (const marker of [
   "navigation-account-avatar",
   "editProfileSignalFound",
   "findVisibleActiveNotesTab",
-  "findProfileSubtabGroup"
+  "findProfileSubtabGroup",
+  "collectSubtabDomDiagnostics",
+  "m0-subtab-dom-diagnostic-v1",
+  "hasSubtabUnderlineSignal",
+  "sanitizeDomIdentifier"
 ]) assertIncludes(core, marker, "strict page/full scan core");
 if (core.includes("root = document.body") || core.includes("element: document.body")) throw new Error("document.body fallback is forbidden.");
 

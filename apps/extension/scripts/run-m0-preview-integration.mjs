@@ -79,6 +79,31 @@ async function testPageIdentity() {
       assert.equal(supportedFormat.diagnostics.notesTabCandidateText, notesText);
       assert.equal(supportedFormat.diagnostics.notesTabMatch, true);
     }
+    const subtabDomDiagnostics = await page.evaluate(() => {
+      document.querySelector('[data-revival-subtab="notes"]').id = "5f02f6f1000000000101cc87";
+      document.querySelector('[data-revival-subtab="albums"]').setAttribute("href", "https://www.xiaohongshu.com/explore/example?token=secret-fixture-token");
+      return globalThis.CollectionRevivalFullScanCore.collectSubtabDomDiagnostics(document);
+    });
+    assert.equal(subtabDomDiagnostics.diagnosticVersion, "m0-subtab-dom-diagnostic-v1");
+    assert.ok(subtabDomDiagnostics.candidates.notes.length >= 2);
+    assert.ok(subtabDomDiagnostics.candidates.albums.length >= 1);
+    assert.ok(subtabDomDiagnostics.candidates.files.length >= 1);
+    assert.ok(subtabDomDiagnostics.candidates.notes.some((candidate) => candidate.id.startsWith("[redacted:")));
+    assert.ok(subtabDomDiagnostics.candidates.albums.some((candidate) => candidate.hasHref === true));
+    assert.ok(subtabDomDiagnostics.candidates.notes.some((candidate) => candidate.hasUnderline === true));
+    const serializedSubtabDomDiagnostics = JSON.stringify(subtabDomDiagnostics);
+    assert.equal(serializedSubtabDomDiagnostics.includes("5f02f6f1000000000101cc87"), false);
+    assert.equal(serializedSubtabDomDiagnostics.includes("secret-fixture-token"), false);
+    for (const candidate of Object.values(subtabDomDiagnostics.candidates).flat()) {
+      assert.equal(typeof candidate.tagName, "string");
+      assert.equal(typeof candidate.className, "string");
+      assert.equal(typeof candidate.boundingRectVisible, "boolean");
+      assert.equal(typeof candidate.hasUnderline, "boolean");
+      assert.equal(typeof candidate.hasSelectedIcon, "boolean");
+      assert.equal(typeof candidate.hasActiveDescendant, "boolean");
+      assert.ok(candidate.computed.display);
+      assert.ok(candidate.computed.visibility);
+    }
 
     await page.evaluate(() => history.replaceState(null, "", "/user/profile/m0fixtureprofile?tab=note"));
     assert.equal((await inspect()).code, "FAVORITES_ROUTE_UNCONFIRMED");
@@ -163,7 +188,7 @@ async function testPageIdentity() {
       await page.addScriptTag({ content: coreSource });
       assert.equal((await inspect()).code, code);
     }
-    return { strictFavoritesConfirmed: true, countedActiveNotesPassed: true, inactiveCountedNotesBlocked: true, activeAlbumsBlocked: true, bodyNotesTextBlocked: true, selfLinkWithoutEditButton: true, mismatchedSelfLinkBlocked: true, editProfileOnlyBlocked: true, otherProfileBlocked: true, inactiveFavoritesBlocked: true, inactiveNotesBlocked: true, noWwwHandshake: true, noWwwRefreshHandshake: true, ownPostFalseImportCount: 0, blockersSafePaused: 3 };
+    return { strictFavoritesConfirmed: true, subtabDomDiagnosticsSanitized: true, countedActiveNotesPassed: true, inactiveCountedNotesBlocked: true, activeAlbumsBlocked: true, bodyNotesTextBlocked: true, selfLinkWithoutEditButton: true, mismatchedSelfLinkBlocked: true, editProfileOnlyBlocked: true, otherProfileBlocked: true, inactiveFavoritesBlocked: true, inactiveNotesBlocked: true, noWwwHandshake: true, noWwwRefreshHandshake: true, ownPostFalseImportCount: 0, blockersSafePaused: 3 };
   } finally {
     await context.close();
   }
@@ -215,6 +240,13 @@ async function testSidePanel() {
     assert.equal(await page.locator("#notesTabCandidateText").textContent(), "笔记 · 3464");
     assert.equal(await page.locator("#notesTabActiveStateSource").textContent(), "aria-selected");
     assert.equal(await page.locator("#notesTabMatch").textContent(), "是");
+    await page.waitForFunction(() => document.getElementById("subtabDomDiagnosticsOutput")?.textContent?.includes("m0-subtab-dom-diagnostic-v1"));
+    assert.equal((await page.locator("#subtabDomDiagnosticsOutput").textContent()).includes("profileId"), false);
+    await page.locator("#copySubtabDomDiagnostics").click();
+    await page.waitForFunction(() => document.getElementById("copySubtabDomDiagnosticsStatus")?.textContent?.includes("已复制"));
+    const copiedSubtabDomDiagnostics = await page.evaluate(() => globalThis.__copiedSubtabDomDiagnostics);
+    assert.ok(copiedSubtabDomDiagnostics.includes("m0-subtab-dom-diagnostic-v1"));
+    assert.equal(copiedSubtabDomDiagnostics.includes("profileId"), false);
     assert.equal(await page.locator("#startScan").isEnabled(), true);
     await page.locator("#randomButton").click();
     await page.waitForFunction(() => document.querySelectorAll("#resultItems li").length === 2);
@@ -228,6 +260,15 @@ async function testSidePanel() {
     const manifestHasPopup = await page.evaluate(() => Boolean(chrome.runtime.getManifest().action?.default_popup));
     assert.equal(manifestHasPopup, false, "long task must not depend on a popup");
 
+    const boundaryFailurePage = await context.newPage();
+    await boundaryFailurePage.goto("https://extension.test/sidepanel.html?boundaryFailure=1", { waitUntil: "domcontentloaded" });
+    await boundaryFailurePage.waitForFunction(() => document.getElementById("pageIdentity")?.textContent === "未确认收藏页");
+    await boundaryFailurePage.waitForFunction(() => document.getElementById("subtabDomDiagnosticsOutput")?.textContent?.includes("m0-subtab-dom-diagnostic-v1"));
+    await boundaryFailurePage.locator("#copySubtabDomDiagnostics").click();
+    await boundaryFailurePage.waitForFunction(() => document.getElementById("copySubtabDomDiagnosticsStatus")?.textContent?.includes("已复制"));
+    assert.ok((await boundaryFailurePage.evaluate(() => globalThis.__copiedSubtabDomDiagnostics)).includes("m0-subtab-dom-diagnostic-v1"));
+    await boundaryFailurePage.close();
+
     const failurePage = await context.newPage();
     await failurePage.goto("https://extension.test/sidepanel.html?injectionFailure=1", { waitUntil: "domcontentloaded" });
     await failurePage.waitForFunction(() => document.getElementById("safetyMessage")?.textContent?.includes("内容脚本注入失败"));
@@ -235,7 +276,7 @@ async function testSidePanel() {
     assert.equal((await failurePage.locator("#safetyMessage").textContent()).includes("请确认当前位于"), false);
     await failurePage.close();
 
-    return { opened: true, apexHost: true, safeReinjection: true, explicitInjectionFailure: true, randomReview: 2, popupIndependent: true };
+    return { opened: true, subtabDomDiagnosticsCopied: true, boundaryFailureDiagnosticsCopied: true, apexHost: true, safeReinjection: true, explicitInjectionFailure: true, randomReview: 2, popupIndependent: true };
   } finally {
     await context.close();
   }
@@ -351,9 +392,22 @@ function installPreviewBridgeMock(items) {
 function installSidePanelChromeMock() {
   globalThis.__sidePanelMessages = [];
   globalThis.__sidePanelInjections = [];
+  globalThis.__copiedSubtabDomDiagnostics = "";
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { async writeText(value) { globalThis.__copiedSubtabDomDiagnostics = String(value); } }
+  });
   let contentConnected = false;
   const session = { sessionId: "scan_sidepanel", status: "completed", discoveredCount: 20, validCount: 20, existingCount: 0, invalidCount: 0, missingLinkCount: 0, reviewCount: 0, resumeCount: 1, lastScrollTop: 100, lastScrollHeight: 100, stableNoGrowthCycles: 6, startedAt: "2026-07-30T00:00:00.000Z", completedAt: "2026-07-30T00:01:00.000Z", selectorVersion: "m0-real-favorites-v4", extensionVersion: "0.3.0-m0-preview" };
   const inspection = { ok: true, identity: { profileIdHash: "abcd1234", favoritesPageIdentity: "fixture-page", selectorVersion: "m0-real-favorites-v4" }, diagnostics: { selectorVersion: "m0-real-favorites-v4", currentUrlProfileIdHash: "abcd1234", selfProfileLinkFound: true, profileIdMatch: true, editProfileSignalFound: false, notesTabCandidateText: "笔记 · 3464", notesTabActiveStateSource: "aria-selected", notesTabMatch: true, ownPostsPanelCount: 1, likesPanelCount: 1 } };
+  const subtabDomDiagnostics = {
+    diagnosticVersion: "m0-subtab-dom-diagnostic-v1",
+    candidates: {
+      notes: [{ tagName: "div", id: "", className: "note channel active", role: "tab", ariaSelected: "", ariaCurrent: "", dataState: "", hasHref: false, parent: { tagName: "div", className: "channel-list", role: "", ariaSelected: "", ariaCurrent: "", dataState: "" }, grandparent: null, siblings: { previousClassName: "", nextClassName: "channel" }, computed: { display: "flex", visibility: "visible" }, boundingRectVisible: true, hasUnderline: true, hasSelectedIcon: false, hasActiveDescendant: true }],
+      albums: [],
+      files: []
+    }
+  };
   const items = [0, 1].map((index) => ({ sourceId: `sidepanel${index}`, title: `抽查 ${index}`, author: "测试作者", canonicalSourceUrl: `https://www.xiaohongshu.com/explore/sidepanel${index}` }));
   const runtimeListeners = [];
   globalThis.chrome = {
@@ -379,7 +433,15 @@ function installSidePanelChromeMock() {
           chrome.runtime.lastError = null;
           return;
         }
-        if (message.type === "M0_FULL_SCAN_GET_PAGE_STATUS") callback({ ok: true, inspection });
+        if (message.type === "M0_FULL_SCAN_GET_PAGE_STATUS") {
+          callback({
+            ok: true,
+            inspection: location.search.includes("boundaryFailure=1")
+              ? { ok: false, code: "NOTES_TAB_UNCONFIRMED", reason: "未确认可见激活子 tab 为“笔记”。", diagnostics: inspection.diagnostics }
+              : inspection
+          });
+        }
+        else if (message.type === "M0_FULL_SCAN_GET_SUBTAB_DOM_DIAGNOSTICS") callback({ ok: true, diagnostics: subtabDomDiagnostics });
         else if (message.type === "M0_FULL_SCAN_GET_RUNTIME_DIAGNOSTICS") callback({ ok: true, diagnostics: { maxBufferedItems: 25, recentItemCount: 12, scrollMode: "element" } });
         else callback({ ok: true, session });
       },

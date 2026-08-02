@@ -512,6 +512,7 @@
   const NOTES_TAB_TEXT = /^笔记(?:\s*[·•:：-]?\s*\d+)?$/;
   const ALBUMS_TAB_TEXT = /^专辑(?:\s*[·•:：-]?\s*\d+)?$/;
   const FILES_TAB_TEXT = /^文件(?:\s*[·•:：-]?\s*\d+)?$/;
+  const SUBTAB_DOM_DIAGNOSTIC_VERSION = "m0-subtab-dom-diagnostic-v1";
 
   function findVisibleActiveNotesTab(document) {
     const evaluated = Array.from(document.querySelectorAll(PROFILE_SUBTAB_SELECTOR))
@@ -535,6 +536,154 @@
         notesTabMatch: Boolean(matched)
       }
     };
+  }
+
+  function collectSubtabDomDiagnostics(document) {
+    const candidates = { notes: [], albums: [], files: [] };
+    for (const element of Array.from(document.querySelectorAll("*"))) {
+      const text = normalizeText(element.textContent);
+      const kind = NOTES_TAB_TEXT.test(text)
+        ? "notes"
+        : ALBUMS_TAB_TEXT.test(text)
+          ? "albums"
+          : FILES_TAB_TEXT.test(text)
+            ? "files"
+            : "";
+      if (!kind) continue;
+      const visibility = readSubtabDiagnosticVisibility(element);
+      if (!isVisible(element) || !visibility.boundingRectVisible || visibility.display === "none" || visibility.visibility === "hidden") continue;
+      candidates[kind].push(describeSubtabDomCandidate(element, visibility));
+    }
+    return { diagnosticVersion: SUBTAB_DOM_DIAGNOSTIC_VERSION, candidates };
+  }
+
+  function describeSubtabDomCandidate(element, visibility) {
+    return {
+      tagName: String(element.tagName || "").toLowerCase(),
+      id: sanitizeDomIdentifier(element.id),
+      className: sanitizeDomClassName(element.className),
+      role: sanitizeDomAttribute(element.getAttribute?.("role")),
+      ariaSelected: sanitizeDomAttribute(element.getAttribute?.("aria-selected")),
+      ariaCurrent: sanitizeDomAttribute(element.getAttribute?.("aria-current")),
+      dataState: sanitizeDomAttribute(element.getAttribute?.("data-state")),
+      hasHref: element.hasAttribute?.("href") === true,
+      parent: describeSubtabDomRelative(element.parentElement),
+      grandparent: describeSubtabDomRelative(element.parentElement?.parentElement),
+      siblings: {
+        previousClassName: sanitizeDomClassName(element.previousElementSibling?.className, 4),
+        nextClassName: sanitizeDomClassName(element.nextElementSibling?.className, 4)
+      },
+      computed: {
+        display: visibility.display,
+        visibility: visibility.visibility
+      },
+      boundingRectVisible: visibility.boundingRectVisible,
+      hasUnderline: hasSubtabUnderlineSignal(element),
+      hasSelectedIcon: hasSubtabSelectedIcon(element),
+      hasActiveDescendant: hasSubtabActiveDescendant(element)
+    };
+  }
+
+  function describeSubtabDomRelative(element) {
+    if (!element) return null;
+    return {
+      tagName: String(element.tagName || "").toLowerCase(),
+      className: sanitizeDomClassName(element.className),
+      role: sanitizeDomAttribute(element.getAttribute?.("role")),
+      ariaSelected: sanitizeDomAttribute(element.getAttribute?.("aria-selected")),
+      ariaCurrent: sanitizeDomAttribute(element.getAttribute?.("aria-current")),
+      dataState: sanitizeDomAttribute(element.getAttribute?.("data-state"))
+    };
+  }
+
+  function readSubtabDiagnosticVisibility(element) {
+    const style = globalThis.getComputedStyle?.(element);
+    const rect = element.getBoundingClientRect?.();
+    const width = Number(rect?.width) || 0;
+    const height = Number(rect?.height) || 0;
+    const viewportWidth = Number(globalThis.innerWidth) || Number(element.ownerDocument?.documentElement?.clientWidth) || 0;
+    const viewportHeight = Number(globalThis.innerHeight) || Number(element.ownerDocument?.documentElement?.clientHeight) || 0;
+    const intersectsViewport = !rect || (
+      rect.bottom > 0 && rect.right > 0 &&
+      (!viewportWidth || rect.left < viewportWidth) &&
+      (!viewportHeight || rect.top < viewportHeight)
+    );
+    return {
+      display: sanitizeDomAttribute(style?.display) || "unknown",
+      visibility: sanitizeDomAttribute(style?.visibility) || "unknown",
+      boundingRectVisible: Boolean((!rect || (width > 0 && height > 0)) && intersectsViewport)
+    };
+  }
+
+  function hasSubtabUnderlineSignal(element) {
+    const nodes = [element, ...Array.from(element.querySelectorAll?.("*") || []).slice(0, 30)];
+    if (nodes.some((node) => {
+      const style = globalThis.getComputedStyle?.(node);
+      const className = String(readRawClassName(node.className) || "");
+      if (/underline|indicator|ink[-_]?bar|tab[-_]?line|active[-_]?line|selected[-_]?line/i.test(className)) return true;
+      if (String(style?.textDecorationLine || "").includes("underline")) return true;
+      return Number.parseFloat(style?.borderBottomWidth || "0") > 0 && style?.borderBottomStyle !== "none";
+    })) return true;
+    return ["::before", "::after"].some((pseudo) => {
+      const style = globalThis.getComputedStyle?.(element, pseudo);
+      const hasBox = Number.parseFloat(style?.height || "0") > 0 || Number.parseFloat(style?.borderBottomWidth || "0") > 0;
+      return style?.display !== "none" && style?.visibility !== "hidden" && style?.content !== "none" && hasBox;
+    });
+  }
+
+  function hasSubtabSelectedIcon(element) {
+    return Array.from(element.querySelectorAll?.("svg, img, [class*='icon'], [data-icon]") || []).some((node) => {
+      const signal = [
+        readRawClassName(node.className),
+        node.getAttribute?.("aria-label"),
+        node.getAttribute?.("data-state"),
+        node.getAttribute?.("data-icon")
+      ].filter(Boolean).join(" ");
+      return isVisible(node) && /selected|active|checked|check|chosen|选中/i.test(signal);
+    });
+  }
+
+  function hasSubtabActiveDescendant(element) {
+    return Boolean(element.querySelector?.([
+      "[aria-selected='true']",
+      "[aria-current='page']",
+      "[aria-current='true']",
+      "[data-state='active']",
+      "[data-state='selected']",
+      ".active",
+      ".selected",
+      ".current"
+    ].join(",")));
+  }
+
+  function sanitizeDomIdentifier(value) {
+    const input = String(value || "").trim();
+    if (!input) return "";
+    return isSensitiveDomToken(input) ? `[redacted:${stableHash(input)}]` : input.slice(0, 80);
+  }
+
+  function sanitizeDomClassName(value, limit = 10) {
+    return readRawClassName(value)
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, limit)
+      .map((token) => isSensitiveDomToken(token) ? `[redacted:${stableHash(token)}]` : token.slice(0, 80))
+      .join(" ");
+  }
+
+  function readRawClassName(value) {
+    return String(typeof value === "object" && value?.baseVal !== undefined ? value.baseVal : value || "").trim();
+  }
+
+  function sanitizeDomAttribute(value) {
+    const input = String(value || "").trim();
+    if (!input) return "";
+    return isSensitiveDomToken(input) ? `[redacted:${stableHash(input)}]` : input.slice(0, 80);
+  }
+
+  function isSensitiveDomToken(value) {
+    const input = String(value || "");
+    return input.length > 80 || /(?:[a-f0-9]{16,}|\d{12,})/i.test(input) || /(?:token|profile)[-_=:]?[a-z0-9_-]{10,}/i.test(input);
   }
 
   function findProfileSubtabGroup(element) {
@@ -852,6 +1001,7 @@
     REQUIRED_STABLE_CYCLES,
     SELECTOR_VERSION,
     canonicalizeSourceUrl,
+    collectSubtabDomDiagnostics,
     collectCardsFromNodes,
     extractFavoriteCard,
     extractSourceId,

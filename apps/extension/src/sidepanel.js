@@ -6,6 +6,7 @@
     "existingCount", "missingLinkCount", "reviewCount", "resumeCount", "searchForm",
     "searchInput", "recentButton", "randomButton", "reviewSummary", "resultItems",
     "diagnosticsPanel", "diagnosticsButton", "exportDiagnostics", "diagnosticsOutput",
+    "subtabDomDiagnosticsPanel", "copySubtabDomDiagnostics", "copySubtabDomDiagnosticsStatus", "subtabDomDiagnosticsOutput",
     "importButton", "importMessage"
   ];
   const elements = Object.fromEntries(ids.map((id) => [id, document.getElementById(id)]));
@@ -23,6 +24,7 @@
   let displayedItems = [];
   let elapsedTimer = null;
   let lastDiagnostics = null;
+  let subtabDomDiagnostics = null;
 
   elements.startScan.addEventListener("click", () => void control("M0_FULL_SCAN_START"));
   elements.pauseScan.addEventListener("click", () => void control("M0_FULL_SCAN_PAUSE"));
@@ -37,6 +39,7 @@
   });
   elements.diagnosticsButton.addEventListener("click", () => void refreshDiagnostics());
   elements.exportDiagnostics.addEventListener("click", () => void exportDiagnostics());
+  elements.copySubtabDomDiagnostics.addEventListener("click", () => void copySubtabDomDiagnostics());
   elements.importButton.addEventListener("click", () => void openImportPreview());
   elements.resultItems.addEventListener("click", (event) => void openOriginalFromEvent(event));
 
@@ -60,6 +63,7 @@
     const pageResponse = connection.response;
     inspection = pageResponse?.inspection || null;
     renderProfileDiagnostics(inspection?.diagnostics);
+    await refreshSubtabDomDiagnostics();
     if (!pageResponse?.ok || !inspection?.ok) {
       return showBoundaryFailure(inspection?.reason || pageResponse?.error || "无法确认收藏页。");
     }
@@ -152,6 +156,44 @@
       saveAs: true
     });
     window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  }
+
+  async function refreshSubtabDomDiagnostics() {
+    const response = activeTabId
+      ? await sendToTab({ type: "M0_FULL_SCAN_GET_SUBTAB_DOM_DIAGNOSTICS" })
+      : null;
+    subtabDomDiagnostics = response?.ok && response.diagnostics
+      ? response.diagnostics
+      : {
+          diagnosticVersion: "m0-subtab-dom-diagnostic-v1",
+          status: "unavailable",
+          candidates: { notes: [], albums: [], files: [] }
+        };
+    elements.subtabDomDiagnosticsOutput.textContent = JSON.stringify(subtabDomDiagnostics, null, 2);
+  }
+
+  async function copySubtabDomDiagnostics() {
+    const text = JSON.stringify(subtabDomDiagnostics || {
+      diagnosticVersion: "m0-subtab-dom-diagnostic-v1",
+      status: "unavailable",
+      candidates: { notes: [], albums: [], files: [] }
+    }, null, 2);
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error("clipboard unavailable");
+      await navigator.clipboard.writeText(text);
+      elements.copySubtabDomDiagnosticsStatus.textContent = "已复制脱敏诊断";
+    } catch {
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.setAttribute("readonly", "");
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.append(textarea);
+      textarea.select();
+      const copied = document.execCommand?.("copy") === true;
+      textarea.remove();
+      elements.copySubtabDomDiagnosticsStatus.textContent = copied ? "已复制脱敏诊断" : "复制失败，请手动选择诊断文本";
+    }
   }
 
   async function openImportPreview() {
