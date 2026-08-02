@@ -9,7 +9,7 @@ for (const file of files) {
   execFileSync(process.execPath, ["--check", path], { stdio: "inherit" });
 }
 const manifest = JSON.parse(readFileSync(new URL("../manifest.json", import.meta.url), "utf8"));
-if (manifest.manifest_version !== 3 || manifest.version_name !== "0.4.0-m0-api-spike") throw new Error("M0 API spike must be MV3 version 0.4.0-m0-api-spike");
+if (manifest.manifest_version !== 3 || manifest.version_name !== "0.4.1-m0-api-spike") throw new Error("M0 API spike must be MV3 version 0.4.1-m0-api-spike");
 if (!manifest.permissions.includes("scripting") || !manifest.permissions.includes("sidePanel") || !manifest.host_permissions.includes("https://www.xiaohongshu.com/*")) throw new Error("Missing required Chromium extension permissions");
 const xhs = manifest.content_scripts.find((item) => item.js?.includes("src/api-sync/api-probe-content.js"));
 if (!xhs || !xhs.matches.includes("https://www.xiaohongshu.com/*")) throw new Error("API probe bridge must target Xiaohongshu");

@@ -42,8 +42,9 @@ async function handleApiSyncMessage(message, sender) {
   if (message.type === "M0_API_PROBE_RECORD") {
     const probe = sanitizeProbe(message.probe);
     if (probe) {
-      const existing = apiProbeRecords.findIndex((item) => item.path === probe.path && item.method === probe.method);
-      if (existing >= 0) apiProbeRecords[existing] = probe; else apiProbeRecords.push(probe);
+      const existing = apiProbeRecords.findIndex((item) => item.path === probe.path && item.method === probe.method && item.kind === probe.kind);
+      if (existing >= 0) apiProbeRecords[existing] = mergeProbe(apiProbeRecords[existing], probe); else apiProbeRecords.push(probe);
+      chrome.runtime.sendMessage({ type: "M0_API_PROBE_UPDATED" }).catch(() => {});
     }
     return { ok: true, probes: summarizeProbes() };
   }
@@ -55,7 +56,7 @@ async function handleApiSyncMessage(message, sender) {
   if (message.type === "M0_API_SYNC_READ") {
     const probes = summarizeProbes();
     const kinds = new Set(probes.map((probe) => probe.kind));
-    if (!kinds.has("favorites") || !kinds.has("albums") || !kinds.has("memberships")) return { ok: false, error: "API_MAPPING_NOT_CONFIRMED: detect all three read endpoints first." };
+    if (!kinds.has("favorites") || !kinds.has("albums") || !kinds.has("albumContent")) return { ok: false, error: "API_MAPPING_NOT_CONFIRMED: detect favorites, album list, and album content endpoints first." };
     if (probes.some((probe) => probe.needsDynamicSignature)) return { ok: false, error: "DYNAMIC_SIGNATURE_REQUIRED: no safe page-native replay mapping has been confirmed." };
     return { ok: false, error: "PAGE_NATIVE_TRANSPORT_NOT_CONFIRMED: captured metadata is intentionally not used as an authenticated request template." };
   }
@@ -68,11 +69,22 @@ function isApiSyncMessage(message) {
 
 function sanitizeProbe(value) {
   if (!value || typeof value !== "object" || !/^\/[a-zA-Z0-9_./-]+$/.test(String(value.path || ""))) return null;
-  const fields = (items) => Array.isArray(items) ? items.filter((item) => /^[a-zA-Z][a-zA-Z0-9_]{0,63}$/.test(String(item)) && !/cookie|token|auth|sign|user.?id|account/i.test(item)).slice(0, 30) : [];
-  return { path: value.path, method: value.method === "POST" ? "POST" : "GET", requestFields: fields(value.requestFields), responseFields: fields(value.responseFields), cursorType: ["cursor", "page", "pageNum", "lastCursor", "nextCursor", "none"].includes(value.cursorType) ? value.cursorType : "none", hasMoreField: Boolean(value.hasMoreField), count: Math.max(0, Math.min(9999, Number(value.count) || 0)), kind: ["favorites", "albums", "memberships", "unknown"].includes(value.kind) ? value.kind : "unknown", needsDynamicSignature: Boolean(value.needsDynamicSignature), example: { request: fields(value.example?.request), response: fields(value.example?.response) } };
+  const fields = (items) => Array.isArray(items) ? items.filter((item) => /^[\p{L}_][\p{L}\p{N}_.\[\]-]{0,180}$/u.test(String(item)) && !/cookie|token|auth|sign|user.?id|account/i.test(item)).slice(0, 180) : [];
+  const safePath = (value) => fields([value])[0] || "";
+  const relation = value.relation && typeof value.relation === "object" ? {
+    source: ["none", "independent-interface", "album-content-derived"].includes(value.relation.source) ? value.relation.source : "none",
+    derivedCount: Math.max(0, Math.min(1000000, Number(value.relation.derivedCount) || 0)),
+    albumIdPath: safePath(value.relation.albumIdPath), noteIdPaths: fields(value.relation.noteIdPaths)
+  } : { source: "none", derivedCount: 0, albumIdPath: "", noteIdPaths: [] };
+  return { path: value.path, method: value.method === "POST" ? "POST" : "GET", queryFields: fields(value.queryFields), requestFields: fields(value.requestFields), responseFields: fields(value.responseFields), cursorType: safePath(value.cursorType) || "none", hasMoreField: Boolean(value.hasMoreField), count: Math.max(0, Math.min(9999, Number(value.count) || 0)), kind: ["favorites", "albums", "albumContent", "unknown"].includes(value.kind) ? value.kind : "unknown", needsDynamicSignature: Boolean(value.needsDynamicSignature), context: { currentPath: /^\/[a-zA-Z0-9_./-]*$/.test(String(value.context?.currentPath || "")) ? value.context.currentPath : "", isAlbumDetail: Boolean(value.context?.isAlbumDetail), albumIdSource: safePath(value.context?.albumIdSource) }, relation, example: { query: fields(value.example?.query), request: fields(value.example?.request), response: fields(value.example?.response) } };
 }
 
-function summarizeProbes() { return apiProbeRecords.map((probe) => ({ ...probe, requestFields: [...probe.requestFields], responseFields: [...probe.responseFields], example: { ...probe.example } })); }
+function mergeProbe(previous, next) {
+  const mergeFields = (left, right) => [...new Set([...left, ...right])].slice(0, 180);
+  return { ...next, queryFields: mergeFields(previous.queryFields, next.queryFields), requestFields: mergeFields(previous.requestFields, next.requestFields), responseFields: mergeFields(previous.responseFields, next.responseFields), relation: next.relation.derivedCount >= previous.relation.derivedCount ? next.relation : previous.relation, needsDynamicSignature: previous.needsDynamicSignature || next.needsDynamicSignature };
+}
+
+function summarizeProbes() { return apiProbeRecords.map((probe) => ({ ...probe, queryFields: [...probe.queryFields], requestFields: [...probe.requestFields], responseFields: [...probe.responseFields], relation: { ...probe.relation, noteIdPaths: [...probe.relation.noteIdPaths] }, context: { ...probe.context }, example: { ...probe.example } })); }
 
 async function handleDatabaseMessage(message, sender) {
   if (message.type === "M0_PREVIEW_PREPARE_IMPORT") {
