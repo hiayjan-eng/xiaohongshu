@@ -43,7 +43,7 @@ for (const marker of ["establishContentConnection", "chrome.scripting.executeScr
 }
 if (!sidepanel.includes("M0 全量扫描 Preview 0.3.0") || !sidepanel.includes("导入收藏复活") || !sidepanel.includes("子标签 DOM 诊断") || !sidepanel.includes("复制诊断")) throw new Error("M0 Side Panel identity/import/diagnostic action is missing.");
 const packagedCore = read("src/full-scan-core.js");
-for (const marker of ["currentUrlProfileIdHash", "selfProfileLinkFound", "profileIdMatch", "navigation-self-profile", "editProfileSignalFound", "findVisibleActiveNotesTab", "findProfileSubtabGroup", "notesTabActiveStateSource", "notesTabMatch", "collectSubtabDomDiagnostics", "m0-subtab-dom-diagnostic-v1", "sanitizeDomIdentifier"]) {
+for (const marker of ["currentUrlProfileIdHash", "selfProfileLinkFound", "profileIdMatch", "navigation-self-profile", "editProfileSignalFound", "findVisibleActiveNotesTab", "findProfileSubtabGroup", "findRedsProfileNotesState", "adjacent-sibling-class:active", "notesTabActiveStateSource", "notesTabMatch", "collectSubtabDomDiagnostics", "m0-subtab-dom-diagnostic-v1", "sanitizeDomIdentifier"]) {
   if (!packagedCore.includes(marker)) throw new Error(`M0 self-profile verification is missing: ${marker}`);
 }
 const packagedContent = read("src/full-scan-content.js");

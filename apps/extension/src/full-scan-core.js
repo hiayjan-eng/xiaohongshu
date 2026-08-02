@@ -1,5 +1,5 @@
 (() => {
-  const SELECTOR_VERSION = "m0-real-favorites-v4";
+  const SELECTOR_VERSION = "m0-real-favorites-v5";
   const REQUIRED_STABLE_CYCLES = 5;
   const PERSIST_BATCH_SIZE = 25;
   const RECENT_LIMIT = 12;
@@ -518,12 +518,13 @@
     const evaluated = Array.from(document.querySelectorAll(PROFILE_SUBTAB_SELECTOR))
       .filter((element) => isVisible(element) && NOTES_TAB_TEXT.test(normalizeText(element.textContent)))
       .map((element) => {
-        const group = findProfileSubtabGroup(element);
+        const redsProfileState = findRedsProfileNotesState(element);
+        const group = redsProfileState?.group || findProfileSubtabGroup(element);
         return {
           element,
           text: normalizeText(element.textContent),
           group,
-          activeStateSource: group ? findActiveStateSource(element, group) : "none"
+          activeStateSource: redsProfileState?.activeStateSource || (group ? findActiveStateSource(element, group) : "none")
         };
       });
     const matched = evaluated.find((candidate) => candidate.group && candidate.activeStateSource !== "none") || null;
@@ -582,6 +583,28 @@
       hasSelectedIcon: hasSubtabSelectedIcon(element),
       hasActiveDescendant: hasSubtabActiveDescendant(element)
     };
+  }
+
+  function findRedsProfileNotesState(element) {
+    if (!hasDomShape(element, "div", ["reds-tab-item", "sub-tab-list"])) return null;
+    const group = element.parentElement;
+    if (!hasDomShape(group, "div", ["tertiary", "center", "reds-tabs-list"])) return null;
+    if (!hasDomShape(group.parentElement, "div", ["reds-sticky"])) return null;
+
+    const activeIndicator = element.nextElementSibling;
+    if (!hasDomShape(activeIndicator, "div", ["reds-tab-item", "active", "sub-tab-list"])) return null;
+    if (normalizeText(activeIndicator.textContent) !== "") return null;
+    if (activeIndicator.hidden || activeIndicator.getAttribute?.("aria-hidden") === "true") return null;
+    const indicatorStyle = globalThis.getComputedStyle?.(activeIndicator);
+    if (indicatorStyle?.display === "none" || indicatorStyle?.visibility === "hidden") return null;
+
+    return { group, activeStateSource: "adjacent-sibling-class:active" };
+  }
+
+  function hasDomShape(element, tagName, classTokens) {
+    if (String(element?.tagName || "").toLowerCase() !== tagName) return false;
+    const tokens = new Set(readRawClassName(element.className).split(/\s+/).filter(Boolean));
+    return classTokens.every((token) => tokens.has(token));
   }
 
   function describeSubtabDomRelative(element) {

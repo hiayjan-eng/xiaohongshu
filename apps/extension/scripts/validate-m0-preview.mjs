@@ -79,7 +79,7 @@ for (const marker of [
 
 const core = read("apps/extension/src/full-scan-core.js");
 for (const marker of [
-  "m0-real-favorites-v4",
+  "m0-real-favorites-v5",
   "OWN_PROFILE_UNCONFIRMED",
   "FAVORITES_TAB_UNCONFIRMED",
   "NOTES_TAB_UNCONFIRMED",
@@ -100,6 +100,8 @@ for (const marker of [
   "editProfileSignalFound",
   "findVisibleActiveNotesTab",
   "findProfileSubtabGroup",
+  "findRedsProfileNotesState",
+  "adjacent-sibling-class:active",
   "collectSubtabDomDiagnostics",
   "m0-subtab-dom-diagnostic-v1",
   "hasSubtabUnderlineSignal",

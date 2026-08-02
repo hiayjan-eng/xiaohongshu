@@ -63,7 +63,7 @@ async function testPageIdentity() {
     await page.addScriptTag({ content: coreSource });
     const confirmed = await inspect();
     assert.equal(confirmed.ok, true);
-    assert.equal(confirmed.diagnostics.selectorVersion, "m0-real-favorites-v4");
+    assert.equal(confirmed.diagnostics.selectorVersion, "m0-real-favorites-v5");
     assert.equal(confirmed.diagnostics.ownPostsPanelCount, 1);
     assert.equal(confirmed.diagnostics.editProfileSignalFound, false, "matching self link must pass without an edit-profile button");
     assert.equal(confirmed.diagnostics.selfProfileLinkFound, true);
@@ -183,15 +183,66 @@ async function testPageIdentity() {
     assert.equal(bodyNotesText.diagnostics.notesTabCandidateText, "");
     assert.equal(bodyNotesText.diagnostics.notesTabMatch, false);
 
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.addScriptTag({ content: coreSource });
+    await installRealRedsNotesSubtab(page);
+    const realRedsNotes = await inspect();
+    assert.equal(realRedsNotes.ok, true);
+    assert.equal(realRedsNotes.diagnostics.notesTabCandidateText, "笔记 · 3470");
+    assert.equal(realRedsNotes.diagnostics.notesTabActiveStateSource, "adjacent-sibling-class:active");
+    assert.equal(realRedsNotes.diagnostics.notesTabMatch, true);
+
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.addScriptTag({ content: coreSource });
+    await installRealRedsNotesSubtab(page, { indicatorText: "专辑 · 17" });
+    const activeAlbumBesideNotes = await inspect();
+    assert.equal(activeAlbumBesideNotes.code, "NOTES_TAB_UNCONFIRMED");
+    assert.equal(activeAlbumBesideNotes.diagnostics.notesTabMatch, false);
+
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.addScriptTag({ content: coreSource });
+    await installRealRedsNotesSubtab(page, { indicatorActive: false });
+    const inactiveRealRedsNotes = await inspect();
+    assert.equal(inactiveRealRedsNotes.code, "NOTES_TAB_UNCONFIRMED");
+    assert.equal(inactiveRealRedsNotes.diagnostics.notesTabMatch, false);
+
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.addScriptTag({ content: coreSource });
+    await installRealRedsNotesSubtab(page, { sticky: false });
+    const unrelatedActiveSibling = await inspect();
+    assert.equal(unrelatedActiveSibling.code, "NOTES_TAB_UNCONFIRMED");
+    assert.equal(unrelatedActiveSibling.diagnostics.notesTabMatch, false);
+
     for (const [mode, code] of [["risk", "RISK_CONTROL"], ["login", "LOGIN_EXPIRED"], ["network", "NETWORK_ERROR"]]) {
       await page.goto(`https://www.xiaohongshu.com/user/profile/m0fixtureprofile?tab=fav&subTab=note&total=20&mode=${mode}`, { waitUntil: "domcontentloaded" });
       await page.addScriptTag({ content: coreSource });
       assert.equal((await inspect()).code, code);
     }
-    return { strictFavoritesConfirmed: true, subtabDomDiagnosticsSanitized: true, countedActiveNotesPassed: true, inactiveCountedNotesBlocked: true, activeAlbumsBlocked: true, bodyNotesTextBlocked: true, selfLinkWithoutEditButton: true, mismatchedSelfLinkBlocked: true, editProfileOnlyBlocked: true, otherProfileBlocked: true, inactiveFavoritesBlocked: true, inactiveNotesBlocked: true, noWwwHandshake: true, noWwwRefreshHandshake: true, ownPostFalseImportCount: 0, blockersSafePaused: 3 };
+    return { strictFavoritesConfirmed: true, subtabDomDiagnosticsSanitized: true, countedActiveNotesPassed: true, realRedsNotesPassed: true, activeAlbumBesideNotesBlocked: true, inactiveRealRedsNotesBlocked: true, unrelatedActiveSiblingBlocked: true, inactiveCountedNotesBlocked: true, activeAlbumsBlocked: true, bodyNotesTextBlocked: true, selfLinkWithoutEditButton: true, mismatchedSelfLinkBlocked: true, editProfileOnlyBlocked: true, otherProfileBlocked: true, inactiveFavoritesBlocked: true, inactiveNotesBlocked: true, noWwwHandshake: true, noWwwRefreshHandshake: true, ownPostFalseImportCount: 0, blockersSafePaused: 3 };
   } finally {
     await context.close();
   }
+}
+
+async function installRealRedsNotesSubtab(page, options = {}) {
+  await page.evaluate(({ indicatorText = "", indicatorActive = true, sticky = true }) => {
+    const current = document.querySelector('nav[aria-label="收藏子标签"]');
+    const wrapper = document.createElement("div");
+    if (sticky) wrapper.className = "reds-sticky";
+    const group = document.createElement("div");
+    group.className = "tertiary center reds-tabs-list reds-tabs-list";
+    const notes = document.createElement("div");
+    notes.className = "reds-tab-item sub-tab-list";
+    const label = document.createElement("span");
+    label.textContent = "笔记 · 3470";
+    notes.append(label);
+    const indicator = document.createElement("div");
+    indicator.className = `reds-tab-item${indicatorActive ? " active" : ""} sub-tab-list`;
+    indicator.textContent = indicatorText;
+    group.append(notes, indicator);
+    wrapper.append(group);
+    current.replaceWith(wrapper);
+  }, options);
 }
 
 async function installContentRuntimeMock(page) {
@@ -366,7 +417,7 @@ function createFixtureItems(total) {
     coverUrl: "",
     visibleExcerpt: `仅用于自动测试的脱敏夹具 ${index}`,
     capturedAt: "2026-07-30T00:00:00.000Z",
-    selectorVersion: "m0-real-favorites-v4"
+    selectorVersion: "m0-real-favorites-v5"
   }));
 }
 
@@ -377,7 +428,7 @@ function installPreviewBridgeMock(items) {
     if (event.source !== window || message.source !== "collection-revival-m0-preview-web") return;
     let response;
     if (message.type === "M0_PREVIEW_IMPORT_META_REQUEST") {
-      response = { ok: true, meta: { importBatchId: message.importBatchId, scanSessionId: "scan_fixture", extensionVersion: "0.3.0-m0-preview", totalCount: items.length, reviewCount: 0, selectorVersion: "m0-real-favorites-v4", status: "prepared" } };
+      response = { ok: true, meta: { importBatchId: message.importBatchId, scanSessionId: "scan_fixture", extensionVersion: "0.3.0-m0-preview", totalCount: items.length, reviewCount: 0, selectorVersion: "m0-real-favorites-v5", status: "prepared" } };
     } else if (message.type === "M0_PREVIEW_IMPORT_CHUNK_REQUEST") {
       const offset = Number(message.offset) || 0;
       const limit = Number(message.limit) || 200;
@@ -398,8 +449,8 @@ function installSidePanelChromeMock() {
     value: { async writeText(value) { globalThis.__copiedSubtabDomDiagnostics = String(value); } }
   });
   let contentConnected = false;
-  const session = { sessionId: "scan_sidepanel", status: "completed", discoveredCount: 20, validCount: 20, existingCount: 0, invalidCount: 0, missingLinkCount: 0, reviewCount: 0, resumeCount: 1, lastScrollTop: 100, lastScrollHeight: 100, stableNoGrowthCycles: 6, startedAt: "2026-07-30T00:00:00.000Z", completedAt: "2026-07-30T00:01:00.000Z", selectorVersion: "m0-real-favorites-v4", extensionVersion: "0.3.0-m0-preview" };
-  const inspection = { ok: true, identity: { profileIdHash: "abcd1234", favoritesPageIdentity: "fixture-page", selectorVersion: "m0-real-favorites-v4" }, diagnostics: { selectorVersion: "m0-real-favorites-v4", currentUrlProfileIdHash: "abcd1234", selfProfileLinkFound: true, profileIdMatch: true, editProfileSignalFound: false, notesTabCandidateText: "笔记 · 3464", notesTabActiveStateSource: "aria-selected", notesTabMatch: true, ownPostsPanelCount: 1, likesPanelCount: 1 } };
+  const session = { sessionId: "scan_sidepanel", status: "completed", discoveredCount: 20, validCount: 20, existingCount: 0, invalidCount: 0, missingLinkCount: 0, reviewCount: 0, resumeCount: 1, lastScrollTop: 100, lastScrollHeight: 100, stableNoGrowthCycles: 6, startedAt: "2026-07-30T00:00:00.000Z", completedAt: "2026-07-30T00:01:00.000Z", selectorVersion: "m0-real-favorites-v5", extensionVersion: "0.3.0-m0-preview" };
+  const inspection = { ok: true, identity: { profileIdHash: "abcd1234", favoritesPageIdentity: "fixture-page", selectorVersion: "m0-real-favorites-v5" }, diagnostics: { selectorVersion: "m0-real-favorites-v5", currentUrlProfileIdHash: "abcd1234", selfProfileLinkFound: true, profileIdMatch: true, editProfileSignalFound: false, notesTabCandidateText: "笔记 · 3464", notesTabActiveStateSource: "aria-selected", notesTabMatch: true, ownPostsPanelCount: 1, likesPanelCount: 1 } };
   const subtabDomDiagnostics = {
     diagnosticVersion: "m0-subtab-dom-diagnostic-v1",
     candidates: {
