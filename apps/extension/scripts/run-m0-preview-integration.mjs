@@ -313,7 +313,7 @@ async function installContentRuntimeMock(page) {
     globalThis.__m0ContentListener = null;
     globalThis.chrome = {
       runtime: {
-        getManifest: () => ({ version: "0.3.2", version_name: "0.3.2-m0-preview" }),
+        getManifest: () => ({ version: "0.3.3", version_name: "0.3.3-m0-preview" }),
         onMessage: { addListener(listener) { globalThis.__m0ContentListener = listener; } },
         sendMessage(_message, callback) { callback?.({ ok: true, session: null, recentItems: [] }); }
       }
@@ -335,7 +335,7 @@ async function sendContentMessage(page, message) {
 async function testSidePanel() {
   const html = await readFile(resolve(extensionRoot, "src", "sidepanel.html"), "utf8");
   const css = await readFile(resolve(extensionRoot, "src", "sidepanel.css"), "utf8");
-  const profile = 'globalThis.__COLLECTION_REVIVAL_BUILD_PROFILE__={id:"m0-preview",versionName:"0.3.2-m0-preview",defaultWebAppUrl:"https://preview.test/m0-preview/",webAppOrigins:["https://preview.test"]};';
+  const profile = 'globalThis.__COLLECTION_REVIVAL_BUILD_PROFILE__={id:"m0-preview",versionName:"0.3.3-m0-preview",defaultWebAppUrl:"https://preview.test/m0-preview/",webAppOrigins:["https://preview.test"]};';
   const sidepanel = await readFile(resolve(extensionRoot, "src", "sidepanel.js"), "utf8");
   const context = await browser.newContext();
   await context.addInitScript(installSidePanelChromeMock);
@@ -351,7 +351,7 @@ async function testSidePanel() {
   try {
     await page.goto("https://extension.test/sidepanel.html", { waitUntil: "domcontentloaded" });
     await page.waitForFunction(() => document.getElementById("pageIdentity")?.textContent?.includes("收藏"));
-    assert.equal(await page.locator(".eyebrow").textContent(), "M0 全量扫描 Preview 0.3.2");
+    assert.equal(await page.locator(".eyebrow").textContent(), "M0 全量扫描 Preview 0.3.3");
     assert.equal(await page.locator("#currentUrlProfileId").textContent(), "已脱敏 •1234");
     assert.equal(await page.locator("#selfProfileLinkStatus").textContent(), "找到");
     assert.equal(await page.locator("#profileIdMatch").textContent(), "是");
@@ -525,12 +525,12 @@ function installPreviewBridgeMock(items) {
     if (event.source !== window || message.source !== "collection-revival-m0-preview-web") return;
     let response;
     if (message.type === "M0_PREVIEW_IMPORT_META_REQUEST") {
-      response = { ok: true, meta: { importBatchId: message.importBatchId, scanSessionId: "scan_fixture", extensionVersion: "0.3.2-m0-preview", totalCount: items.length, reviewCount: 0, selectorVersion: "m0-real-favorites-v5", status: "prepared" } };
+      response = { ok: true, meta: { importBatchId: message.importBatchId, scanSessionId: "scan_fixture", extensionVersion: "0.3.3-m0-preview", totalCount: items.length, reviewCount: 0, selectorVersion: "m0-real-favorites-v5", status: "prepared" } };
     } else if (message.type === "M0_PREVIEW_IMPORT_CHUNK_REQUEST") {
       const offset = Number(message.offset) || 0;
       const limit = Number(message.limit) || 200;
       const chunkItems = items.slice(offset, offset + limit);
-      response = { ok: true, chunk: { importBatchId: message.importBatchId, scanSessionId: "scan_fixture", extensionVersion: "0.3.2-m0-preview", items: chunkItems, offset, nextOffset: offset + chunkItems.length, hasMore: offset + chunkItems.length < items.length, totalCount: items.length } };
+      response = { ok: true, chunk: { importBatchId: message.importBatchId, scanSessionId: "scan_fixture", extensionVersion: "0.3.3-m0-preview", items: chunkItems, offset, nextOffset: offset + chunkItems.length, hasMore: offset + chunkItems.length < items.length, totalCount: items.length } };
     } else if (message.type === "M0_PREVIEW_IMPORT_RESULT") response = { ok: true };
     else return;
     window.setTimeout(() => window.postMessage({ source: "collection-revival-extension", type: "M0_PREVIEW_RESPONSE", requestId: message.requestId, requestType: message.type, response }, window.location.origin), 0);
@@ -560,7 +560,7 @@ function installSidePanelChromeMock() {
   const tabActivatedListeners = [];
   const tabUpdatedListeners = [];
   const delayedReadyCallbacks = [];
-  const session = { sessionId: "scan_sidepanel", status: "completed", discoveredCount: 20, validCount: 20, existingCount: 0, invalidCount: 0, missingLinkCount: 0, reviewCount: 0, resumeCount: 1, lastScrollTop: 100, lastScrollHeight: 100, stableNoGrowthCycles: 6, startedAt: "2026-07-30T00:00:00.000Z", completedAt: "2026-07-30T00:01:00.000Z", selectorVersion: "m0-real-favorites-v5", extensionVersion: "0.3.2-m0-preview" };
+  const session = { sessionId: "scan_sidepanel", status: "completed", discoveredCount: 20, validCount: 20, existingCount: 0, invalidCount: 0, missingLinkCount: 0, reviewCount: 0, resumeCount: 1, lastScrollTop: 100, lastScrollHeight: 100, stableNoGrowthCycles: 6, startedAt: "2026-07-30T00:00:00.000Z", completedAt: "2026-07-30T00:01:00.000Z", selectorVersion: "m0-real-favorites-v5", extensionVersion: "0.3.3-m0-preview" };
   const inspection = { ok: true, identity: { profileIdHash: "abcd1234", favoritesPageIdentity: "fixture-page", selectorVersion: "m0-real-favorites-v5" }, diagnostics: { selectorVersion: "m0-real-favorites-v5", currentUrlProfileIdHash: "abcd1234", selfProfileLinkFound: true, profileIdMatch: true, editProfileSignalFound: false, notesTabCandidateText: "笔记 · 3464", notesTabActiveStateSource: "aria-selected", notesTabMatch: true, ownPostsPanelCount: 1, likesPanelCount: 1 } };
   const subtabDomDiagnostics = {
     diagnosticVersion: "m0-subtab-dom-diagnostic-v1",
@@ -600,7 +600,7 @@ function installSidePanelChromeMock() {
   globalThis.chrome = {
     runtime: {
       lastError: null,
-      getManifest: () => ({ version: "0.3.2", version_name: "0.3.2-m0-preview", action: {} }),
+      getManifest: () => ({ version: "0.3.3", version_name: "0.3.3-m0-preview", action: {} }),
       onMessage: { addListener(listener) { runtimeListeners.push(listener); } },
       sendMessage(message, callback) {
         globalThis.__sidePanelMessages.push(message);

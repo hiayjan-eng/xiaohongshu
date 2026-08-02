@@ -51,7 +51,7 @@ const background = readFileSync(new URL("../src/background.js", import.meta.url)
 const build = readFileSync(new URL("./build-extension.mjs", import.meta.url), "utf8");
 
 for (const marker of [
-  "M0 全量扫描 Preview 0.3.2",
+  "M0 全量扫描 Preview 0.3.3",
   "扫描全部收藏",
   "暂停",
   "继续",
@@ -75,6 +75,11 @@ for (const marker of [
   "EXCLUDED_PANEL_INSIDE_ROOT",
   "scrollFavoritesContainerToBottom",
   "waitForActivityToSettle",
+  "confirmTrueEnd",
+  "syncPageBindings",
+  "END_NOT_PROVEN",
+  "fallbackScrollAttempts",
+  "rootRebindCount",
   "M0_FULL_SCAN_VERIFY_SESSION"
 ]) {
   if (!core.includes(marker)) throw new Error(`Missing full scan engine marker: ${marker}`);

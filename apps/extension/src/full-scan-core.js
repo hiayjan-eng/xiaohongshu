@@ -5,6 +5,7 @@
   const RECENT_LIMIT = 12;
   const ACTIVITY_QUIET_MS = 360;
   const ACTIVITY_GUARD_MS = 12000;
+  const END_CONFIRMATION_PROBES = 3;
 
   class FullScanController {
     constructor(options) {
@@ -30,7 +31,15 @@
       this.recentItems = [];
       this.lastGeometry = "";
       this.stableGeometryCycles = 0;
+      this.endCandidateCycles = 0;
       this.debugPauseAfter = 0;
+      this.rootRebindCount = 0;
+      this.scrollContainerSwitchCount = 0;
+      this.observerMutationCount = 0;
+      this.observerAddedNodeCount = 0;
+      this.fallbackScrollAttempts = 0;
+      this.endConfirmationAttempts = 0;
+      this.lastEndProof = "";
     }
 
     inspectPage() {
@@ -104,6 +113,7 @@
     }
 
     diagnostics() {
+      const pageScrollContainer = this.document.scrollingElement || this.document.documentElement;
       return {
         running: this.running,
         sessionId: this.session?.sessionId || "",
@@ -118,6 +128,20 @@
             this.root.contains(this.scrollContainer)
           )
         ),
+        rootSelector: describeElement(this.root),
+        rootConnected: Boolean(this.root?.isConnected),
+        scrollGeometry: readGeometry(this.scrollContainer),
+        pageScrollGeometry: readGeometry(pageScrollContainer),
+        loadingInsideRoot: isLoading(this.root),
+        loadingAnywhereOnPage: isLoading(this.document),
+        rootRebindCount: this.rootRebindCount,
+        scrollContainerSwitchCount: this.scrollContainerSwitchCount,
+        observerMutationCount: this.observerMutationCount,
+        observerAddedNodeCount: this.observerAddedNodeCount,
+        fallbackScrollAttempts: this.fallbackScrollAttempts,
+        endConfirmationAttempts: this.endConfirmationAttempts,
+        endCandidateCycles: this.endCandidateCycles,
+        lastEndProof: this.lastEndProof,
         selectorVersion: SELECTOR_VERSION
       };
     }
@@ -127,10 +151,33 @@
       this.observer = new this.MutationObserver((records) => {
         this.lastMutationAt = Date.now();
         this.activityVersion += 1;
+        this.observerMutationCount += records.length;
         const addedNodes = records.flatMap((record) => Array.from(record.addedNodes || []));
+        this.observerAddedNodeCount += addedNodes.length;
         if (addedNodes.length) void this.captureFromNodes(addedNodes);
       });
       this.observer.observe(this.root, { childList: true, subtree: true });
+    }
+
+    async syncPageBindings() {
+      const inspection = this.inspectPage();
+      if (!inspection.ok) return { ok: false, code: inspection.code, reason: inspection.reason };
+      if (inspection.identity.favoritesPageIdentity !== this.session?.favoritesPageIdentity) {
+        return { ok: false, code: "PAGE_IDENTITY_CHANGED", reason: "账号或收藏页身份已变化，旧会话未自动继续。" };
+      }
+      const rootChanged = !this.root?.isConnected || inspection.root !== this.root;
+      const scrollChanged = inspection.scrollContainer !== this.scrollContainer;
+      if (rootChanged || scrollChanged) {
+        this.root = inspection.root;
+        this.scrollContainer = inspection.scrollContainer;
+        if (rootChanged) this.rootRebindCount += 1;
+        if (scrollChanged) this.scrollContainerSwitchCount += 1;
+        this.installObserver();
+        this.lastMutationAt = Date.now();
+        this.activityVersion += 1;
+      }
+      if (rootChanged) await this.captureFromNodes([this.root]);
+      return { ok: true, rootChanged, scrollChanged };
     }
 
     restoreScrollCheckpoint() {
@@ -170,13 +217,9 @@
     async runLoop() {
       try {
         while (!this.stopRequested && this.session?.status === "scanning") {
-          const inspection = this.inspectPage();
-          if (!inspection.ok) {
-            await this.pauseForUser(inspection.code, inspection.reason);
-            return;
-          }
-          if (inspection.identity.favoritesPageIdentity !== this.session.favoritesPageIdentity) {
-            await this.pauseForUser("PAGE_IDENTITY_CHANGED", "账号或收藏页身份已变化，旧会话未自动继续。");
+          const initialSync = await this.syncPageBindings();
+          if (!initialSync.ok) {
+            await this.pauseForUser(initialSync.code, initialSync.reason);
             return;
           }
           if (this.debugPauseAfter && this.session.validCount >= this.debugPauseAfter) {
@@ -188,11 +231,32 @@
           const geometryBefore = readGeometry(this.scrollContainer);
           scrollFavoritesContainerToBottom(this.scrollContainer);
           await this.waitForActivityToSettle();
+          const primarySync = await this.syncPageBindings();
+          if (!primarySync.ok) {
+            await this.pauseForUser(primarySync.code, primarySync.reason);
+            return;
+          }
+          let rootChangedDuringCycle = initialSync.rootChanged || primarySync.rootChanged;
           await this.captureFromNodes([this.root]);
           await this.captureQueue;
 
-          const loading = isLoading(this.root);
-          const loadMore = hasVisibleLoadMore(this.root);
+          const pageScrollContainer = this.document.scrollingElement || this.document.documentElement;
+          if (this.session.validCount === countBefore && this.scrollContainer !== pageScrollContainer && pageScrollContainer) {
+            this.fallbackScrollAttempts += 1;
+            scrollFavoritesContainerToBottom(pageScrollContainer);
+            await this.waitForActivityToSettle();
+            const fallbackSync = await this.syncPageBindings();
+            if (!fallbackSync.ok) {
+              await this.pauseForUser(fallbackSync.code, fallbackSync.reason);
+              return;
+            }
+            rootChangedDuringCycle ||= fallbackSync.rootChanged;
+            await this.captureFromNodes([this.root]);
+            await this.captureQueue;
+          }
+
+          const loading = isLoading(this.document);
+          const loadMore = hasVisibleLoadMore(this.root) || hasVisibleLoadMore(this.document);
           const blocker = findBlockingState(this.document);
           if (blocker) {
             await this.pauseForUser(blocker.code, blocker.reason);
@@ -202,10 +266,12 @@
           const geometryAfter = readGeometry(this.scrollContainer);
           const noGrowth = this.session.validCount === countBefore;
           const geometryStable =
+            !rootChangedDuringCycle &&
             geometryAfter.scrollHeight === geometryBefore.scrollHeight &&
             geometryAfter.sentinel === geometryBefore.sentinel;
           const reachedBottom = geometryAfter.reachedBottom;
           this.stableGeometryCycles = geometryStable ? this.stableGeometryCycles + 1 : 0;
+          this.endCandidateCycles = noGrowth && reachedBottom ? this.endCandidateCycles + 1 : 0;
           const stableNoGrowthCycles =
             noGrowth && reachedBottom && !loading && !loadMore
               ? Number(this.session.stableNoGrowthCycles || 0) + 1
@@ -219,12 +285,22 @@
 
           if (
             reachedBottom &&
-            stableNoGrowthCycles >= REQUIRED_STABLE_CYCLES &&
-            this.stableGeometryCycles >= REQUIRED_STABLE_CYCLES &&
-            !loading &&
-            !loadMore
+            this.endCandidateCycles >= REQUIRED_STABLE_CYCLES &&
+            this.stableGeometryCycles >= REQUIRED_STABLE_CYCLES
           ) {
-            await this.complete();
+            const endConfirmation = await this.confirmTrueEnd();
+            if (endConfirmation.proved) {
+              await this.complete(endConfirmation.proof);
+              return;
+            }
+            if (endConfirmation.grew) {
+              this.stableGeometryCycles = 0;
+              this.endCandidateCycles = 0;
+              this.session = await this.updateSession({ ...this.readCheckpoint(), stableNoGrowthCycles: 0 });
+              this.emitProgress();
+              continue;
+            }
+            await this.pauseForUser("END_NOT_PROVEN", endConfirmation.reason || "无法证明已到达真实收藏列表末尾，扫描保持为未完成。请稍后继续。");
             return;
           }
         }
@@ -236,23 +312,95 @@
       }
     }
 
-    async waitForActivityToSettle() {
+    async waitForActivityToSettle(options = {}) {
       const startedAt = Date.now();
       const startingVersion = this.activityVersion;
-      const quietWindow = this.testMode ? 24 : ACTIVITY_QUIET_MS;
-      const guardWindow = this.testMode ? 1200 : ACTIVITY_GUARD_MS;
-      const minimumWindow = this.testMode ? 24 : 180;
+      const endProbe = options.endProbe === true;
+      const quietWindow = this.testMode ? 24 : endProbe ? 800 : ACTIVITY_QUIET_MS;
+      const guardWindow = this.testMode ? 1600 : endProbe ? 15000 : ACTIVITY_GUARD_MS;
+      const minimumWindow = this.testMode ? (endProbe ? 140 : 24) : endProbe ? 5000 : 180;
       const tick = this.testMode ? 8 : 80;
       while (Date.now() - startedAt < guardWindow) {
         const elapsed = Date.now() - startedAt;
         const quietFor = Date.now() - this.lastMutationAt;
         const sawActivity = this.activityVersion !== startingVersion;
-        if (!isLoading(this.root) && quietFor >= quietWindow && (sawActivity || elapsed >= minimumWindow)) return;
+        if (!isLoading(this.document) && quietFor >= quietWindow && (sawActivity || elapsed >= minimumWindow)) {
+          return { timedOut: false, sawActivity, elapsed };
+        }
         await wait(tick);
       }
+      return { timedOut: true, sawActivity: this.activityVersion !== startingVersion, elapsed: Date.now() - startedAt };
     }
 
-    async complete() {
+    async confirmTrueEnd() {
+      this.endConfirmationAttempts += 1;
+      let stableProbes = 0;
+      for (let phase = 0; phase < END_CONFIRMATION_PROBES; phase += 1) {
+        const beforeSync = await this.syncPageBindings();
+        if (!beforeSync.ok) return { proved: false, grew: false, reason: beforeSync.reason };
+        const countBefore = Number(this.session.validCount) || 0;
+        const primaryBefore = readGeometry(this.scrollContainer);
+        const pageScrollContainer = this.document.scrollingElement || this.document.documentElement;
+        const pageBefore = readGeometry(pageScrollContainer);
+
+        if (phase === 1) {
+          pullBackScrollContainer(this.scrollContainer);
+          if (pageScrollContainer && pageScrollContainer !== this.scrollContainer) pullBackScrollContainer(pageScrollContainer);
+          await wait(this.testMode ? 16 : 180);
+        }
+        scrollFavoritesContainerToBottom(this.scrollContainer);
+        if (pageScrollContainer && pageScrollContainer !== this.scrollContainer) {
+          this.fallbackScrollAttempts += 1;
+          scrollFavoritesContainerToBottom(pageScrollContainer);
+        }
+        if (phase > 0) {
+          scrollFavoritesContainerToEnd(this.scrollContainer);
+          if (pageScrollContainer && pageScrollContainer !== this.scrollContainer) scrollFavoritesContainerToEnd(pageScrollContainer);
+        }
+
+        const settle = await this.waitForActivityToSettle({ endProbe: true });
+        const afterSync = await this.syncPageBindings();
+        if (!afterSync.ok) return { proved: false, grew: false, reason: afterSync.reason };
+        await this.captureFromNodes([this.root]);
+        await this.captureQueue;
+
+        const primaryAfter = readGeometry(this.scrollContainer);
+        const currentPageScrollContainer = this.document.scrollingElement || this.document.documentElement;
+        const pageAfter = readGeometry(currentPageScrollContainer);
+        const grew =
+          Number(this.session.validCount) > countBefore ||
+          primaryAfter.scrollHeight > primaryBefore.scrollHeight ||
+          pageAfter.scrollHeight > pageBefore.scrollHeight ||
+          beforeSync.rootChanged ||
+          afterSync.rootChanged;
+        if (grew) return { proved: false, grew: true };
+
+        const loading = isLoading(this.document);
+        const allTargetsAtBottom = primaryAfter.reachedBottom && (
+          !currentPageScrollContainer ||
+          currentPageScrollContainer === this.scrollContainer ||
+          pageAfter.reachedBottom
+        );
+        const stable = !settle.timedOut && !loading && allTargetsAtBottom;
+        stableProbes = stable ? stableProbes + 1 : 0;
+        if (phase >= 1 && stableProbes >= 2 && hasExplicitEndMarker(this.document, this.root)) {
+          this.lastEndProof = "explicit-end-marker";
+          return { proved: true, grew: false, proof: this.lastEndProof };
+        }
+      }
+      if (stableProbes >= END_CONFIRMATION_PROBES) {
+        this.lastEndProof = "multi-probe-dom-and-scroll-stability";
+        return { proved: true, grew: false, proof: this.lastEndProof };
+      }
+      return {
+        proved: false,
+        grew: false,
+        reason: "末尾确认期间仍存在加载、DOM 活动、root 变化或未到底的滚动容器；扫描保持为未完成。"
+      };
+    }
+
+    async complete(proof = "") {
+      this.lastEndProof = proof || this.lastEndProof;
       await this.captureQueue;
       const verificationResponse = await this.sendMessage({
         type: "M0_FULL_SCAN_VERIFY_SESSION",
@@ -935,7 +1083,22 @@
     const current = Math.max(0, Number(container.scrollTop) || 0);
     const maximum = Math.max(0, Number(container.scrollHeight) - Number(container.clientHeight));
     const step = Math.max(360, Math.round((Number(container.clientHeight) || 440) * 0.82));
-    const top = Math.min(maximum, current + step);
+    setScrollContainerPosition(container, Math.min(maximum, current + step));
+  }
+
+  function scrollFavoritesContainerToEnd(container) {
+    const maximum = Math.max(0, Number(container?.scrollHeight) - Number(container?.clientHeight));
+    setScrollContainerPosition(container, maximum);
+  }
+
+  function pullBackScrollContainer(container) {
+    const current = Math.max(0, Number(container?.scrollTop) || 0);
+    const distance = Math.max(160, Math.round((Number(container?.clientHeight) || 440) * 0.36));
+    setScrollContainerPosition(container, Math.max(0, current - distance));
+  }
+
+  function setScrollContainerPosition(container, top) {
+    if (!container) return;
     const view = container.ownerDocument?.defaultView;
     if (container === container.ownerDocument?.scrollingElement && typeof view?.scrollTo === "function") {
       view.scrollTo({ top, behavior: "auto" });
@@ -943,6 +1106,26 @@
     else container.scrollTop = top;
     const EventConstructor = view?.Event || globalThis.Event;
     if (EventConstructor && typeof container.dispatchEvent === "function") container.dispatchEvent(new EventConstructor("scroll"));
+  }
+
+  function hasExplicitEndMarker(document, root) {
+    const candidates = Array.from(document?.querySelectorAll?.([
+      "[data-revival-list-end='true']",
+      "[data-list-end='true']",
+      "[class*='no-more']",
+      "[class*='nomore']",
+      "[class*='end-tip']",
+      "[class*='feeds-end']"
+    ].join(",")) || []);
+    return candidates.some((element) => {
+      if (!isVisible(element) || isInsideExcludedPanel(element)) return false;
+      const closeToRoot = root && (
+        root.contains(element) ||
+        root.parentElement?.contains(element) ||
+        element.parentElement?.contains(root)
+      );
+      return closeToRoot && /没有更多|没有更多了|到底了|已显示全部|全部加载完成|no more/i.test(normalizeText(element.textContent));
+    });
   }
 
   function readGeometry(container) {
@@ -960,12 +1143,12 @@
 
   function isLoading(root) {
     return Array.from(
-      root.querySelectorAll?.('[data-revival-loading="true"], [aria-busy="true"], .loading, [class*="loading"]') || []
+      root?.querySelectorAll?.('[data-revival-loading="true"], [aria-busy="true"], .loading, [class*="loading"]') || []
     ).some(isVisible);
   }
 
   function hasVisibleLoadMore(root) {
-    return Array.from(root.querySelectorAll?.("button, [role='button']") || []).some((element) => {
+    return Array.from(root?.querySelectorAll?.("button, [role='button']") || []).some((element) => {
       return isVisible(element) && /继续加载|加载更多|load more/i.test(normalizeText(element.textContent));
     });
   }

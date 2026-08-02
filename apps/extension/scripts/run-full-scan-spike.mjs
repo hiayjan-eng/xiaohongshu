@@ -46,12 +46,7 @@ const heapBefore = await cdp.send("Runtime.getHeapUsage");
 
 try {
   await openFixture(page, { total: targetTotal });
-  await page.evaluate(async () => {
-    sessionStorage.clear();
-    await globalThis.CollectionRevivalFullScanDb.clearDatabaseForTests();
-  });
-  await page.reload({ waitUntil: "domcontentloaded" });
-  await installExtensionScripts(page);
+  await page.evaluate(() => sessionStorage.clear());
 
   const pageStatus = await sendToContent(page, { type: "M0_FULL_SCAN_GET_PAGE_STATUS" });
   assert.equal(pageStatus.ok, true);

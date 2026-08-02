@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>M0 真实滚动末尾确认夹具</title>
+    <style>
+      * { box-sizing: border-box; }
+      body { margin: 0; font: 14px system-ui, sans-serif; }
+      nav, .reds-sticky { padding: 8px 16px; }
+      .main-tabs, .reds-tabs-list { display: flex; gap: 12px; }
+      .feeds-container { width: min(760px, calc(100vw - 32px)); margin: 16px; }
+      .feeds-container.inner-scroll { height: 420px; overflow-y: auto; border: 1px solid #ddd; }
+      [data-revival-note-card] { min-height: 0; height: 1px; padding: 0 8px; overflow: hidden; }
+      [data-revival-note-card] a { color: #222; text-decoration: none; }
+      #global-loading, #list-end { margin: 16px; padding: 10px; }
+      #global-loading[data-revival-loading="false"], #list-end[hidden] { display: none; }
+      #window-spacer { height: 1400px; }
+      [data-revival-own-posts-panel] { display: none; }
+    </style>
+  </head>
+  <body>
+    <nav aria-label="侧边导航">
+      <a href="/user/profile/m0fixtureprofile" aria-label="我的主页"><img alt="我的头像" />我</a>
+    </nav>
+    <nav class="main-tabs" aria-label="主标签">
+      <button role="tab" aria-selected="false">笔记</button>
+      <button role="tab" aria-selected="true" data-revival-tab="favorites">收藏</button>
+    </nav>
+    <div class="reds-sticky">
+      <div class="tertiary center reds-tabs-list reds-tabs-list">
+        <div class="reds-tab-item sub-tab-list"><span>笔记 · 3000</span></div>
+        <div class="reds-tab-item active sub-tab-list"><span aria-hidden="true" style="display:block;width:24px;height:2px"></span></div>
+      </div>
+    </div>
+    <main id="profile-content"></main>
+    <div id="global-loading" class="loading" data-revival-loading="false">正在加载下一批收藏…</div>
+    <div id="list-end" data-revival-list-end="true" hidden>没有更多收藏了</div>
+    <div id="window-spacer" hidden></div>
+    <section data-revival-own-posts-panel aria-hidden="true"></section>
+
+    <script>
+      (() => {
+        const mode = new URLSearchParams(location.search).get("fixtureMode") || "delayed-190";
+        const total = 3000;
+        const initialCount = 190;
+        const batchSize = 281;
+        const loadingElement = document.getElementById("global-loading");
+        const endElement = document.getElementById("list-end");
+        const profileContent = document.getElementById("profile-content");
+        const windowSpacer = document.getElementById("window-spacer");
+        let root = createRoot();
+        let loaded = initialCount;
+        let loading = false;
+        let loadRequests = 0;
+        let rootReplacementCount = 0;
+        let completedMarkerShownAt = 0;
+
+        windowSpacer.hidden = false;
+        if (mode === "inner-window") {
+          root.classList.add("inner-scroll");
+        }
+        appendCards(root, 0, loaded);
+        bindRootScroll(root);
+        bindWindowScroll();
+
+        function createRoot() {
+          const element = document.createElement("div");
+          element.className = "feeds-container";
+          element.setAttribute("aria-label", "收藏笔记列表");
+          profileContent.append(element);
+          return element;
+        }
+
+        function bindRootScroll(element) {
+          element.addEventListener("scroll", () => {
+            if (mode === "inner-window") return;
+            if (isAtBottom(element)) requestMore("inner");
+          });
+        }
+
+        function bindWindowScroll() {
+          const scrollingElement = document.scrollingElement || document.documentElement;
+          const handler = () => {
+            if (isAtBottom(scrollingElement)) requestMore("window");
+          };
+          scrollingElement.addEventListener("scroll", handler);
+          window.addEventListener("scroll", handler);
+        }
+
+        function requestMore(source) {
+          if (loading || loaded >= total) return;
+          loadRequests += 1;
+          if (mode === "unproven-end") {
+            loading = true;
+            loadingElement.dataset.revivalLoading = "true";
+            return;
+          }
+          if (mode === "plateau" && loadRequests <= 7) return;
+          if (mode === "inner-window" && source !== "window") return;
+          if (mode === "root-replaced" && rootReplacementCount === 0) replaceRoot();
+
+          loading = true;
+          const exposeLoading = mode !== "plateau";
+          if (exposeLoading) loadingElement.dataset.revivalLoading = "true";
+          const delay = mode === "delayed-190" ? 360 : mode === "plateau" ? 40 : 70;
+          setTimeout(() => {
+            const start = loaded;
+            loaded = Math.min(total, loaded + batchSize);
+            appendCards(root, start, loaded);
+            loading = false;
+            loadingElement.dataset.revivalLoading = "false";
+            if (loaded >= total) {
+              completedMarkerShownAt = Date.now();
+              endElement.hidden = false;
+            }
+          }, delay);
+        }
+
+        function replaceRoot() {
+          const previous = root;
+          const replacement = document.createElement("div");
+          replacement.className = previous.className;
+          replacement.setAttribute("aria-label", "收藏笔记列表");
+          appendCards(replacement, 0, loaded);
+          previous.replaceWith(replacement);
+          root = replacement;
+          rootReplacementCount += 1;
+          bindRootScroll(root);
+        }
+
+        function appendCards(target, start, end) {
+          const fragment = document.createDocumentFragment();
+          for (let index = start; index < end; index += 1) fragment.append(createCard(index));
+          target.append(fragment);
+        }
+
+        function createCard(index) {
+          const sourceId = `realnote${String(index).padStart(8, "0")}`;
+          const card = document.createElement("article");
+          card.dataset.revivalNoteCard = "true";
+          card.dataset.sourceId = sourceId;
+          card.dataset.title = `真实结构收藏 ${index}`;
+          card.dataset.author = `作者 ${index % 41}`;
+          const link = document.createElement("a");
+          link.href = `https://www.xiaohongshu.com/explore/${sourceId}?xsec_token=fixture-${index}`;
+          const title = document.createElement("span");
+          title.dataset.title = "true";
+          title.textContent = card.dataset.title;
+          link.append(title);
+          const author = document.createElement("span");
+          author.dataset.author = "true";
+          author.textContent = card.dataset.author;
+          card.append(link, author);
+          return card;
+        }
+
+        function isAtBottom(container) {
+          return Number(container.scrollTop) + Number(container.clientHeight) >= Number(container.scrollHeight) - 3;
+        }
+
+        globalThis.__M0_PREMATURE_FIXTURE__ = {
+          mode,
+          total,
+          initialCount,
+          get loaded() { return loaded; },
+          get loading() { return loading; },
+          get loadRequests() { return loadRequests; },
+          get rootReplacementCount() { return rootReplacementCount; },
+          get completedMarkerShownAt() { return completedMarkerShownAt; },
+          get rootConnected() { return root.isConnected; }
+        };
+      })();
+    </script>
+  </body>
+</html>

@@ -11,6 +11,7 @@
     "build": "node ./scripts/build-extension.mjs",
     "build:preview": "node ./scripts/build-extension.mjs --preview",
     "test:m0:fixtures": "node ./scripts/run-full-scan-spike.mjs",
+    "test:m0:premature-completion": "node ./scripts/run-premature-completion-regression.mjs",
     "test:m0:page-identity": "node ./scripts/run-m0-preview-integration.mjs --suite=page-identity",
     "test:m0:side-panel": "node ./scripts/run-m0-preview-integration.mjs --suite=side-panel",
     "test:m0:import-bridge": "node ./scripts/run-m0-preview-integration.mjs --suite=import-bridge",

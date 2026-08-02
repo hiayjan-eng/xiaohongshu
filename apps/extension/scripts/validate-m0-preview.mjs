@@ -30,7 +30,7 @@ for (const path of [
 const manifest = JSON.parse(read("apps/extension/manifest.json"));
 if (manifest.version !== "0.2.3") throw new Error("Production source manifest version changed.");
 if (!manifest.host_permissions.includes("https://xiaohongshu-green.vercel.app/*")) throw new Error("Production source origin changed.");
-if (JSON.stringify(manifest).includes("0.3.2-m0-preview")) throw new Error("M0 version leaked into the Production source manifest.");
+if (JSON.stringify(manifest).includes("0.3.3-m0-preview")) throw new Error("M0 version leaked into the Production source manifest.");
 const expectedXhsMatches = new Set(["https://xiaohongshu.com/*", "https://www.xiaohongshu.com/*"]);
 const sourceScannerEntry = manifest.content_scripts.find((entry) => (entry.js || []).includes("src/full-scan-content.js"));
 if (!sourceScannerEntry || sourceScannerEntry.matches.length !== expectedXhsMatches.size || sourceScannerEntry.matches.some((value) => !expectedXhsMatches.has(value))) {
@@ -44,16 +44,16 @@ const build = read("apps/extension/scripts/build-extension.mjs");
 for (const marker of [
   "--m0-preview",
   "--preview-origin=",
-  "0.3.2-m0-preview",
+  "0.3.3-m0-preview",
   "extension-m0-full-scan-preview",
-  "collection-revival-extension-m0-full-scan-preview-v0.3.2.zip",
+  "collection-revival-extension-m0-full-scan-preview-v0.3.3.zip",
   "M0 Preview origin must be one exact HTTPS origin",
   "Production origin is forbidden"
 ]) assertIncludes(build, marker, "M0 build profile");
 
 const sidepanel = `${read("apps/extension/src/sidepanel.html")}\n${read("apps/extension/src/sidepanel.js")}`;
 for (const marker of [
-  "M0 全量扫描 Preview 0.3.2",
+  "M0 全量扫描 Preview 0.3.3",
   "扫描全部收藏",
   "随机 50 条",
   "导出脱敏统计",
@@ -101,6 +101,11 @@ for (const marker of [
   "document.scrollingElement",
   "REQUIRED_STABLE_CYCLES = 5",
   "waitForActivityToSettle",
+  "confirmTrueEnd",
+  "syncPageBindings",
+  "END_NOT_PROVEN",
+  "fallbackScrollAttempts",
+  "rootRebindCount",
   "M0_FULL_SCAN_VERIFY_SESSION",
   "confirmOwnProfile(document, profileId, location)",
   "currentUrlProfileIdHash",
@@ -123,6 +128,10 @@ for (const marker of [
   "hasSubtabUnderlineSignal",
   "sanitizeDomIdentifier"
 ]) assertIncludes(core, marker, "strict page/full scan core");
+for (const path of [
+  "apps/extension/scripts/run-premature-completion-regression.mjs",
+  "apps/extension/tests/fixtures/full-scan-premature-completion.html"
+]) if (!existsSync(resolve(repoRoot, path))) throw new Error(`Missing premature completion regression asset: ${path}`);
 if (core.includes("root = document.body") || core.includes("element: document.body")) throw new Error("document.body fallback is forbidden.");
 if (core.includes("activeIndicator.textContent")) throw new Error("Reds active indicator must not require strict empty textContent.");
 

@@ -9,13 +9,13 @@ const originArg = process.argv.find((arg) => arg.startsWith("--preview-origin=")
 if (!originArg) throw new Error("Artifact validation requires --preview-origin=<exact origin>.");
 const previewOrigin = new URL(originArg.slice("--preview-origin=".length)).origin;
 const outDir = resolve(repoRoot, "release-artifacts", "extension-m0-full-scan-preview");
-const zipPath = resolve(repoRoot, "release-artifacts", "collection-revival-extension-m0-full-scan-preview-v0.3.2.zip");
+const zipPath = resolve(repoRoot, "release-artifacts", "collection-revival-extension-m0-full-scan-preview-v0.3.3.zip");
 const read = (path) => readFileSync(resolve(outDir, path), "utf8");
 if (!existsSync(outDir) || !existsSync(zipPath) || statSync(zipPath).size === 0) throw new Error("M0 Preview directory or ZIP is missing.");
 
 const manifest = JSON.parse(read("manifest.json"));
 if (manifest.manifest_version !== 3) throw new Error("M0 Preview must use Manifest V3.");
-if (manifest.version !== "0.3.2" || manifest.version_name !== "0.3.2-m0-preview") throw new Error("M0 Preview version mismatch.");
+if (manifest.version !== "0.3.3" || manifest.version_name !== "0.3.3-m0-preview") throw new Error("M0 Preview version mismatch.");
 if (manifest.side_panel?.default_path !== "src/sidepanel.html") throw new Error("M0 Side Panel is not registered.");
 if (manifest.background?.service_worker !== "src/background.js") throw new Error("M0 background service worker is not registered.");
 const serialized = JSON.stringify(manifest);
@@ -33,7 +33,7 @@ if (scanner.matches.length !== expectedScannerMatches.size || scanner.matches.so
 }
 
 const profile = read("src/build-profile.js");
-for (const marker of ['id": "m0-preview', 'versionName": "0.3.2-m0-preview', `${previewOrigin}/m0-preview/`, `"${previewOrigin}"`]) {
+for (const marker of ['id": "m0-preview', 'versionName": "0.3.3-m0-preview', `${previewOrigin}/m0-preview/`, `"${previewOrigin}"`]) {
   if (!profile.includes(marker)) throw new Error(`M0 build profile missing: ${marker}`);
 }
 if (profile.includes("xiaohongshu-green.vercel.app")) throw new Error("Production origin leaked into M0 build profile.");
@@ -42,8 +42,11 @@ const sidepanelScript = read("src/sidepanel.js");
 for (const marker of ["establishContentConnection", "chrome.scripting.executeScript", "内容脚本注入失败", "扩展未连接", "currentUrlProfileId", "selfProfileLinkStatus", "profileIdMatch", "notesTabCandidateText", "notesTabActiveStateSource", "notesTabMatch", "M0_FULL_SCAN_WAIT_PAGE_READY", "PAGE_READY_WAIT_MS = 10_000", "chrome.tabs.onActivated", "chrome.tabs.onUpdated", "copySubtabDomDiagnostics", "M0_FULL_SCAN_GET_SUBTAB_DOM_DIAGNOSTICS"]) {
   if (!sidepanelScript.includes(marker)) throw new Error(`M0 Side Panel handshake recovery is missing: ${marker}`);
 }
-if (!sidepanel.includes("M0 全量扫描 Preview 0.3.2") || !sidepanel.includes("导入收藏复活") || !sidepanel.includes("重新检测当前页面") || !sidepanel.includes("子标签 DOM 诊断") || !sidepanel.includes("复制诊断")) throw new Error("M0 Side Panel identity/import/diagnostic action is missing.");
+if (!sidepanel.includes("M0 全量扫描 Preview 0.3.3") || !sidepanel.includes("导入收藏复活") || !sidepanel.includes("重新检测当前页面") || !sidepanel.includes("子标签 DOM 诊断") || !sidepanel.includes("复制诊断")) throw new Error("M0 Side Panel identity/import/diagnostic action is missing.");
 const packagedCore = read("src/full-scan-core.js");
+for (const marker of ["confirmTrueEnd", "syncPageBindings", "END_NOT_PROVEN", "fallbackScrollAttempts", "rootRebindCount"]) {
+  if (!packagedCore.includes(marker)) throw new Error(`M0 premature completion guard is missing: ${marker}`);
+}
 for (const marker of ["currentUrlProfileIdHash", "selfProfileLinkFound", "profileIdMatch", "navigation-self-profile", "editProfileSignalFound", "findVisibleActiveNotesTab", "findProfileSubtabGroup", "findRedsProfileNotesState", "readVisibleElementText", "isVisible(activeIndicator)", "adjacent-sibling-class:active", "notesTabActiveStateSource", "notesTabMatch", "collectSubtabDomDiagnostics", "m0-subtab-dom-diagnostic-v1", "sanitizeDomIdentifier"]) {
   if (!packagedCore.includes(marker)) throw new Error(`M0 self-profile verification is missing: ${marker}`);
 }
