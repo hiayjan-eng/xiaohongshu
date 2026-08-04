@@ -1,4 +1,4 @@
-importScripts("build-profile.js", "full-scan-idb.js", "api-sync/api-sync-core.js", "api-sync/api-sync-idb.js", "api-sync/api-sync-provider.js");
+importScripts("build-profile.js", "full-scan-idb.js", "api-sync/api-sync-core.js", "api-sync/api-sync-idb.js", "api-sync/api-sync-provider.js", "api-sync/cdp-network-probe.js");
 
 const BUILD_PROFILE = globalThis.__COLLECTION_REVIVAL_BUILD_PROFILE__ || {};
 const WEB_APP_ORIGINS = Array.isArray(BUILD_PROFILE.webAppOrigins) ? BUILD_PROFILE.webAppOrigins : [];
@@ -35,8 +35,26 @@ const apiProbeRecords = [];
 const apiProbeBridgeTabs = new Set();
 const apiProbeMainTabs = new Set();
 let apiProbeSession = null;
+let cdpProbeState = globalThis.CollectionRevivalCdpNetworkProbe.BrowserNetworkProbe.prototype.inactive("inactive");
+let cdpTargetTabId = null;
+const cdpNetworkProbe = new globalThis.CollectionRevivalCdpNetworkProbe.BrowserNetworkProbe({ onUpdate: (state) => { cdpProbeState = state; chrome.runtime.sendMessage({ type: "M0_CDP_PROBE_UPDATED" }).catch(() => {}); } });
+
+chrome.tabs.onRemoved.addListener((tabId) => { if (cdpProbeState.active && tabId === cdpTargetTabId) { cdpTargetTabId = null; void cdpNetworkProbe.stop(tabId, "tab-closed"); } });
 
 async function handleApiSyncMessage(message, sender) {
+  if (message.type === "M0_CDP_PROBE_START") {
+    const targetTabId = Number(message.targetTabId);
+    if (!Number.isInteger(targetTabId) || targetTabId <= 0) throw new Error("Target Xiaohongshu tab is required.");
+    const tab = await chrome.tabs.get(targetTabId);
+    const url = new URL(tab.url || "");
+    if (url.protocol !== "https:" || !["xiaohongshu.com", "www.xiaohongshu.com"].includes(url.hostname)) throw new Error("当前标签页不是小红书页面，无法进行深度检测。");
+    if (cdpProbeState.active && cdpTargetTabId != null) await cdpNetworkProbe.stop(cdpTargetTabId, "restarted");
+    cdpProbeState = await cdpNetworkProbe.start(targetTabId);
+    cdpTargetTabId = targetTabId;
+    return { ok: true, session: cdpProbeState };
+  }
+  if (message.type === "M0_CDP_PROBE_GET") return { ok: true, session: cdpProbeState };
+  if (message.type === "M0_CDP_PROBE_STOP") { const tabId = cdpTargetTabId; cdpTargetTabId = null; return { ok: true, session: await cdpNetworkProbe.stop(tabId, "user") }; }
   if (message.type === "M0_API_PROBE_START") {
     const targetTabId = Number(message.targetTabId);
     if (!Number.isInteger(targetTabId) || targetTabId <= 0) throw new Error("Target Xiaohongshu tab is required.");
@@ -86,7 +104,7 @@ async function handleApiSyncMessage(message, sender) {
 }
 
 function isApiSyncMessage(message) {
-  return ["M0_API_PROBE_START", "M0_API_PROBE_BRIDGE_READY", "M0_API_PROBE_MAIN_READY", "M0_API_PROBE_RECORD", "M0_API_PROBE_GET", "M0_API_SYNC_CREATE_RUN", "M0_API_SYNC_GET_RUN", "M0_API_SYNC_READ", "M0_API_SYNC_DISCARD", "M0_API_SYNC_CONFIRM"].includes(message?.type);
+  return ["M0_CDP_PROBE_START", "M0_CDP_PROBE_GET", "M0_CDP_PROBE_STOP", "M0_API_PROBE_START", "M0_API_PROBE_BRIDGE_READY", "M0_API_PROBE_MAIN_READY", "M0_API_PROBE_RECORD", "M0_API_PROBE_GET", "M0_API_SYNC_CREATE_RUN", "M0_API_SYNC_GET_RUN", "M0_API_SYNC_READ", "M0_API_SYNC_DISCARD", "M0_API_SYNC_CONFIRM"].includes(message?.type);
 }
 
 function createProbeSession(tabId) { const timestamp = new Date().toISOString(); return { status: "active", phase: "waiting-handshake", startedAt: timestamp, updatedAt: timestamp, mainReady: apiProbeMainTabs.has(tabId), bridgeReady: apiProbeBridgeTabs.has(tabId), capturedCount: 0, targetTabId: tabId }; }

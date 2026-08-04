@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "收藏复活旧收藏扫描 Beta",
-  "version": "0.4.3",
-  "version_name": "0.4.3-m0-api-spike",
+  "version": "0.5.0",
+  "version_name": "0.5.0-m0-cdp-spike",
   "description": "在用户主动点击后，扫描本人小红书网页版当前已加载收藏卡片，支持进度反馈、暂停继续、断点恢复和导入前确认。",
   "permissions": [
     "activeTab",
@@ -10,7 +10,8 @@
     "storage",
     "downloads",
     "tabs",
-    "sidePanel"
+    "sidePanel",
+    "debugger"
   ],
   "host_permissions": [
     "https://xiaohongshu-green.vercel.app/*",

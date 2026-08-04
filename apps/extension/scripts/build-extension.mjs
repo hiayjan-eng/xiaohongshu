@@ -67,7 +67,7 @@ for (const file of [
   "full-scan-idb.js", "background.js", "build-profile.js"
 ]) copyFileSync(resolve(root, "src", file), resolve(srcOut, file));
 mkdirSync(resolve(srcOut, "api-sync"), { recursive: true });
-for (const file of ["api-sync-core.js", "api-sync-idb.js", "api-sync-provider.js", "api-probe-main.js", "api-probe-content.js"]) {
+for (const file of ["api-sync-core.js", "api-sync-idb.js", "api-sync-provider.js", "api-probe-main.js", "api-probe-content.js", "cdp-network-probe.js"]) {
   copyFileSync(resolve(root, "src", "api-sync", file), resolve(srcOut, "api-sync", file));
 }
 
